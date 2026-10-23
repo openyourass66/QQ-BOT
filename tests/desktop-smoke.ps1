@@ -11,6 +11,15 @@ $smokeTimer.Add_Tick({
         switch ($smokeStage) {
             0 {
                 if ($script:ready -and $controls.StartButton.IsEnabled -and $settings -and $controls.SavePersonaButton.IsEnabled) {
+                    $connectionState = [pscustomobject]@{ phase = 'running'; settings = $settings; wsConnected = $false; qqOnline = $false; acpConnected = $true; uptimeMs = 0; pid = 1 }
+                    Update-Status $connectionState
+                    if ($controls.PhaseLabel.Text -ne ([string][char]0x7B49 + [char]0x5F85 + ' NapCat') -or $controls.TestButton.IsEnabled) { throw 'Disconnected OneBot must show waiting state and disable test send' }
+                    $connectionState.wsConnected = $true
+                    Update-Status $connectionState
+                    if ($controls.PhaseLabel.Text -notmatch 'QQ' -or $controls.TestButton.IsEnabled) { throw 'Offline QQ must disable test send' }
+                    $connectionState.qqOnline = $true
+                    Update-Status $connectionState
+                    if (!$controls.TestButton.IsEnabled) { throw 'Online QQ must allow test send' }
                     $inputs['identity.name'].Control.Text = 'Native desktop test'
                     if (!$settingsDirty) { throw 'Settings dirty tracking failed' }
                     $controls.SaveSettingsButton.RaiseEvent([Windows.RoutedEventArgs]::new([Windows.Controls.Button]::ClickEvent))

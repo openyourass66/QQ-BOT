@@ -81,6 +81,15 @@ npm run ui
 powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File desktop/start.ps1 -ValidateOnly
 ```
 
+如果本机 Shell 方式的 NapCat 在加载 QQ 时崩溃，可使用独立 Node 运行环境。`desktop/napcat-node.mjs` 从 `BOT_QQ_DIR` 中读取当前 QQ 版本，把所需文件复制到项目的 `napcat/node-runtime`，不修改系统 QQ。需先解压官方 NapCat Shell 到 `napcat/shell`，并将官方 Node 运行适配库 `QQNT.dll` 部署到 `napcat/node-runtime/QQNT.dll`；它与系统 QQ 的同名文件用途不同。参考 [官方 Node 环境准备脚本](https://github.com/NapNeko/NapCatQQ/blob/main/packages/napcat-develop/loadNapCat.cjs)。本地 `.env` 配置示例：
+
+```dotenv
+BOT_NAPCAT_ENTRY=desktop/napcat-node.mjs
+BOT_QQ_DIR=D:\app\qq
+```
+
+配置后，点击启动时若 OneBot HTTP 端口尚未监听，控制台会启动该 Node 运行环境；停止、重启、关闭窗口会清理控制台自己启动的 NapCat。已在外部运行的 NapCat 会复用并保持独立。首次部署会复制 `napcat/shell/config` 中对应 `BOT_SELF_ID` 的账号与 OneBot 配置；后续配置以 `napcat/node-runtime/config` 为准。首次登录可能需要扫码。连接尚未完成时，概览会显示“等待 NapCat”或“等待 QQ 登录”，测试发送按钮保持禁用。
+
 直接运行 `npm start` 时，本地管理 API 默认位于 `http://127.0.0.1:6080`，可通过 `ADMIN_UI_PORT` 修改端口，设置 `ADMIN_UI_TOKEN` 后请求需携带 `x-admin-token`。接口包括 `/api/status`、`/api/settings`、`/api/persona`、`/api/logs`、`/api/sessions`、`/api/login-info` 和 `/api/test`。直接桥接模式不提供进程启停接口。
 
 `requireMention=false` 会允许群消息无需 @ 或前缀直接触发；`contextLines=0` 关闭附加的最近群聊摘要，不清除 Agent 已有会话上下文。

@@ -7,6 +7,16 @@ import { mkdtemp, readFile, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { WebSocketServer } from 'ws';
+import { subprocessLogLevel } from '../dist/state.js';
+
+test('子进程正常 stderr 不误报错误，显式级别及真正失败仍保留', () => {
+  assert.equal(subprocessLogLevel('[dsh] [mcp-qq] ready'), 'info');
+  assert.equal(subprocessLogLevel('[dsh] model connection ready'), 'info');
+  assert.equal(subprocessLogLevel('18:00 [info] previous error cleared'), 'info');
+  assert.equal(subprocessLogLevel('[warn] connection retrying'), 'warn');
+  assert.equal(subprocessLogLevel('[error] connection refused'), 'error');
+  assert.equal(subprocessLogLevel('Error: fetch failed'), 'error');
+});
 
 test('桌面后台：鉴权、离线配置、启动、热更新、重复启动、重启、停止与窗口断开清理', { timeout: 30000 }, async () => {
   const dir = await mkdtemp(join(tmpdir(), 'qq-console-'));
@@ -36,6 +46,8 @@ test('桌面后台：鉴权、离线配置、启动、热更新、重复启动�
       env: { ...process.env, BOT_DESKTOP: '1', ADMIN_UI_PORT: '0', ADMIN_UI_TOKEN: 'desktop-test', BOT_SETTINGS_FILE: settingsPath,
         BOT_DSH_BIN: wrapper, BOT_DSH_PROFILE: 'acp', BOT_WORKSPACE: dir, SESSION_STORE: join(dir, 'sessions.json'), BOT_USAGE_STORE: join(dir, 'usage.json'),
         ONEBOT_HTTP_URL: `http://127.0.0.1:${server.address().port}`, ONEBOT_WS_URL: `ws://127.0.0.1:${ws.address().port}`, ONEBOT_TOKEN: '', BOT_SELF_ID: '10000', ADMIN_QQ: '0',
+        // 已有外部 OneBot 时不应执行这个不存在的启动文件。
+        BOT_NAPCAT_ENTRY: join(dir, 'must-not-start.mjs'),
       },
     });
     child.stdout.on('data', (chunk) => { output += chunk; const match = output.match(/\[admin\] (http:\/\/127\.0\.0\.1:\d+)/); if (match) readyResolve(match[1]); });

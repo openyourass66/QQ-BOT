@@ -1,5 +1,14 @@
 export type LogLevel = 'info' | 'warn' | 'error';
 
+/** 子进程的 stderr 也可能承载普通运行消息，优先使用消息中的显式级别。 */
+export function subprocessLogLevel(message: string): LogLevel {
+  const marker = message.match(/\[(info|warn|error)\]/i)?.[1]?.toLowerCase();
+  if (marker === 'info' || marker === 'warn' || marker === 'error') return marker;
+  if (/\b(error|exception|failed|fatal)\b|失败|错误/i.test(message)) return 'error';
+  if (/\bwarn(?:ing)?\b|警告/i.test(message)) return 'warn';
+  return 'info';
+}
+
 export interface LogEntry {
   ts: number;
   level: LogLevel;

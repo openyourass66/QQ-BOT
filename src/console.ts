@@ -1,15 +1,17 @@
 import { fork, spawn, type ChildProcess } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { access, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { startAdmin } from './admin.js';
 import { getSettings, loadSettings, saveSettings, watchSettings } from './settings.js';
-import { log, snapshotStatus } from './state.js';
+import { log, snapshotStatus, subprocessLogLevel } from './state.js';
 import { config } from './config.js';
 import { SessionStore } from './store.js';
+import { createConnection } from 'node:net';
 
 let child: ChildProcess | undefined;
+let napcat: ChildProcess | undefined;
 let childUrl = '';
 let phase = 'stopped';
 let busy = false;
@@ -28,8 +30,58 @@ async function bridgeApi(path: string, method = 'GET'): Promise<any> {
   return body;
 }
 
-function start(): void {
+async function startNapcat(): Promise<void> {
+  const entry = process.env.BOT_NAPCAT_ENTRY;
+  if (!entry || napcat) return;
+  const endpoint = new URL(config.onebot.httpUrl);
+  if (endpoint.hostname !== '127.0.0.1' && endpoint.hostname !== 'localhost') {
+    throw new Error('自动启动 NapCat 仅支持本机 OneBot 地址');
+  }
+  const listening = await new Promise<boolean>((done) => {
+    const socket = createConnection({ host: endpoint.hostname, port: Number(endpoint.port || (endpoint.protocol === 'https:' ? 443 : 80)) });
+    const finish = (connected: boolean): void => { socket.destroy(); done(connected); };
+    socket.setTimeout(1000, () => finish(false));
+    socket.once('connect', () => finish(true)); socket.once('error', () => finish(false));
+  });
+  if (listening || closing) return;
+  const path = resolve(entry);
+  await access(path);
+  if (closing) return;
+  const proc = spawn(process.execPath, [path], {
+    env: process.env, cwd: process.cwd(), stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true,
+  });
+  napcat = proc;
+  for (const stream of [proc.stdout, proc.stderr]) {
+    let pending = '';
+    stream?.setEncoding('utf8');
+    stream?.on('data', (data: string) => {
+      pending += data;
+      const lines = pending.split(/\r?\n/); pending = lines.pop() ?? '';
+      for (const line of lines) if (line) log(subprocessLogLevel(line), `[napcat] ${line}`);
+    });
+  }
+  proc.on('error', (error) => { log('error', `[napcat] ${error.message}`); if (napcat === proc) napcat = undefined; });
+  proc.on('exit', (code) => {
+    if (napcat === proc) napcat = undefined;
+    log(code ? 'error' : 'info', `[napcat] 运行进程退出（${code}）`);
+  });
+  log('info', '[napcat] 正在启动本地 Node 运行环境');
+}
+
+async function stopNapcat(): Promise<void> {
+  const proc = napcat;
+  if (!proc) return;
+  await new Promise<void>((done) => {
+    proc.once('exit', () => done());
+    proc.kill('SIGTERM');
+  });
+}
+
+async function start(): Promise<void> {
   if (child) return;
+  try { await startNapcat(); }
+  catch (error) { phase = 'failed'; lastError = `NapCat 启动失败：${String(error)}`; throw error; }
+  if (closing) return;
   phase = 'starting';
   lastError = '';
   childUrl = '';
@@ -38,7 +90,7 @@ function start(): void {
     stdio: ['ignore', 'pipe', 'pipe', 'ipc'], windowsHide: true,
   });
   child = proc;
-  for (const [stream, level] of [[proc.stdout, 'info'], [proc.stderr, 'error']] as const) {
+  for (const stream of [proc.stdout, proc.stderr]) {
     let pending = '';
     stream?.setEncoding('utf8');
     stream?.on('data', (data: string) => {
@@ -47,7 +99,7 @@ function start(): void {
       pending = lines.pop() ?? '';
       for (const line of lines) {
         if (!line) continue;
-        log(level, line);
+        log(subprocessLogLevel(line), line);
         const match = line.match(/^\[admin\] (http:\/\/127\.0\.0\.1:\d+)$/);
         if (match && phase === 'starting') { childUrl = match[1]; phase = 'running'; }
       }
@@ -96,8 +148,8 @@ const server = await startAdmin({
     if (busy) throw new Error('正在执行其他控制操作，请稍后再试');
     busy = true;
     try {
-      if (action === 'stop' || action === 'restart') await stop();
-      if (!closing && (action === 'start' || action === 'restart')) start();
+      if (action === 'stop' || action === 'restart') { await stop(); await stopNapcat(); }
+      if (!closing && (action === 'start' || action === 'restart')) await start();
       return { phase };
     } finally { busy = false; }
   },
@@ -134,7 +186,7 @@ log('info', '桌面控制服务已就绪，等待启动机器人');
 async function shutdown(): Promise<void> {
   if (closing) return;
   closing = true;
-  await stop(); unwatch(); await server.close();
+  await stop(); await stopNapcat(); unwatch(); await server.close();
 }
 process.on('SIGINT', () => { void shutdown(); });
 process.on('SIGTERM', () => { void shutdown(); });

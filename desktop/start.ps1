@@ -179,6 +179,13 @@ function Update-Status($Data) {
     $controls.PhaseLabel.Text = $names[[string]$Data.phase]
     $controls.BotName.Text = $Data.settings.identity.name
     $controls.RuntimeDetail.Text = if ($Data.lastError) { $Data.lastError } elseif ($Data.phase -eq 'running') { '已运行 {0} 分钟 · 进程 {1}' -f [math]::Floor($Data.uptimeMs / 60000), $Data.pid } else { '控制台保持在线，随时可以启动机器人。' }
+    if ($Data.phase -eq 'running' -and !$Data.wsConnected) {
+        $controls.PhaseLabel.Text = '等待 NapCat'
+        $controls.RuntimeDetail.Text = '桥接已启动，但 OneBot 尚未连接。请启动 NapCat，并确认其 WebSocket 服务已开启。'
+    } elseif ($Data.phase -eq 'running' -and !$Data.qqOnline) {
+        $controls.PhaseLabel.Text = '等待 QQ 登录'
+        $controls.RuntimeDetail.Text = 'OneBot 已连接，但 QQ 尚未在线。请在 NapCat 中完成 QQ 登录。'
+    }
     $controls.MessagesIn.Text = [string]$Data.messagesIn; $controls.MessagesOut.Text = [string]$Data.messagesOut
     $controls.SessionCount.Text = [string]$Data.sessions; $controls.PendingCount.Text = [string]$Data.pendingMessages
     $ws = if ($Data.wsConnected) { '已连接' } else { '未连接' }
@@ -190,6 +197,8 @@ function Update-Status($Data) {
     $controls.StartButton.IsEnabled = !$controlPending -and $Data.phase -in @('stopped', 'failed')
     $controls.StopButton.IsEnabled = !$controlPending -and $Data.phase -in @('running', 'starting', 'unreachable')
     $controls.RestartButton.IsEnabled = !$controlPending -and $Data.phase -notin @('starting', 'stopping')
+    $controls.TestButton.IsEnabled = $Data.phase -eq 'running' -and $Data.qqOnline -and @($requests | Where-Object { $_.Path -eq 'test' }).Count -eq 0
+    $controls.TestButton.ToolTip = if ($Data.qqOnline) { '向管理员 QQ 发送测试消息' } else { '请先启动 NapCat 并完成 QQ 登录' }
 }
 function Render-Logs {
     $query = $controls.LogSearch.Text
@@ -289,7 +298,8 @@ if ($ValidateOnly -or $PreviewPath) {
 try {
     $hasher = [Security.Cryptography.SHA256]::Create()
     try { $lockKey = [BitConverter]::ToString($hasher.ComputeHash([Text.Encoding]::UTF8.GetBytes($projectRoot.ToLowerInvariant()))).Replace('-', '') } finally { $hasher.Dispose() }
-    $script:desktopMutex = [Threading.Mutex]::new($true, ('Local\QQBotDesktop-' + $lockKey), [ref]$script:ownsMutex)
+    $mutexSuffix = if ($TestMode) { '-test-' + $PID } else { '' }
+    $script:desktopMutex = [Threading.Mutex]::new($true, ('Local\QQBotDesktop-' + $lockKey + $mutexSuffix), [ref]$script:ownsMutex)
     if (!$ownsMutex) { [Windows.MessageBox]::Show('此项目的桌面控制台已经打开，请使用已有窗口。', 'QQ BOT', 'OK', 'Information') | Out-Null; return }
     $node = (Get-Command node.exe -ErrorAction Stop).Source
     if (![IO.File]::Exists((Join-Path $projectRoot 'dist/console.js'))) { throw '缺少构建产物，请先运行 npm run build，或使用 npm run ui 启动。' }
