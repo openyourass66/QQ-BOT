@@ -1,0 +1,26 @@
+# 依赖
+node_modules/
+
+# 构建产物
+dist/
+
+# 本地环境与密钥
+.env
+.env.local
+*.pem
+*.key
+
+# 运行时数据（QQ 会话映射、记忆等）
+data/
+bot-workspace/memory/
+
+# NapCat 运行时（含账号配置与依赖）
+napcat/
+
+# 含真实 OneBot token / QQ 号的本地联调脚本
+send-test.mjs
+
+# 日志与系统文件
+*.log
+.DS_Store
+Thumbs.db
