@@ -10,6 +10,10 @@ function num(name: string, fallback: number): number {
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
+function boundedNum(name: string, fallback: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, Math.trunc(num(name, fallback))));
+}
+
 export const config = {
   onebot: {
     httpUrl: env('ONEBOT_HTTP_URL', 'http://127.0.0.1:3000').replace(/\/+$/, ''),
@@ -33,5 +37,8 @@ export const config = {
     turnTimeoutMs: Math.max(1000, Math.min(600_000, num('TURN_TIMEOUT_MS', 180_000))),
     allowExec: env('ALLOW_EXEC') === '1',
     groupContextLines: num('GROUP_CONTEXT_LINES', 6),
+    queuePerConversation: boundedNum('QUEUE_PER_CONVERSATION', 5, 1, 100),
+    queueTotal: boundedNum('QUEUE_TOTAL', 50, 1, 1000),
+    maxConcurrentTurns: boundedNum('MAX_CONCURRENT_TURNS', 4, 1, 32),
   },
 };

@@ -18,7 +18,8 @@ import { SessionStore } from './store.js';
 import { getSettings, loadSettings, watchSettings, saveSettings, flushSettings, type BotSettings } from './settings.js';
 import { log, status } from './state.js';
 import { startAdmin } from './admin.js';
-import { ConversationQueue, withTimeout } from './runtime.js';
+import { ConversationQueue, QueueFullError, withTimeout } from './runtime.js';
+import { RecentMessages, splitForQq } from './message-utils.js';
 import { parseApprovalReply, permissionOutcome } from './permissions.js';
 import { DailyUsageStore } from './usage.js';
 import { QqActionPolicy } from './qq-actions.js';
@@ -32,12 +33,18 @@ const personaPath = resolve(config.dsh.workspace, 'AGENTS.md');
 
 const sessions = new Map<string, acp.ActiveSession>();
 const creating = new Map<string, Promise<acp.ActiveSession>>();
-const queue = new ConversationQueue();
+const queue = new ConversationQueue({
+  maxPerKey: config.bot.queuePerConversation,
+  maxTotal: config.bot.queueTotal,
+  maxConcurrent: config.bot.maxConcurrentTurns,
+  onChange: (pending) => { status.pendingMessages = pending; },
+});
 const turnSignals = new Map<string, AbortSignal>();
 const sessionContexts = new Map<string, string>();
 const toolCalls = new Map<string, { title: string; kind: string; signal: AbortSignal }>();
 const groupHistory = new Map<number, string[]>();
-const seen = new Set<number>();
+const seen = new RecentMessages();
+const lastBusyNotice = new Map<string, number>();
 const pendingApprovals = new Map<string, (approved: boolean) => void>();
 const lastGroupReply = new Map<number, number>();
 
@@ -316,26 +323,6 @@ function remember(event: MessageEvent, text: string): void {
   groupHistory.set(event.group_id, list);
 }
 
-function splitForQq(text: string, max: number): string[] {
-  const chunks: string[] = [];
-  let rest = text.trim();
-  while (rest.length > max) {
-    const window = rest.slice(0, max);
-    const breakAt = Math.max(
-      window.lastIndexOf('\n'),
-      window.lastIndexOf('。'),
-      window.lastIndexOf('！'),
-      window.lastIndexOf('？'),
-      window.lastIndexOf('；'),
-    );
-    const cut = breakAt > max * 0.5 ? breakAt + 1 : max;
-    chunks.push(rest.slice(0, cut).trim());
-    rest = rest.slice(cut).trim();
-  }
-  if (rest) chunks.push(rest);
-  return chunks;
-}
-
 async function reply(event: MessageEvent, text: string): Promise<void> {
   const delay = getSettings().chat.delay;
   const chunks = splitForQq(text, delay.chunkSize);
@@ -354,9 +341,7 @@ async function onMessage(event: MessageEvent): Promise<void> {
   if (stopping) return;
   selfId ||= event.self_id;
   if (event.self_id && event.user_id === event.self_id) return;
-  if (seen.has(event.message_id)) return;
-  seen.add(event.message_id);
-  if (seen.size > 1000) seen.clear();
+  if (seen.isDuplicate(event)) return;
 
   const text = segmentsToText(event.message);
   if (!text) return;
@@ -399,6 +384,18 @@ async function onMessage(event: MessageEvent): Promise<void> {
           .catch(() => undefined);
       }
     }
+  }).catch(async (error: unknown) => {
+    if (!(error instanceof QueueFullError)) throw error;
+    status.messagesDropped++;
+    log('warn', `[queue] ${key} rejected; pending=${queue.size}`);
+    if (event.message_type !== 'private') return;
+    const lastNotice = lastBusyNotice.get(key);
+    if (lastNotice !== undefined && Date.now() - lastNotice < 15_000) return;
+    lastBusyNotice.set(key, Date.now());
+    if (lastBusyNotice.size > 1000) lastBusyNotice.delete(lastBusyNotice.keys().next().value!);
+    await api.sendPrivate(event.user_id, '（消息有点多，这条还没接上，稍后再发给我吧。）')
+      .then(() => { status.messagesOut++; })
+      .catch(() => undefined);
   });
 }
 
@@ -538,6 +535,8 @@ async function main(): Promise<void> {
   startBridge();
   await withTimeout(ready, 30_000);
 
+  let connectionGeneration = 0;
+  let heartbeatRevision = 0;
   ws = new OneBotWs({
     url: config.onebot.wsUrl,
     token: config.onebot.token,
@@ -546,22 +545,28 @@ async function main(): Promise<void> {
     },
     onState: (connected) => {
       status.wsConnected = connected;
+      const generation = ++connectionGeneration;
+      if (!connected) { status.qqOnline = false; return; }
+      const revision = heartbeatRevision;
+      void api.call<{ user_id: number; nickname: string }>('get_login_info').then((info) => {
+        if (generation !== connectionGeneration || !status.wsConnected) return;
+        if (!Number.isSafeInteger(info.user_id) || info.user_id <= 0 || typeof info.nickname !== 'string') {
+          throw new Error('无效的登录信息');
+        }
+        selfId ||= info.user_id;
+        status.selfId = info.user_id;
+        status.nickname = info.nickname;
+        if (revision === heartbeatRevision) status.qqOnline = true;
+      }).catch((error) => {
+        if (generation !== connectionGeneration) return;
+        if (revision === heartbeatRevision) status.qqOnline = false;
+        log('warn', `[onebot] get_login_info failed: ${String(error)}`);
+      });
     },
+    onHeartbeat: (online) => { heartbeatRevision++; status.qqOnline = online; },
     onLog: (message) => log('info', message),
   });
   ws.start();
-
-  void api
-    .call<{ user_id: number; nickname: string }>('get_login_info')
-    .then((info) => {
-      status.qqOnline = true;
-      status.selfId = info.user_id;
-      status.nickname = info.nickname;
-    })
-    .catch((error) => {
-      status.qqOnline = false;
-      log('warn', `[onebot] get_login_info failed: ${String(error)}`);
-    });
 
   await startAdminServer();
 

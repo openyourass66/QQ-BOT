@@ -19,6 +19,8 @@ export const status = {
   sessions: 0,
   messagesIn: 0,
   messagesOut: 0,
+  messagesDropped: 0,
+  pendingMessages: 0,
   turns: 0,
   lastError: '',
 };

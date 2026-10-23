@@ -19,6 +19,7 @@ QQ-BOT\
 ├─ src\settings.ts     动态配置、校验与热加载
 ├─ src\admin.ts        本地管理 API
 ├─ src\runtime.ts      会话队列与超时控制
+├─ src\message-utils.ts 消息去重与文本分片
 ├─ src\permissions.ts  审批选项与回复解析
 ├─ src\qq-actions.ts   QQ 动作开关、审批与额度校验
 ├─ src\usage.ts        每日额度持久化（上海时区）
@@ -51,7 +52,7 @@ DeepSeek 登录态；也可以在 `~\.dsh\.env` 里写 `DEEPSEEK_API_KEY`。
 ## 接入真 QQ
 
 1. 安装 NapCat（Windows 一键包），登录小号；
-2. NapCat 网络配置：HTTP `127.0.0.1:3000`、WS `127.0.0.1:3001`，设置 token；
+2. NapCat 网络配置：HTTP `127.0.0.1:3000`、WS `127.0.0.1:3001`，设置 token，消息格式选择消息段数组；
 3. 复制 `.env.example` 为 `.env`，填 `ONEBOT_TOKEN`、`BOT_SELF_ID`、`ADMIN_QQ`；
 4. 桥接会在新建和恢复 ACP 会话时自动挂载名为 `qq` 的 MCP，并显式传入 OneBot 与内部动作接口凭据。升级前若已在 acp profile 中手动配置 `mcp-qq` / `serverName: qq`，请移除旧的重复配置；其它 MCP（如浏览器）保留原有配置；
 5. `npm start`
@@ -100,9 +101,13 @@ QQ MCP 的主动发消息、点赞和空间发布由桥接统一执行，多个�
 
 同一会话的模型生成和回复发送串行执行。轮次超时后取消请求、丢弃异常会话，后续消息创建新会话；OneBot HTTP 请求最多等待 15 秒。DSH 初始化最多等待 30 秒，DSH 异常退出会关闭桥接并以非零状态退出，需要手动或由进程管理器重启。退出时尝试保存配置和会话映射、关闭连接并清理 DSH 子进程。
 
+模型及回复处理默认最多并发 4 个会话；每个会话最多接收 5 条待处理消息，全局最多 50 条，容量均包含正在处理的消息。可通过 `MAX_CONCURRENT_TURNS`、`QUEUE_PER_CONVERSATION`、`QUEUE_TOTAL` 调整，重启生效。超过容量的消息会被丢弃，不会稍后自动补答；私聊会发送忙碌提示，同一会话 15 秒内最多提示一次。管理员审批回复先于消息队列处理，不受队列容量阻塞。管理状态的 `pendingMessages`、`messagesDropped` 分别表示当前处理及等待消息总数、启动后因容量不足丢弃的消息数。
+
+OneBot WebSocket 握手最多等待 10 秒，连接后每 30 秒发送 ping；下一次检测仍没有 pong 或其它消息时断开，3 秒后重连。每次连接会重新查询登录信息，OneBot 的 heartbeat 事件同步 QQ 在线状态。入口校验消息结构并忽略异常事件；去重缓存按账号及会话区分，保留最近 1000 条、最多 10 分钟，逐条淘汰。回复分片不会从 emoji 的 UTF-16 代理对中间切开。
+
 ```powershell
 npm run typecheck
 npm test
 ```
 
-测试使用临时目录、假的 ACP / OneBot 服务与真实 QQ MCP 子进程，验证消息顺序、超时恢复、审批取消、配置热更新、并发额度、重启计数与跨日重置，不连接真实 QQ 或调用模型。
+测试使用临时目录、假的 ACP / OneBot 服务与真实 QQ MCP 子进程，验证消息顺序、超时恢复、审批取消、配置热更新、并发额度、重启计数、跨日重置、突发消息限流、握手超时及心跳重连，不连接真实 QQ 或调用模型。

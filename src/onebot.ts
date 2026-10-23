@@ -1,4 +1,5 @@
 import WebSocket from 'ws';
+import { z } from 'zod';
 
 export interface Segment {
   type: string;
@@ -22,6 +23,31 @@ export interface MessageEvent {
   message: Segment[];
   sender: Sender;
   group_id?: number;
+}
+
+const MessageSchema = z.object({
+  post_type: z.literal('message'),
+  message_type: z.enum(['private', 'group']),
+  time: z.number().int().nonnegative(),
+  self_id: z.number().int().positive().safe(),
+  user_id: z.number().int().positive().safe(),
+  message_id: z.number().int().safe(),
+  raw_message: z.string().default(''),
+  message: z.array(z.object({ type: z.string(), data: z.record(z.unknown()) })),
+  sender: z.object({
+    user_id: z.number().int().positive().safe().optional(),
+    nickname: z.string().default(''),
+    card: z.string().optional(),
+  }),
+  group_id: z.number().int().positive().safe().optional(),
+}).refine((event) => event.message_type !== 'group' || event.group_id !== undefined, {
+  message: '群消息缺少 group_id', path: ['group_id'],
+});
+
+export function parseMessageEvent(input: unknown): MessageEvent | undefined {
+  const result = MessageSchema.safeParse(input);
+  if (!result.success) return undefined;
+  return { ...result.data, sender: { ...result.data.sender, user_id: result.data.sender.user_id ?? result.data.user_id } };
 }
 
 export interface OneBotResponse<T> {
@@ -76,25 +102,45 @@ export interface OneBotWsOptions {
   onEvent: (event: MessageEvent) => void;
   onState?: (connected: boolean) => void;
   onLog?: (message: string) => void;
+  onHeartbeat?: (online: boolean) => void;
+  heartbeatIntervalMs?: number;
+  reconnectDelayMs?: number;
+  handshakeTimeoutMs?: number;
 }
 
-/** 正向 WebSocket 长连接；断线后按固定间隔重连。 */
+/** 正向 WebSocket 长连接；检测失活连接，并在断线后重连。 */
 export class OneBotWs {
   private ws?: WebSocket;
-  private stopped = false;
+  private stopped = true;
   private retry?: NodeJS.Timeout;
+  private heartbeat?: NodeJS.Timeout;
 
-  constructor(private readonly options: OneBotWsOptions) {}
+  constructor(private readonly options: OneBotWsOptions) {
+    for (const value of [options.heartbeatIntervalMs, options.handshakeTimeoutMs]) {
+      if (value !== undefined && (!Number.isSafeInteger(value) || value < 1)) throw new Error('无效的 WebSocket 超时');
+    }
+    if (options.reconnectDelayMs !== undefined && (!Number.isSafeInteger(options.reconnectDelayMs) || options.reconnectDelayMs < 0)) {
+      throw new Error('无效的 WebSocket 重连间隔');
+    }
+  }
 
   start(): void {
+    if (!this.stopped) return;
     this.stopped = false;
     this.connect();
   }
 
   stop(): void {
+    if (this.stopped) return;
     this.stopped = true;
     if (this.retry) clearTimeout(this.retry);
-    this.ws?.close();
+    this.retry = undefined;
+    if (this.heartbeat) clearInterval(this.heartbeat);
+    this.heartbeat = undefined;
+    const ws = this.ws;
+    this.ws = undefined;
+    this.options.onState?.(false);
+    ws?.terminate();
   }
 
   private connect(): void {
@@ -102,41 +148,70 @@ export class OneBotWs {
     const headers: Record<string, string> = {};
     if (this.options.token) headers.authorization = `Bearer ${this.options.token}`;
 
-    const ws = new WebSocket(this.options.url, { headers });
+    const ws = new WebSocket(this.options.url, {
+      headers, handshakeTimeout: this.options.handshakeTimeoutMs ?? 10_000, maxPayload: 1_048_576,
+    });
     this.ws = ws;
+    let alive = true;
 
     ws.on('open', () => {
+      if (this.stopped || this.ws !== ws) { ws.terminate(); return; }
       this.options.onState?.(true);
       this.options.onLog?.('[onebot] websocket connected');
+      this.heartbeat = setInterval(() => {
+        if (!alive) {
+          this.options.onLog?.('[onebot] heartbeat timeout');
+          ws.terminate();
+          return;
+        }
+        alive = false;
+        ws.ping();
+      }, this.options.heartbeatIntervalMs ?? 30_000);
     });
+    ws.on('pong', () => { alive = true; });
     ws.on('message', (raw) => {
+      if (this.stopped || this.ws !== ws) return;
+      alive = true;
       try {
-        const parsed = JSON.parse(raw.toString()) as { post_type?: string };
-        if (parsed.post_type === 'message') {
-          this.options.onEvent(parsed as MessageEvent);
+        const parsed: unknown = JSON.parse(raw.toString());
+        if (!parsed || typeof parsed !== 'object') return;
+        const frame = parsed as Record<string, unknown>;
+        if (frame.post_type === 'message') {
+          const event = parseMessageEvent(parsed);
+          if (event) this.options.onEvent(event);
+          else this.options.onLog?.('[onebot] invalid message event ignored');
+        } else if (frame.post_type === 'meta_event' && frame.meta_event_type === 'heartbeat') {
+          const status = frame.status as { online?: unknown } | undefined;
+          if (typeof status?.online === 'boolean') this.options.onHeartbeat?.(status.online);
         }
       } catch (error) {
         this.options.onLog?.(`[onebot] bad frame: ${String(error)}`);
       }
     });
     ws.on('close', () => {
+      if (this.ws !== ws) return;
+      if (this.heartbeat) clearInterval(this.heartbeat);
+      this.heartbeat = undefined;
+      this.ws = undefined;
       this.options.onState?.(false);
       this.scheduleReconnect();
     });
     ws.on('error', (error) => {
+      if (this.stopped || this.ws !== ws) return;
       this.options.onState?.(false);
       this.options.onLog?.(`[onebot] websocket error: ${error.message}`);
-      ws.close();
+      if (ws.readyState === WebSocket.OPEN) ws.terminate();
     });
   }
 
   private scheduleReconnect(): void {
     if (this.stopped || this.retry) return;
-    this.options.onLog?.('[onebot] reconnecting in 3s');
+    const delay = this.options.reconnectDelayMs ?? 3000;
+    this.options.onLog?.(`[onebot] reconnecting in ${delay}ms`);
     this.retry = setTimeout(() => {
       this.retry = undefined;
       this.connect();
-    }, 3000);
+    }, delay);
   }
 }
 

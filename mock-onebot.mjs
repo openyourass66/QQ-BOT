@@ -24,7 +24,10 @@ const server = http.createServer((req, res) => {
       return;
     }
     res.writeHead(200, { 'content-type': 'application/json' });
-    res.end(JSON.stringify({ status: 'ok', retcode: 0, data: {} }));
+    res.end(JSON.stringify({
+      status: 'ok', retcode: 0,
+      data: action === 'get_login_info' ? { user_id: SELF_ID, nickname: '测试机器人' } : {},
+    }));
   });
 });
 
