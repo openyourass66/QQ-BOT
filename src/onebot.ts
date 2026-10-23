@@ -25,6 +25,25 @@ export interface MessageEvent {
   group_id?: number;
 }
 
+/** 兼容 OneBot 的 CQ 字符串格式；转义文本不能伪装成真正的 @ 消息段。 */
+export function parseCqMessage(message: string): Segment[] {
+  const decode = (text: string): string => text.replace(/&#91;/g, '[').replace(/&#93;/g, ']').replace(/&#44;/g, ',').replace(/&amp;/g, '&');
+  const segments: Segment[] = [];
+  const pattern = /\[CQ:([a-zA-Z0-9_]+)((?:,[^\]]*)?)\]/g;
+  let offset = 0;
+  for (const match of message.matchAll(pattern)) {
+    if (match.index! > offset) segments.push({ type: 'text', data: { text: decode(message.slice(offset, match.index)) } });
+    const data: Record<string, unknown> = {};
+    for (const item of match[2].slice(1).split(',')) {
+      const index = item.indexOf('=');
+      if (index > 0) data[item.slice(0, index)] = decode(item.slice(index + 1));
+    }
+    segments.push({ type: match[1], data }); offset = match.index! + match[0].length;
+  }
+  if (offset < message.length) segments.push({ type: 'text', data: { text: decode(message.slice(offset)) } });
+  return segments;
+}
+
 const MessageSchema = z.object({
   post_type: z.literal('message'),
   message_type: z.enum(['private', 'group']),
@@ -33,7 +52,7 @@ const MessageSchema = z.object({
   user_id: z.number().int().positive().safe(),
   message_id: z.number().int().safe(),
   raw_message: z.string().default(''),
-  message: z.array(z.object({ type: z.string(), data: z.record(z.unknown()) })),
+  message: z.union([z.array(z.object({ type: z.string(), data: z.record(z.unknown()) })), z.string().transform(parseCqMessage)]),
   sender: z.object({
     user_id: z.number().int().positive().safe().optional(),
     nickname: z.string().default(''),

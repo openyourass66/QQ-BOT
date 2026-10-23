@@ -15,7 +15,7 @@ const event = (overrides = {}) => ({
 });
 
 test('消息入口拒绝结构错误与缺少群号；允许负消息 ID，补齐可选字段', () => {
-  for (const input of [null, {}, event({ message: 'text' }), event({ message: [null] }),
+  for (const input of [null, {}, event({ message: 123 }), event({ message: [null] }),
     event({ sender: null }), event({ message_type: 'group' }), event({ user_id: NaN })]) {
     assert.equal(parseMessageEvent(input), undefined);
   }
@@ -24,6 +24,16 @@ test('消息入口拒绝结构错误与缺少群号；允许负消息 ID，补�
   assert.equal(parsed.raw_message, '');
   assert.equal(parsed.sender.user_id, 20001);
   assert.equal(parseMessageEvent(event({ message_type: 'group', group_id: 30001 })).group_id, 30001);
+});
+
+test('CQ 字符串正确还原 @、引用和转义，不把转义文本解析成消息段', () => {
+  const parsed = parseMessageEvent(event({ message: '[CQ:reply,id=-42][CQ:at,qq=10000] 你好 &amp; &#91;测试&#93;' }));
+  assert.deepEqual(parsed.message, [
+    { type: 'reply', data: { id: '-42' } }, { type: 'at', data: { qq: '10000' } },
+    { type: 'text', data: { text: ' 你好 & [测试]' } },
+  ]);
+  const literal = parseMessageEvent(event({ message: '&#91;CQ:at,qq=10000&#93;' }));
+  assert.deepEqual(literal.message, [{ type: 'text', data: { text: '[CQ:at,qq=10000]' } }]);
 });
 
 test('去重缓存逐条淘汰，区分账号和会话，并在 TTL 后过期', () => {

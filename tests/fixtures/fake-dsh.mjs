@@ -1,8 +1,10 @@
 import { createInterface } from 'node:readline';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
+import { appendFileSync } from 'node:fs';
 
 let nextSession = 0;
+let nextGroupTurn = 0;
 const sessionServers = new Map();
 const respond = (id, result) => process.stdout.write(`${JSON.stringify({ jsonrpc: '2.0', id, result })}\n`);
 const notify = (method, params) => process.stdout.write(`${JSON.stringify({ jsonrpc: '2.0', method, params })}\n`);
@@ -21,6 +23,27 @@ lines.on('line', async (line) => {
     respond(id, {});
   } else if (method === 'session/prompt') {
     let text = params.prompt.map((block) => block.text ?? '').join('');
+    if (process.env.FAKE_GROUP_PROMPTS) {
+      appendFileSync(process.env.FAKE_GROUP_PROMPTS, JSON.stringify({ sessionId: params.sessionId, text }) + '\n');
+      const current = text.split('对你说：\n').at(-1).split('\n')[0];
+      if (current.includes('GROUP_TIMEOUT')) return;
+      if (current.includes('GROUP_TOOL_ONLY')) {
+        const server = sessionServers.get(params.sessionId).find((entry) => entry.name === 'qq');
+        const client = new Client({ name: 'fake-agent', version: '1' });
+        try {
+          await client.connect(new StdioClientTransport({ command: server.command, args: server.args, env: Object.fromEntries(server.env.map(({ name, value }) => [name, value])), stderr: 'pipe' }));
+          const result = await client.callTool({ name: 'qq_send_message', arguments: { target_type: 'group', target_id: Number(text.match(/【QQ群 (\d+)】/)[1]), text: '工具发出的群回答' } });
+          if (result.isError) throw new Error(result.content[0].text);
+        } finally { await client.close(); }
+        respond(id, { stopReason: 'end_turn' }); return;
+      }
+      await new Promise((done) => setTimeout(done, 100));
+      if (!current.includes('GROUP_EMPTY')) notify('session/update', {
+        sessionId: params.sessionId,
+        update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: `群回答 ${++nextGroupTurn}` } },
+      });
+      respond(id, { stopReason: 'end_turn' }); return;
+    }
     if (text.includes('测试超时')) return;
     if (text.includes('测试崩溃')) { process.exit(3); }
     if (text.includes('MCP点赞') || text.includes('MCP空间')) {

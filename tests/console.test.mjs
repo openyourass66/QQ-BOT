@@ -101,7 +101,7 @@ test('Windows 原生窗口与全部配置控件可加载', { skip: process.platf
   proc.stdout.on('data', (data) => { output += data; }); proc.stderr.on('data', (data) => { output += data; });
   await once(proc, 'exit');
   assert.equal(proc.exitCode, 0, output);
-  assert.match(output, /36.*19/);
+  assert.match(output, /36.*20/);
 });
 
 test('原生控件交互：异步状态、配置保存、人设、导航、会话、日志和关闭', { skip: process.platform !== 'win32', timeout: 30000 }, async () => {

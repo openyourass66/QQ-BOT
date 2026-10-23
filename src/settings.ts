@@ -10,6 +10,7 @@ const GroupSchema = z
     prefix: z.string().max(32).default(config.bot.groupPrefix),
     cooldownMs: z.number().int().min(0).max(60000).default(config.bot.groupCooldownMs),
     contextLines: z.number().int().min(0).max(30).default(config.bot.groupContextLines),
+    followUpMs: z.number().int().min(0).max(600000).default(90000),
     proactive: z
       .object({
         enabled: z.boolean().default(false),

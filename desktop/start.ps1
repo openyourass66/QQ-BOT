@@ -78,6 +78,7 @@ $script:fieldGroups = @(
         @('chat.group.prefix', '群聊触发前缀（可留空）', 'text', 0, 32),
         @('chat.group.cooldownMs', '群聊冷却（毫秒）', 'number', 0, 60000),
         @('chat.group.contextLines', '最近群聊摘要行数（0 为关闭）', 'number', 0, 30),
+        @('chat.group.followUpMs', '同一群友追问窗口（毫秒，0 为关闭）', 'number', 0, 600000),
         @('chat.delay.chunkSize', '回复分片长度', 'number', 100, 4000),
         @('chat.delay.minMs', '最短回复延迟（毫秒）', 'number', 0, 10000),
         @('chat.delay.maxMs', '最长回复延迟（毫秒）', 'number', 0, 20000)
