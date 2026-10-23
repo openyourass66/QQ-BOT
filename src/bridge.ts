@@ -3,6 +3,7 @@ import { Readable, Writable } from 'node:stream';
 import { readFile, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import process from 'node:process';
+import { randomBytes } from 'node:crypto';
 import * as acp from '@agentclientprotocol/sdk';
 import { config } from './config.js';
 import {
@@ -13,9 +14,11 @@ import {
   type MessageEvent,
 } from './onebot.js';
 import { SessionStore } from './store.js';
-import { getSettings, loadSettings, watchSettings, saveSettings, type BotSettings } from './settings.js';
-import { log, snapshotStatus, status } from './state.js';
+import { getSettings, loadSettings, watchSettings, saveSettings, flushSettings, type BotSettings } from './settings.js';
+import { log, status } from './state.js';
 import { startAdmin } from './admin.js';
+import { ConversationQueue, withTimeout } from './runtime.js';
+import { parseApprovalReply, permissionOutcome } from './permissions.js';
 
 const api = new OneBotHttp(config.onebot.httpUrl, config.onebot.token);
 const store = new SessionStore(process.env.SESSION_STORE ?? 'data/sessions.json');
@@ -23,8 +26,8 @@ const personaPath = resolve(config.dsh.workspace, 'AGENTS.md');
 
 const sessions = new Map<string, acp.ActiveSession>();
 const creating = new Map<string, Promise<acp.ActiveSession>>();
-const chains = new Map<string, Promise<unknown>>();
-const toolCalls = new Map<string, { title: string; kind: string }>();
+const queue = new ConversationQueue();
+const toolCalls = new Map<string, { title: string; kind: string; signal: AbortSignal }>();
 const groupHistory = new Map<number, string[]>();
 const seen = new Set<number>();
 const pendingApprovals = new Map<string, (approved: boolean) => void>();
@@ -33,24 +36,20 @@ const lastGroupReply = new Map<number, number>();
 let selfId = config.bot.selfId;
 let acpCtx: acp.ClientContext | undefined;
 let admin: { close(): Promise<void>; url: string } | undefined;
+let dshChild: ReturnType<typeof spawn> | undefined;
+let ws: OneBotWs | undefined;
+let stopSettings: (() => void) | undefined;
+let stopping = false;
 let readyResolve: (() => void) | undefined;
-const ready = new Promise<void>((done) => {
+let readyReject: ((error: Error) => void) | undefined;
+const ready = new Promise<void>((done, reject) => {
   readyResolve = done;
+  readyReject = reject;
 });
 
 const sleep = (ms: number): Promise<void> => new Promise((done) => setTimeout(done, ms));
 const rand = (min: number, max: number): number =>
   min + Math.floor(Math.random() * Math.max(1, max - min));
-
-function enqueue<T>(key: string, task: () => Promise<T>): Promise<T> {
-  const previous = chains.get(key) ?? Promise.resolve();
-  const next = previous.then(task, task);
-  chains.set(
-    key,
-    next.catch(() => undefined),
-  );
-  return next;
-}
 
 function keyOf(event: MessageEvent): string {
   return event.message_type === 'group' ? `group:${event.group_id}` : `private:${event.user_id}`;
@@ -109,94 +108,110 @@ async function getSession(key: string): Promise<acp.ActiveSession> {
 }
 
 async function runTurn(key: string, prompt: string): Promise<string> {
-  const session = await getSession(key);
-  const settings = getSettings();
-
-  return enqueue(key, async () => {
-    let text = '';
-    const done = session.prompt(prompt);
-    const timer = setTimeout(() => {
-      log('warn', `[acp] turn timeout for ${key}, cancelling`);
-      acpCtx
-        ?.notify(acp.methods.agent.session.cancel, { sessionId: session.sessionId })
-        .catch(() => undefined);
-    }, config.bot.turnTimeoutMs);
-
-    try {
-      for (;;) {
-        const message = await session.nextUpdate();
-        if (message.kind === 'stop') break;
-
-        const update = message.update;
-        if (update.sessionUpdate === 'agent_message_chunk' && update.content.type === 'text') {
-          text += update.content.text;
-        } else if (update.sessionUpdate === 'tool_call') {
-          toolCalls.set(update.toolCallId, {
-            title: update.title,
-            kind: String(update.kind ?? 'other'),
-          });
-          log('info', `[tool] ${update.title}`);
-        }
-      }
-      await done;
-    } finally {
-      clearTimeout(timer);
-    }
-
-    status.turns += 1;
-    status.lastError = '';
-    void settings;
-    return text.trim();
+  const session = await withTimeout(getSession(key), config.bot.turnTimeoutMs, () => {
+    void shutdown(1);
   });
+  const turnToolIds = new Set<string>();
+  const controller = new AbortController();
+  try {
+    return await withTimeout((async () => {
+      let text = '';
+      const done = session.prompt(prompt, { cancellationSignal: controller.signal });
+      // prompt 可能先于更新流失败，必须立即订阅拒绝结果。
+      const updates = (async () => {
+        for (;;) {
+          const message = await session.nextUpdate();
+          if (message.kind === 'stop') break;
+
+          const update = message.update;
+          if (update.sessionUpdate === 'agent_message_chunk' && update.content.type === 'text') {
+            text += update.content.text;
+          } else if (update.sessionUpdate === 'tool_call') {
+            turnToolIds.add(update.toolCallId);
+            toolCalls.set(update.toolCallId, {
+              title: update.title,
+              kind: String(update.kind ?? 'other'),
+              signal: controller.signal,
+            });
+            log('info', `[tool] ${update.title}`);
+          }
+        }
+      })();
+      await Promise.all([done, updates]);
+
+      status.turns += 1;
+      status.lastError = '';
+      return text.trim();
+    })(), config.bot.turnTimeoutMs, () => {
+      log('warn', `[acp] turn timeout for ${key}, cancelling`);
+      controller.abort();
+      void acpCtx?.notify(acp.methods.agent.session.cancel, { sessionId: session.sessionId })
+        .catch(() => undefined);
+    });
+  } catch (error) {
+    controller.abort();
+    session.dispose();
+    sessions.delete(key);
+    store.delete(key);
+    status.sessions = sessions.size;
+    throw error;
+  } finally {
+    for (const id of turnToolIds) toolCalls.delete(id);
+  }
 }
 
-const SAFE_KINDS = new Set(['read', 'search', 'fetch', 'think', 'edit', 'move']);
+const SAFE_KINDS = new Set(['read', 'search', 'fetch', 'think']);
 
 async function decidePermission(params: {
   toolCall: { toolCallId: string };
   options: Array<{ optionId: string; kind: string }>;
-}): Promise<{ outcome: { outcome: 'selected'; optionId: string } }> {
+}): Promise<ReturnType<typeof permissionOutcome>> {
   const call = toolCalls.get(params.toolCall.toolCallId);
   const kind = call?.kind;
   let allowed = false;
 
-  if (kind === undefined) {
+  if (call?.signal.aborted || stopping) {
+    return permissionOutcome(params.options, false);
+  } else if (kind === undefined) {
     // 审批请求只带 toolCallId；类型缺失时无法判断风险，默认拒绝。
     log('warn', `[approval] unknown tool call ${params.toolCall.toolCallId} -> reject`);
   } else if (kind === 'execute') {
-    allowed = getSettings().approval.allowExec || (await askAdmin(`要执行命令：${call?.title ?? ''}`));
+    allowed = getSettings().approval.allowExec || (await askAdmin(`要执行命令：${call?.title ?? ''}`, call?.signal));
+  } else if (kind === 'edit' || kind === 'move') {
+    allowed = await askAdmin(`要修改或移动文件：${call?.title ?? ''}`, call?.signal);
   } else if (SAFE_KINDS.has(kind)) {
     allowed = true;
   } else {
     log('warn', `[approval] denied kind=${kind} ${call?.title ?? ''}`);
   }
 
-  const option =
-    params.options.find((item) => item.kind === (allowed ? 'allow_once' : 'reject_once')) ??
-    params.options[0];
-
   log('info', `[approval] ${kind ?? 'unknown'} ${call?.title ?? ''} -> ${allowed ? 'allow' : 'reject'}`);
-  return { outcome: { outcome: 'selected', optionId: option.optionId } };
+  return permissionOutcome(params.options, allowed);
 }
 
 /** 把审批请求转到管理员私聊；超时或没有管理员就拒绝。 */
-function askAdmin(title: string): Promise<boolean> {
+function askAdmin(title: string, signal?: AbortSignal): Promise<boolean> {
   const settings = getSettings();
-  if (!settings.approval.adminQq) return Promise.resolve(false);
+  if (!settings.approval.adminQq || signal?.aborted) return Promise.resolve(false);
 
-  const id = Math.random().toString(36).slice(2, 8);
+  const id = randomBytes(3).toString('hex');
   return new Promise<boolean>((resolve) => {
-    pendingApprovals.set(id, resolve);
+    const finish = (approved: boolean): void => {
+      clearTimeout(timer);
+      signal?.removeEventListener('abort', cancel);
+      pendingApprovals.delete(id);
+      resolve(approved);
+    };
+    const cancel = (): void => finish(false);
+    const timer = setTimeout(() => finish(false), settings.approval.timeoutMs);
+    signal?.addEventListener('abort', cancel, { once: true });
+    pendingApprovals.set(id, finish);
     void api
       .sendPrivate(
         settings.approval.adminQq,
-        `【授权请求 #${id}】\n${title}\n\n回复 y 允许 / n 拒绝`,
+        `【授权请求 #${id}】\n${title}\n\n回复 y ${id} 允许 / n ${id} 拒绝`,
       )
-      .catch(() => undefined);
-
-    setTimeout(() => {
-      if (pendingApprovals.delete(id)) resolve(false);
-    }, settings.approval.timeoutMs);
+      .catch(() => finish(false));
   });
 }
 
@@ -205,15 +220,16 @@ function handleAdminReply(event: MessageEvent, text: string): boolean {
   if (event.message_type !== 'private' || event.user_id !== adminQq) return false;
   if (pendingApprovals.size === 0) return false;
 
-  const match = /^(y|n|允许|拒绝|好|不)/i.exec(text.trim());
+  const match = parseApprovalReply(text);
   if (!match) return false;
 
-  const approved = /^(y|允许|好)/i.test(match[1]);
-  const [id, resolve] = pendingApprovals.entries().next().value as [
-    string,
-    (ok: boolean) => void,
-  ];
-  pendingApprovals.delete(id);
+  const approved = match.approved;
+  const id = match.id ?? (pendingApprovals.size === 1 ? pendingApprovals.keys().next().value : undefined);
+  const resolve = id ? pendingApprovals.get(id) : undefined;
+  if (!resolve) {
+    void api.sendPrivate(event.user_id, '请带有效的授权编号回复，例如 y a1b2c3').catch(() => undefined);
+    return true;
+  }
   resolve(approved);
   void api
     .sendPrivate(event.user_id, approved ? `已允许 #${id}` : `已拒绝 #${id}`)
@@ -237,16 +253,16 @@ function shouldReply(event: MessageEvent, text: string): { ok: boolean; body: st
   if (prefix && text.startsWith(prefix)) {
     return { ok: true, body: text.slice(prefix.length).trim() };
   }
-  return { ok: false, body: text };
+  return { ok: !settings.chat.group.requireMention, body: text };
 }
 
 function buildPrompt(event: MessageEvent, body: string): string {
   const sender = event.sender.card || event.sender.nickname;
   if (event.message_type === 'group') {
     const lines = getSettings().chat.group.contextLines;
-    const history = (groupHistory.get(event.group_id ?? 0) ?? [])
-      .slice(-lines)
-      .join('\n');
+    const history = lines > 0
+      ? (groupHistory.get(event.group_id ?? 0) ?? []).slice(-lines).join('\n')
+      : '';
     return [
       `【QQ群 ${event.group_id}】`,
       '最近的群聊：',
@@ -264,7 +280,7 @@ function remember(event: MessageEvent, text: string): void {
   const list = groupHistory.get(event.group_id) ?? [];
   const sender = event.sender.card || event.sender.nickname;
   list.push(`${sender}: ${text}`);
-  while (list.length > 20) list.shift();
+  while (list.length > 30) list.shift();
   groupHistory.set(event.group_id, list);
 }
 
@@ -303,6 +319,7 @@ async function reply(event: MessageEvent, text: string): Promise<void> {
 }
 
 async function onMessage(event: MessageEvent): Promise<void> {
+  if (stopping) return;
   selfId ||= event.self_id;
   if (event.self_id && event.user_id === event.self_id) return;
   if (seen.has(event.message_id)) return;
@@ -316,9 +333,9 @@ async function onMessage(event: MessageEvent): Promise<void> {
 
   if (handleAdminReply(event, text)) return;
 
-  remember(event, text);
-
   const trigger = shouldReply(event, text);
+  const prompt = trigger.ok ? buildPrompt(event, trigger.body) : '';
+  remember(event, text);
   if (!trigger.ok || !trigger.body) return;
 
   const key = keyOf(event);
@@ -333,21 +350,24 @@ async function onMessage(event: MessageEvent): Promise<void> {
   void api.markRead(event.message_id).catch(() => undefined);
   log('info', `[msg] ${key} <- ${trigger.body.slice(0, 60)}`);
 
-  try {
-    const answer = await runTurn(key, buildPrompt(event, trigger.body));
-    if (answer) {
-      log('info', `[msg] ${key} -> ${answer.slice(0, 60)}`);
-      await reply(event, answer);
+  await queue.run(key, async () => {
+    if (stopping) return;
+    try {
+      const answer = await runTurn(key, prompt);
+      if (answer) {
+        log('info', `[msg] ${key} -> ${answer.slice(0, 60)}`);
+        await reply(event, answer);
+      }
+    } catch (error) {
+      status.lastError = String(error);
+      log('error', `[turn] ${key} failed: ${String(error)}`);
+      if (event.message_type === 'private') {
+        await api
+          .sendPrivate(event.user_id, '（我这边刚刚走神了，稍后再试一次？）')
+          .catch(() => undefined);
+      }
     }
-  } catch (error) {
-    status.lastError = String(error);
-    log('error', `[turn] ${key} failed: ${String(error)}`);
-    if (event.message_type === 'private') {
-      await api
-        .sendPrivate(event.user_id, '（我这边刚刚走神了，稍后再试一次？）')
-        .catch(() => undefined);
-    }
-  }
+  });
 }
 
 function spawnDsh(): ReturnType<typeof spawn> {
@@ -379,14 +399,22 @@ function spawnDsh(): ReturnType<typeof spawn> {
 
 function startBridge(): void {
   const child = spawnDsh();
+  dshChild = child;
+  child.on('error', (error) => {
+    readyReject?.(error);
+    if (!stopping) void shutdown(1);
+  });
 
   child.stderr?.on('data', (chunk: Buffer) => {
     process.stderr.write(`[dsh] ${chunk.toString()}`);
   });
   child.on('exit', (code) => {
     status.acpConnected = false;
+    acpCtx = undefined;
+    readyReject?.(new Error(`DSH 已退出 (${code})`));
+    if (stopping) return;
     log('error', `[acp] dsh exited with ${code}`);
-    process.exitCode = code ?? 1;
+    void shutdown(1);
   });
 
   if (!child.stdin || !child.stdout) throw new Error('无法连接 dsh 的 stdin/stdout');
@@ -417,13 +445,14 @@ function startBridge(): void {
       status.acpConnected = false;
       status.lastError = String(error);
       log('error', `[acp] connection failed: ${String(error)}`);
-      process.exitCode = 1;
+      readyReject?.(error instanceof Error ? error : new Error(String(error)));
+      if (!stopping) void shutdown(1);
     });
 }
 
 async function startAdminServer(): Promise<void> {
   try {
-    admin = startAdmin({
+    admin = await startAdmin({
       getSettings: () => getSettings(),
       saveSettings: (input) => saveSettings(input),
       getPersona: async () => {
@@ -438,6 +467,7 @@ async function startAdminServer(): Promise<void> {
       },
       getSessions: () => store.list(),
       deleteSession: (key) => {
+        if (queue.has(key)) throw new Error('会话正在处理消息，请稍后删除');
         store.delete(key);
         sessions.get(key)?.dispose();
         sessions.delete(key);
@@ -459,16 +489,16 @@ async function startAdminServer(): Promise<void> {
 async function main(): Promise<void> {
   await loadSettings();
   await store.load();
-  watchSettings();
+  stopSettings = watchSettings();
 
   startBridge();
-  await ready;
+  await withTimeout(ready, 30_000);
 
-  const ws = new OneBotWs({
+  ws = new OneBotWs({
     url: config.onebot.wsUrl,
     token: config.onebot.token,
     onEvent: (event) => {
-      void onMessage(event);
+      void onMessage(event).catch((error) => log('error', `[message] ${String(error)}`));
     },
     onState: (connected) => {
       status.wsConnected = connected;
@@ -491,17 +521,42 @@ async function main(): Promise<void> {
 
   await startAdminServer();
 
-  const shutdown = (): void => {
-    log('info', '[bridge] shutting down');
-    ws.stop();
-    void admin?.close();
-    process.exit(0);
-  };
-  process.on('SIGINT', shutdown);
-  process.on('SIGTERM', shutdown);
-
-  log('info', `[bridge] ready; ${sessions.size} session(s) restored from store`);
+  log('info', `[bridge] ready; ${store.list().length} saved session(s), resumed on demand`);
 }
 
+async function shutdown(code = 0): Promise<void> {
+  if (stopping) return;
+  stopping = true;
+  log('info', '[bridge] shutting down');
+  ws?.stop();
+  stopSettings?.();
+  for (const finish of pendingApprovals.values()) finish(false);
+  for (const session of sessions.values()) session.dispose();
+  dshChild?.stdin?.end();
+  // Windows 的 cmd 启动器需要连同其 DSH 子进程一起结束。
+  const stopChild = async (): Promise<void> => {
+    if (!dshChild?.pid || dshChild.exitCode !== null) return;
+    if (process.platform === 'win32') {
+      await new Promise<void>((resolveStop) => {
+        const killer = spawn('taskkill', ['/pid', String(dshChild!.pid), '/t', '/f'], { windowsHide: true });
+        killer.once('error', () => resolveStop());
+        killer.once('exit', () => resolveStop());
+      });
+    } else dshChild.kill('SIGTERM');
+  };
+  try {
+    await withTimeout(Promise.all([store.flush(), flushSettings(), admin?.close(), stopChild()]), 5000);
+  } catch (error) {
+    log('error', `[shutdown] ${String(error)}`);
+    code = 1;
+  }
+  process.exit(code);
+}
+
+process.on('SIGINT', () => { void shutdown(); });
+process.on('SIGTERM', () => { void shutdown(); });
 export type { BotSettings };
-void main();
+void main().catch((error) => {
+  log('error', `[startup] ${String(error)}`);
+  void shutdown(1);
+});

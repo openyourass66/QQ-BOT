@@ -46,6 +46,7 @@ export class OneBotHttp {
       method: 'POST',
       headers,
       body: JSON.stringify(params),
+      signal: AbortSignal.timeout(15_000),
     });
 
     const body = (await response.json()) as OneBotResponse<T>;

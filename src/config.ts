@@ -30,7 +30,7 @@ export const config = {
     chunkSize: num('REPLY_CHUNK_SIZE', 600),
     minDelayMs: num('MIN_DELAY_MS', 700),
     maxDelayMs: num('MAX_DELAY_MS', 2400),
-    turnTimeoutMs: num('TURN_TIMEOUT_MS', 180_000),
+    turnTimeoutMs: Math.max(1000, Math.min(600_000, num('TURN_TIMEOUT_MS', 180_000))),
     allowExec: env('ALLOW_EXEC') === '1',
     groupContextLines: num('GROUP_CONTEXT_LINES', 6),
   },

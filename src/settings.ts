@@ -1,14 +1,15 @@
-import { readFile, rename, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { watch } from 'node:fs';
-import { resolve } from 'node:path';
+import { basename, dirname, resolve } from 'node:path';
 import { z } from 'zod';
+import { config } from './config.js';
 
 const GroupSchema = z
   .object({
     requireMention: z.boolean().default(true),
-    prefix: z.string().max(32).default(''),
-    cooldownMs: z.number().int().min(0).max(60000).default(3000),
-    contextLines: z.number().int().min(0).max(30).default(6),
+    prefix: z.string().max(32).default(config.bot.groupPrefix),
+    cooldownMs: z.number().int().min(0).max(60000).default(config.bot.groupCooldownMs),
+    contextLines: z.number().int().min(0).max(30).default(config.bot.groupContextLines),
     proactive: z
       .object({
         enabled: z.boolean().default(false),
@@ -31,17 +32,17 @@ const SettingsSchema = z
         group: GroupSchema,
         delay: z
           .object({
-            minMs: z.number().int().min(0).max(10000).default(700),
-            maxMs: z.number().int().min(0).max(20000).default(2400),
-            chunkSize: z.number().int().min(100).max(4000).default(600),
+            minMs: z.number().int().min(0).max(10000).default(config.bot.minDelayMs),
+            maxMs: z.number().int().min(0).max(20000).default(config.bot.maxDelayMs),
+            chunkSize: z.number().int().min(100).max(4000).default(config.bot.chunkSize),
           })
           .default({}),
       })
       .default({}),
     approval: z
       .object({
-        adminQq: z.number().int().min(0).default(0),
-        allowExec: z.boolean().default(false),
+        adminQq: z.number().int().min(0).default(config.bot.adminQq),
+        allowExec: z.boolean().default(config.bot.allowExec),
         timeoutMs: z.number().int().min(5000).max(600000).default(90000),
       })
       .default({}),
@@ -70,7 +71,11 @@ const SettingsSchema = z
       })
       .default({}),
   })
-  .default({});
+  .default({})
+  .refine((value) => value.chat.delay.minMs <= value.chat.delay.maxMs, {
+    message: 'minMs 不能大于 maxMs',
+    path: ['chat', 'delay'],
+  });
 
 export type BotSettings = z.infer<typeof SettingsSchema>;
 
@@ -78,6 +83,7 @@ export const DEFAULT_SETTINGS: BotSettings = SettingsSchema.parse({});
 
 const path = resolve(process.env.BOT_SETTINGS_FILE ?? 'bot.config.json');
 let current: BotSettings = DEFAULT_SETTINGS;
+let writes: Promise<unknown> = Promise.resolve();
 const listeners = new Set<(next: BotSettings) => void>();
 
 function clone(value: BotSettings): BotSettings {
@@ -89,7 +95,7 @@ function notify(next: BotSettings): void {
 }
 
 export function getSettings(): BotSettings {
-  return current;
+  return clone(current);
 }
 
 export function onSettingsChange(listener: (next: BotSettings) => void): () => void {
@@ -102,16 +108,15 @@ export async function loadSettings(): Promise<BotSettings> {
     const raw = await readFile(path, 'utf8');
     current = SettingsSchema.parse(JSON.parse(raw));
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
-      console.warn(`[settings] 读取失败，使用默认值: ${String(error)}`);
-    }
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
     current = clone(DEFAULT_SETTINGS);
     await persist(current);
   }
-  return current;
+  return clone(current);
 }
 
 async function persist(next: BotSettings): Promise<void> {
+  await mkdir(dirname(path), { recursive: true });
   const temp = `${path}.tmp`;
   await writeFile(temp, `${JSON.stringify(next, null, 2)}\n`, 'utf8');
   await rename(temp, path);
@@ -119,29 +124,43 @@ async function persist(next: BotSettings): Promise<void> {
 
 export async function saveSettings(input: unknown): Promise<BotSettings> {
   const parsed = SettingsSchema.parse(input);
-  current = parsed;
-  await persist(parsed);
-  notify(parsed);
-  return parsed;
+  const task = writes.then(async () => {
+    await persist(parsed);
+    current = parsed;
+    notify(parsed);
+    return clone(parsed);
+  });
+  writes = task.catch(() => undefined);
+  return task;
+}
+
+export async function flushSettings(): Promise<void> {
+  await writes;
 }
 
 /** 监听外部编辑 bot.config.json，热更新到内存。 */
-export function watchSettings(): void {
+export function watchSettings(): () => void {
+  let timer: NodeJS.Timeout | undefined;
   try {
-    watch(path, { persistent: false }, () => {
-      void (async () => {
-        try {
+    const watcher = watch(dirname(path), { persistent: false }, (_event, filename) => {
+      if (filename && filename.toString() !== basename(path)) return;
+      clearTimeout(timer);
+      timer = setTimeout(() => {
+        const reload = writes.then(async () => {
           const raw = await readFile(path, 'utf8');
           const parsed = SettingsSchema.parse(JSON.parse(raw));
           current = parsed;
           notify(parsed);
           console.log('[settings] reloaded from file');
-        } catch (error) {
+        });
+        writes = reload.catch((error) => {
           console.warn(`[settings] 热加载失败，保留旧值: ${String(error)}`);
-        }
-      })();
+        });
+      }, 100);
     });
+    return () => { clearTimeout(timer); watcher.close(); };
   } catch {
     // 文件不存在时不阻塞启动。
+    return () => undefined;
   }
 }

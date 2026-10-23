@@ -8,7 +8,8 @@
     "start": "node --env-file=.env dist/bridge.js",
     "mcp": "node --env-file=.env dist/mcp-qq.js",
     "mock": "node mock-onebot.mjs",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "npm run build && node --test tests/*.test.mjs"
   },
   "dependencies": {
     "@agentclientprotocol/sdk": "1.4.0",

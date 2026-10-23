@@ -1,6 +1,7 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
-import { readFile } from 'node:fs/promises';
-import { extname, join, normalize, resolve } from 'node:path';
+import { readFile, realpath } from 'node:fs/promises';
+import { extname, isAbsolute, relative, resolve } from 'node:path';
+import { ZodError } from 'zod';
 import type { BotSettings } from './settings.js';
 import { recentLogs, snapshotStatus } from './state.js';
 
@@ -48,7 +49,7 @@ async function readBody(req: IncomingMessage): Promise<unknown> {
   return text ? JSON.parse(text) : {};
 }
 
-export function startAdmin(deps: AdminDeps): { close(): Promise<void>; url: string } {
+export async function startAdmin(deps: AdminDeps): Promise<{ close(): Promise<void>; url: string }> {
   const port = Number(process.env.ADMIN_UI_PORT ?? 6080);
   const host = '127.0.0.1';
   const token = process.env.ADMIN_UI_TOKEN ?? '';
@@ -68,6 +69,16 @@ export function startAdmin(deps: AdminDeps): { close(): Promise<void>; url: stri
       const path = url.pathname;
 
       if (path.startsWith('/api/')) {
+        const port = req.socket.localPort;
+        if (req.headers.host !== `127.0.0.1:${port}` && req.headers.host !== `localhost:${port}`) {
+          sendJson(res, 403, { error: '无效的管理接口 Host' });
+          return;
+        }
+        const origin = req.headers.origin;
+        if (origin && origin !== `http://${req.headers.host}`) {
+          sendJson(res, 403, { error: '不允许跨站访问管理接口' });
+          return;
+        }
         if (!authorized(req)) {
           sendJson(res, 401, { error: '未授权，请检查 ADMIN_UI_TOKEN' });
           return;
@@ -78,16 +89,23 @@ export function startAdmin(deps: AdminDeps): { close(): Promise<void>; url: stri
 
       await serveStatic(res, publicDir, path);
     } catch (error) {
-      sendJson(res, 500, { error: String(error) });
+      sendJson(res, error instanceof ZodError || error instanceof SyntaxError ? 400 : 500, { error: String(error) });
     }
   });
 
-  server.listen(port, host, () => {
-    console.log(`[admin] http://${host}:${port}`);
+  await new Promise<void>((resolveListen, reject) => {
+    server.once('error', reject);
+    server.listen(port, host, () => {
+      server.off('error', reject);
+      resolveListen();
+    });
   });
+  const address = server.address();
+  const url = `http://${host}:${typeof address === 'object' && address ? address.port : port}`;
+  console.log(`[admin] ${url}`);
 
   return {
-    url: `http://${host}:${port}`,
+    url,
     close: () =>
       new Promise<void>((resolveClose, reject) => {
         server.close((error) => (error ? reject(error) : resolveClose()));
@@ -96,13 +114,23 @@ export function startAdmin(deps: AdminDeps): { close(): Promise<void>; url: stri
 }
 
 async function serveStatic(res: ServerResponse, publicDir: string, path: string): Promise<void> {
-  const relative = path === '/' ? 'index.html' : path.replace(/^\/+/, '');
-  const target = resolve(join(publicDir, normalize(relative)));
-  if (!target.startsWith(publicDir)) {
+  const filePath = path === '/' ? 'index.html' : decodeURIComponent(path).replace(/^\/+/, '');
+  let target = resolve(publicDir, filePath);
+  const within = (root: string, file: string): boolean => {
+    const part = relative(root, file);
+    return part !== '..' && !part.startsWith('..\\') && !part.startsWith('../') && !isAbsolute(part);
+  };
+  if (!within(publicDir, target)) {
     sendJson(res, 403, { error: 'forbidden' });
     return;
   }
   try {
+    const [root, actual] = await Promise.all([realpath(publicDir), realpath(target)]);
+    if (!within(root, actual)) {
+      sendJson(res, 403, { error: 'forbidden' });
+      return;
+    }
+    target = actual;
     const file = await readFile(target);
     res.writeHead(200, {
       'content-type': MIME[extname(target)] ?? 'application/octet-stream',

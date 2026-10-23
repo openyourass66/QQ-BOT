@@ -1,5 +1,11 @@
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
+import { z } from 'zod';
+
+const StoreSchema = z.object({
+  version: z.literal(1),
+  sessions: z.record(z.object({ sessionId: z.string().min(1), updatedAt: z.number().finite() })),
+});
 
 type StoreShape = {
   version: 1;
@@ -14,6 +20,8 @@ export class SessionStore {
   private data: StoreShape = { version: 1, sessions: {} };
   private readonly path: string;
   private saving?: Promise<void>;
+  private revision = 0;
+  private persistedRevision = 0;
 
   constructor(path = 'data/sessions.json') {
     this.path = resolve(path);
@@ -22,10 +30,9 @@ export class SessionStore {
   async load(): Promise<void> {
     try {
       const raw = await readFile(this.path, 'utf8');
-      const parsed = JSON.parse(raw) as StoreShape;
-      if (parsed?.version === 1 && parsed.sessions) this.data = parsed;
-    } catch {
-      // 首次启动没有文件是正常情况。
+      this.data = StoreSchema.parse(JSON.parse(raw));
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
     }
   }
 
@@ -35,12 +42,12 @@ export class SessionStore {
 
   set(key: string, sessionId: string): void {
     this.data.sessions[key] = { sessionId, updatedAt: Date.now() };
-    void this.save();
+    this.changed();
   }
 
   delete(key: string): void {
     delete this.data.sessions[key];
-    void this.save();
+    this.changed();
   }
 
   entries(): Array<[string, string]> {
@@ -55,12 +62,21 @@ export class SessionStore {
     }));
   }
 
-  private save(): Promise<void> {
+  private changed(): void {
+    this.revision += 1;
+    void this.flush().catch((error) => console.error('[store] 保存失败:', error));
+  }
+
+  flush(): Promise<void> {
     this.saving ??= (async () => {
       await mkdir(dirname(this.path), { recursive: true });
       const temp = `${this.path}.tmp`;
-      await writeFile(temp, JSON.stringify(this.data, null, 2), 'utf8');
-      await rename(temp, this.path);
+      while (this.persistedRevision < this.revision) {
+        const revision = this.revision;
+        await writeFile(temp, JSON.stringify(this.data, null, 2), 'utf8');
+        await rename(temp, this.path);
+        this.persistedRevision = revision;
+      }
     })().finally(() => {
       this.saving = undefined;
     });
