@@ -606,6 +606,10 @@ async function shutdown(code = 0): Promise<void> {
 
 process.on('SIGINT', () => { void shutdown(); });
 process.on('SIGTERM', () => { void shutdown(); });
+process.on('message', (message) => {
+  if (message === 'shutdown') void shutdown();
+});
+process.on('disconnect', () => { void shutdown(); });
 export type { BotSettings };
 void main().catch((error) => {
   log('error', `[startup] ${String(error)}`);

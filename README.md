@@ -63,7 +63,25 @@ DeepSeek 登录态；也可以在 `~\.dsh\.env` 里写 `DEEPSEEK_API_KEY`。
 
 首次启动会创建 `bot.config.json`（可通过 `BOT_SETTINGS_FILE` 改路径）。文件中的显式值优先，缺失字段从 `.env` 的对应配置或默认值补齐；已有文件中的值不会因修改 `.env` 自动改变。配置保存后热更新，支持编辑器通过原子替换保存文件。无效配置会报错，原文件保留。
 
-本地管理 API 默认位于 `http://127.0.0.1:6080`，可通过 `ADMIN_UI_PORT` 修改端口，设置 `ADMIN_UI_TOKEN` 后请求需携带 `x-admin-token`。接口包括 `/api/status`、`/api/settings`、`/api/persona`、`/api/logs`、`/api/sessions`、`/api/login-info` 和 `/api/test`。仓库暂未提供管理页面，访问首页需要自行提供 `public/index.html`。
+### Windows 桌面控制台
+
+```powershell
+npm run ui
+```
+
+使用 Windows 自带的 WPF 与 Windows PowerShell 5.1，沿用项目的 Node.js 22+，不需要 Electron、WebView 或浏览器，也不新增 npm 依赖。首次使用先 `npm install`；启动命令自动构建后打开原生桌面窗口，不会自动启动机器人。
+
+控制台提供启动、停止、重启、连接状态、消息统计、动态配置、人设编辑、会话重置、日志筛选和管理员测试消息。机器人停止后仍可编辑配置、查看日志并重新启动。关闭窗口会停止由该窗口启动的机器人并清理 DSH 子进程；有未保存的配置或人设时会提示确认。配置和人设保存失败会保留输入。
+
+完成构建后，也可以双击 `desktop/launch.vbs` 启动，后台不显示命令行窗口。连接地址、OneBot 令牌、DSH 路径等启动参数通过“连接配置 (.env)”打开本地记事本编辑，保存后需要关闭并重新打开控制台。运行中的 `npm start` 桥接需先退出，再交由桌面控制台启动，避免重复连接和数据文件争用。同一项目的桌面窗口通过系统互斥量限制为一个实例。
+
+桌面窗口通过本机随机端口与独立控制进程通信，每次启动使用独立随机令牌；该接口仅作进程间通信，不提供网页界面。日志最多保留 500 条，最小化时暂停状态轮询，关闭日志页后停止拉取日志。桌面 UI 的自检可运行：
+
+```powershell
+powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File desktop/start.ps1 -ValidateOnly
+```
+
+直接运行 `npm start` 时，本地管理 API 默认位于 `http://127.0.0.1:6080`，可通过 `ADMIN_UI_PORT` 修改端口，设置 `ADMIN_UI_TOKEN` 后请求需携带 `x-admin-token`。接口包括 `/api/status`、`/api/settings`、`/api/persona`、`/api/logs`、`/api/sessions`、`/api/login-info` 和 `/api/test`。直接桥接模式不提供进程启停接口。
 
 `requireMention=false` 会允许群消息无需 @ 或前缀直接触发；`contextLines=0` 关闭附加的最近群聊摘要，不清除 Agent 已有会话上下文。
 

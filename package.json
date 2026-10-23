@@ -4,6 +4,7 @@
   "type": "module",
   "version": "0.1.0",
   "scripts": {
+    "ui": "npm run build && powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File desktop/start.ps1",
     "build": "tsc -p tsconfig.json",
     "start": "node --env-file=.env dist/bridge.js",
     "mcp": "node --env-file=.env dist/mcp-qq.js",

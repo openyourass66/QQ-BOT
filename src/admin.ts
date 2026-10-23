@@ -6,12 +6,14 @@ import type { BotSettings } from './settings.js';
 import { recentLogs, snapshotStatus } from './state.js';
 
 export interface AdminDeps {
+  getStatus?(): unknown | Promise<unknown>;
+  control?(action: 'start' | 'stop' | 'restart'): Promise<unknown>;
   getSettings(): BotSettings;
   saveSettings(input: unknown): Promise<BotSettings>;
   getPersona(): Promise<string>;
   savePersona(content: string): Promise<void>;
-  getSessions(): Array<{ key: string; sessionId: string; updatedAt: number }>;
-  deleteSession(key: string): void;
+  getSessions(): Array<{ key: string; sessionId: string; updatedAt: number }> | Promise<Array<{ key: string; sessionId: string; updatedAt: number }>>;
+  deleteSession(key: string): void | Promise<void>;
   testSend(text: string): Promise<unknown>;
   getLoginInfo(): Promise<unknown>;
 }
@@ -152,7 +154,17 @@ async function handleApi(
   const method = req.method ?? 'GET';
 
   if (method === 'GET' && path === '/api/status') {
-    sendJson(res, 200, { ...snapshotStatus(), settings: deps.getSettings() });
+    sendJson(res, 200, { ...(deps.getStatus ? await deps.getStatus() as object : snapshotStatus()), settings: deps.getSettings(), managed: Boolean(deps.control) });
+    return;
+  }
+
+  if (method === 'POST' && path === '/api/control' && deps.control) {
+    const body = await readBody(req) as { action?: unknown };
+    if (body.action !== 'start' && body.action !== 'stop' && body.action !== 'restart') {
+      sendJson(res, 400, { error: '无效的控制动作' });
+      return;
+    }
+    sendJson(res, 200, await deps.control(body.action));
     return;
   }
 
@@ -188,14 +200,14 @@ async function handleApi(
   }
 
   if (method === 'GET' && path === '/api/sessions') {
-    sendJson(res, 200, { sessions: deps.getSessions() });
+    sendJson(res, 200, { sessions: await deps.getSessions() });
     return;
   }
 
   if (method === 'DELETE' && path === '/api/sessions') {
     const key = url.searchParams.get('key');
     if (!key) throw new Error('缺少 key');
-    deps.deleteSession(key);
+    await deps.deleteSession(key);
     sendJson(res, 200, { ok: true });
     return;
   }
