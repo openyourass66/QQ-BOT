@@ -20,6 +20,10 @@ QQ-BOT\
 ├─ src\admin.ts        本地管理 API
 ├─ src\runtime.ts      会话队列与超时控制
 ├─ src\permissions.ts  审批选项与回复解析
+├─ src\qq-actions.ts   QQ 动作开关、审批与额度校验
+├─ src\usage.ts        每日额度持久化（上海时区）
+├─ src\action-server.ts 桥接内部动作接口
+├─ src\action-client.ts MCP 动作接口客户端
 ├─ bot-workspace\      机器人工作区（AGENTS.md、memory）
 ├─ data\               会话映射
 └─ mock-onebot.mjs     假 OneBot 服务端，用于不接 QQ 的联调
@@ -49,20 +53,7 @@ DeepSeek 登录态；也可以在 `~\.dsh\.env` 里写 `DEEPSEEK_API_KEY`。
 1. 安装 NapCat（Windows 一键包），登录小号；
 2. NapCat 网络配置：HTTP `127.0.0.1:3000`、WS `127.0.0.1:3001`，设置 token；
 3. 复制 `.env.example` 为 `.env`，填 `ONEBOT_TOKEN`、`BOT_SELF_ID`、`ADMIN_QQ`；
-4. 给 acp profile 挂 MCP（见方案文档 §8）：
-   ```yaml
-   - insert:
-       - id: mcp-qq
-         name: '@deepseek-ai/dsh-mcp-client'
-         config:
-           serverName: qq
-           transport: stdio
-           command: node
-           args: ['D:\Project\software\QQ-BOT\dist\mcp-qq.js']
-           env:
-             ONEBOT_HTTP_URL: 'http://127.0.0.1:3000'
-             ONEBOT_TOKEN: '你的 token'
-   ```
+4. 桥接会在新建和恢复 ACP 会话时自动挂载名为 `qq` 的 MCP，并显式传入 OneBot 与内部动作接口凭据。升级前若已在 acp profile 中手动配置 `mcp-qq` / `serverName: qq`，请移除旧的重复配置；其它 MCP（如浏览器）保留原有配置；
 5. `npm start`
 
 ## 配置与管理
@@ -75,7 +66,25 @@ DeepSeek 登录态；也可以在 `~\.dsh\.env` 里写 `DEEPSEEK_API_KEY`。
 
 `requireMention=false` 会允许群消息无需 @ 或前缀直接触发；`contextLines=0` 关闭附加的最近群聊摘要，不清除 Agent 已有会话上下文。
 
-主动聊天、空间确认与每日额度、浏览额度等字段仍为预留配置，目前没有完整的执行约束。QQ MCP 工具尚未接入这些开关，不能依靠设置它们限制工具调用。
+## QQ 工具额度
+
+QQ MCP 的主动发消息、点赞和空间发布由桥接统一执行，多个会话的 MCP 子进程共享额度。普通对话回复、审批通知及管理 API 的测试消息不计入主动消息额度。
+
+| 配置 | 实际行为 |
+| --- | --- |
+| `budgets.proactiveMessagesPerDay` | MCP 主动私聊及群消息的合计每日上限，默认 5 条 |
+| `chat.group.proactive.enabled` | 是否允许 MCP 主动往群里发消息，默认关闭 |
+| `chat.group.proactive.perGroupPerDay` | 每个群的主动消息上限，默认 1 条，同时受全局额度约束 |
+| `budgets.likesPerDay` | 点赞总次数上限，默认 20；一次调用 `times=5` 扣 5 次 |
+| `features.qzone.enabled` | 是否允许发布空间，默认关闭 |
+| `features.qzone.requireConfirm` | 默认开启；发布前通过管理员 QQ 审批实际正文及图片路径 / URL |
+| `features.qzone.dailyLimit` | 每日空间发布上限，默认 1 条 |
+
+额度为 0 表示禁止对应动作。计数按 `Asia/Shanghai` 每日零点重置，默认保存到 `SESSION_STORE` 同目录的 `daily-usage.json`，可通过 `BOT_USAGE_STORE` 指定路径。额度在调用 OneBot 前原子落盘；写入失败不执行动作。远端失败、取消或结果未知仍保留预扣，避免重试造成超额。审批拒绝或审批期间取消不扣额度。损坏的额度文件会阻止启动并保留原文件。一个额度文件由一个桥接实例管理，不支持多个桥接实例同时写入。
+
+内部动作服务只监听本机随机端口，每次启动生成独立凭据，通过 ACP 显式传给 MCP，并绑定对应模型轮次。轮次结束、超时或会话重建后，旧的待审批请求不能继续执行。单独运行 `npm run mcp` 可用于发现工具；受管动作需要桥接自动挂载的连接配置，缺失时返回错误，不绕过额度直连 OneBot。
+
+目前没有定时主动聊天调度器；以上主动发言配置约束模型调用 QQ 发送工具的行为。浏览器开关与浏览额度仍未接入外部浏览器 MCP。
 
 ## 审批
 
@@ -96,4 +105,4 @@ npm run typecheck
 npm test
 ```
 
-测试使用临时目录和假的 ACP / OneBot 服务，验证消息顺序、超时恢复、群上下文、审批、持久化及配置热更新，不连接真实 QQ 或调用模型。
+测试使用临时目录、假的 ACP / OneBot 服务与真实 QQ MCP 子进程，验证消息顺序、超时恢复、审批取消、配置热更新、并发额度、重启计数与跨日重置，不连接真实 QQ 或调用模型。

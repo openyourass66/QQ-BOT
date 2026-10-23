@@ -38,7 +38,7 @@ export class OneBotHttp {
     private readonly token: string,
   ) {}
 
-  async call<T = unknown>(action: string, params: Record<string, unknown> = {}): Promise<T> {
+  async call<T = unknown>(action: string, params: Record<string, unknown> = {}, signal?: AbortSignal): Promise<T> {
     const headers: Record<string, string> = { 'content-type': 'application/json' };
     if (this.token) headers.authorization = `Bearer ${this.token}`;
 
@@ -46,7 +46,7 @@ export class OneBotHttp {
       method: 'POST',
       headers,
       body: JSON.stringify(params),
-      signal: AbortSignal.timeout(15_000),
+      signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(15_000)]) : AbortSignal.timeout(15_000),
     });
 
     const body = (await response.json()) as OneBotResponse<T>;
@@ -57,12 +57,12 @@ export class OneBotHttp {
     return body.data;
   }
 
-  sendPrivate(userId: number, text: string): Promise<{ message_id: number }> {
-    return this.call('send_private_msg', { user_id: userId, message: text, auto_escape: true });
+  sendPrivate(userId: number, text: string, signal?: AbortSignal): Promise<{ message_id: number }> {
+    return this.call('send_private_msg', { user_id: userId, message: text, auto_escape: true }, signal);
   }
 
-  sendGroup(groupId: number, text: string): Promise<{ message_id: number }> {
-    return this.call('send_group_msg', { group_id: groupId, message: text, auto_escape: true });
+  sendGroup(groupId: number, text: string, signal?: AbortSignal): Promise<{ message_id: number }> {
+    return this.call('send_group_msg', { group_id: groupId, message: text, auto_escape: true }, signal);
   }
 
   markRead(messageId: number): Promise<unknown> {

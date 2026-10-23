@@ -1,9 +1,10 @@
 import { spawn } from 'node:child_process';
 import { Readable, Writable } from 'node:stream';
 import { readFile, writeFile } from 'node:fs/promises';
-import { resolve } from 'node:path';
+import { dirname, resolve } from 'node:path';
 import process from 'node:process';
 import { randomBytes } from 'node:crypto';
+import { fileURLToPath } from 'node:url';
 import * as acp from '@agentclientprotocol/sdk';
 import { config } from './config.js';
 import {
@@ -19,14 +20,21 @@ import { log, status } from './state.js';
 import { startAdmin } from './admin.js';
 import { ConversationQueue, withTimeout } from './runtime.js';
 import { parseApprovalReply, permissionOutcome } from './permissions.js';
+import { DailyUsageStore } from './usage.js';
+import { QqActionPolicy } from './qq-actions.js';
+import { startActionServer, type ActionServer } from './action-server.js';
 
 const api = new OneBotHttp(config.onebot.httpUrl, config.onebot.token);
-const store = new SessionStore(process.env.SESSION_STORE ?? 'data/sessions.json');
+const sessionStorePath = resolve(process.env.SESSION_STORE ?? 'data/sessions.json');
+const store = new SessionStore(sessionStorePath);
+const usage = new DailyUsageStore(process.env.BOT_USAGE_STORE ?? resolve(dirname(sessionStorePath), 'daily-usage.json'));
 const personaPath = resolve(config.dsh.workspace, 'AGENTS.md');
 
 const sessions = new Map<string, acp.ActiveSession>();
 const creating = new Map<string, Promise<acp.ActiveSession>>();
 const queue = new ConversationQueue();
+const turnSignals = new Map<string, AbortSignal>();
+const sessionContexts = new Map<string, string>();
 const toolCalls = new Map<string, { title: string; kind: string; signal: AbortSignal }>();
 const groupHistory = new Map<number, string[]>();
 const seen = new Set<number>();
@@ -36,6 +44,7 @@ const lastGroupReply = new Map<number, number>();
 let selfId = config.bot.selfId;
 let acpCtx: acp.ClientContext | undefined;
 let admin: { close(): Promise<void>; url: string } | undefined;
+let actionServer: ActionServer | undefined;
 let dshChild: ReturnType<typeof spawn> | undefined;
 let ws: OneBotWs | undefined;
 let stopSettings: (() => void) | undefined;
@@ -53,6 +62,24 @@ const rand = (min: number, max: number): number =>
 
 function keyOf(event: MessageEvent): string {
   return event.message_type === 'group' ? `group:${event.group_id}` : `private:${event.user_id}`;
+}
+
+function qqMcpServers(key: string): acp.McpServer[] {
+  if (!actionServer) throw new Error('动作策略服务尚未就绪');
+  const context = sessionContexts.get(key) ?? randomBytes(24).toString('hex');
+  sessionContexts.set(key, context);
+  return [{
+    name: 'qq',
+    command: process.execPath,
+    args: [fileURLToPath(new URL('./mcp-qq.js', import.meta.url))],
+    env: [
+      { name: 'ONEBOT_HTTP_URL', value: config.onebot.httpUrl },
+      { name: 'ONEBOT_TOKEN', value: config.onebot.token },
+      { name: 'BOT_ACTION_URL', value: actionServer.url },
+      { name: 'BOT_ACTION_TOKEN', value: actionServer.token },
+      { name: 'BOT_ACTION_CONTEXT', value: context },
+    ],
+  }];
 }
 
 async function getSession(key: string): Promise<acp.ActiveSession> {
@@ -74,7 +101,7 @@ async function getSession(key: string): Promise<acp.ActiveSession> {
         const resumed = await ctx.request(acp.methods.agent.session.resume, {
           sessionId: saved,
           cwd: config.dsh.workspace,
-          mcpServers: [],
+          mcpServers: qqMcpServers(key),
         });
         // DSH 的 session/resume 响应不带 sessionId，必须补回去，
         // 否则后续 prompt 会发送 sessionId: undefined，报 Invalid params。
@@ -89,11 +116,11 @@ async function getSession(key: string): Promise<acp.ActiveSession> {
       } catch (error) {
         log('warn', `[acp] resume ${saved} failed, recreating: ${String(error)}`);
         store.delete(key);
-        session = await ctx.buildSession({ cwd: config.dsh.workspace, mcpServers: [] }).start();
+        session = await ctx.buildSession({ cwd: config.dsh.workspace, mcpServers: qqMcpServers(key) }).start();
         store.set(key, session.sessionId);
       }
     } else {
-      session = await ctx.buildSession({ cwd: config.dsh.workspace, mcpServers: [] }).start();
+      session = await ctx.buildSession({ cwd: config.dsh.workspace, mcpServers: qqMcpServers(key) }).start();
       store.set(key, session.sessionId);
       log('info', `[acp] created ${session.sessionId} for ${key}`);
     }
@@ -113,6 +140,8 @@ async function runTurn(key: string, prompt: string): Promise<string> {
   });
   const turnToolIds = new Set<string>();
   const controller = new AbortController();
+  const context = sessionContexts.get(key)!;
+  turnSignals.set(context, controller.signal);
   try {
     return await withTimeout((async () => {
       let text = '';
@@ -152,10 +181,13 @@ async function runTurn(key: string, prompt: string): Promise<string> {
     controller.abort();
     session.dispose();
     sessions.delete(key);
+    sessionContexts.delete(key);
     store.delete(key);
     status.sessions = sessions.size;
     throw error;
   } finally {
+    controller.abort();
+    turnSignals.delete(context);
     for (const id of turnToolIds) toolCalls.delete(id);
   }
 }
@@ -471,6 +503,7 @@ async function startAdminServer(): Promise<void> {
         store.delete(key);
         sessions.get(key)?.dispose();
         sessions.delete(key);
+        sessionContexts.delete(key);
         status.sessions = sessions.size;
         log('info', `[admin] session ${key} removed`);
       },
@@ -489,7 +522,18 @@ async function startAdminServer(): Promise<void> {
 async function main(): Promise<void> {
   await loadSettings();
   await store.load();
+  await usage.load();
   stopSettings = watchSettings();
+
+  const policy = new QqActionPolicy(api, usage, getSettings, askAdmin, () => {
+    status.messagesOut += 1;
+  });
+  actionServer = await startActionServer((input, signal, conversation) => {
+    if (stopping) return Promise.reject(new Error('桥接正在退出'));
+    const turnSignal = conversation ? turnSignals.get(conversation) : undefined;
+    if (!turnSignal) return Promise.reject(new Error('该会话没有正在执行的模型轮次'));
+    return policy.execute(input, AbortSignal.any([signal, turnSignal]));
+  });
 
   startBridge();
   await withTimeout(ready, 30_000);
@@ -545,7 +589,9 @@ async function shutdown(code = 0): Promise<void> {
     } else dshChild.kill('SIGTERM');
   };
   try {
-    await withTimeout(Promise.all([store.flush(), flushSettings(), admin?.close(), stopChild()]), 5000);
+    await withTimeout(Promise.all([
+      actionServer?.close(), usage.flush(), store.flush(), flushSettings(), admin?.close(), stopChild(),
+    ]), 5000);
   } catch (error) {
     log('error', `[shutdown] ${String(error)}`);
     code = 1;

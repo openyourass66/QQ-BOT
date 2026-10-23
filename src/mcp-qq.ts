@@ -2,6 +2,7 @@ import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
 import { OneBotHttp } from './onebot.js';
+import { requestQqAction } from './action-client.js';
 
 /**
  * QQ 动作 MCP 服务：由 DSH 通过 dsh-mcp-client 以 stdio 方式拉起。
@@ -33,20 +34,16 @@ server.registerTool(
   {
     title: '发送 QQ 消息',
     description:
-      '给指定私聊或群聊发送一条文本消息。仅在需要主动私聊别人、或把消息发到当前对话之外时使用；回复当前对话请直接输出文本。',
+      '给指定私聊或群聊发送一条文本消息，受主动消息每日额度约束；群聊还需开启主动发言并满足单群额度。仅在需要主动私聊别人、或把消息发到当前对话之外时使用；回复当前对话请直接输出文本。',
     inputSchema: {
       target_type: z.enum(['private', 'group']).describe('private=私聊，group=群聊'),
       target_id: z.number().int().positive().describe('私聊填 QQ 号，群聊填群号'),
       text: z.string().min(1).max(4000).describe('消息正文，纯文本'),
     },
   },
-  async ({ target_type, target_id, text }) => {
+  async ({ target_type, target_id, text }, extra) => {
     try {
-      const data =
-        target_type === 'group'
-          ? await api.sendGroup(target_id, text)
-          : await api.sendPrivate(target_id, text);
-      return ok(data);
+      return ok(await requestQqAction({ action: 'send_message', target_type, target_id, text }, extra.signal));
     } catch (error) {
       return fail(String(error));
     }
@@ -183,15 +180,15 @@ server.registerTool(
   'qq_like',
   {
     title: '给好友点赞',
-    description: '给指定好友的名片点赞。',
+    description: '给指定好友的名片点赞，按实际点赞次数扣除每日额度。',
     inputSchema: {
       user_id: z.number().int().positive().describe('QQ 号'),
       times: z.number().int().min(1).max(20).default(1).describe('点赞次数'),
     },
   },
-  async ({ user_id, times }) => {
+  async ({ user_id, times }, extra) => {
     try {
-      return ok(await api.call('send_like', { user_id, times }));
+      return ok(await requestQqAction({ action: 'like', user_id, times }, extra.signal));
     } catch (error) {
       return fail(String(error));
     }
@@ -203,24 +200,17 @@ server.registerTool(
   {
     title: '发表 QQ 空间说说',
     description:
-      '发布一条 QQ 空间说说，可带图片。依赖 NapCat 的 send_qzone_msg 扩展动作；不同版本参数可能不同。',
+      '发布一条 QQ 空间说说，可带图片。需开启空间功能并满足每日额度；开启 requireConfirm 时由桥接服务请求管理员确认正文和图片。依赖 NapCat 的 send_qzone_msg 扩展动作。',
     inputSchema: {
       text: z.string().min(1).max(2000).describe('说说正文'),
-      images: z.array(z.string()).max(9).optional().describe('图片路径 / URL 列表'),
+      images: z.array(z.string().min(1).max(4096)).max(9).optional().describe('图片路径 / URL 列表'),
     },
   },
-  async ({ text, images }) => {
-    const message: Array<Record<string, unknown>> = [{ type: 'text', data: { text } }];
-    for (const file of images ?? []) {
-      message.push({ type: 'image', data: { file } });
-    }
+  async ({ text, images }, extra) => {
     try {
-      return ok(await api.call('send_qzone_msg', { message }));
+      return ok(await requestQqAction({ action: 'qzone_post', text, images }, extra.signal));
     } catch (error) {
-      return fail(
-        `发送说说失败：${String(error)}\n` +
-          '如果当前 NapCat 版本没有 send_qzone_msg，可改用浏览器自动化登录空间发布。',
-      );
+      return fail(`发送说说失败：${String(error)}`);
     }
   },
 );
