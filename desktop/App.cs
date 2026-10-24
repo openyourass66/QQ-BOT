@@ -260,10 +260,10 @@ class App
         var menu = new ContextMenu();
         foreach (var entry in new[] { new[] { "打开小鲸工作台", "show" }, new[] { "启动机器人", "start" }, new[] { "重连模型", "restartBridge" }, new[] { "停止机器人", "stop" }, new[] { "退出并停止机器人", "quit" } }) {
             var item = new MenuItem { Header = entry[0], Padding = new Thickness(14,8,14,8) }; string command = entry[1]; item.Click += (s,e) => { if (command == "show") Restore(); else if (command == "quit") Exit(); else Send(command); }; menu.Items.Add(item);
+            System.Windows.Automation.AutomationProperties.SetAutomationId(item, "Tray-" + command);
         }
         tray.Click += Restore; tray.ContextMenu += () => { menu.Placement = System.Windows.Controls.Primitives.PlacementMode.MousePoint; menu.IsOpen = true; };
         window.Closing += (s, e) => { if (!exiting) { e.Cancel = true; if (tray.Ensure()) window.Hide(); else { window.WindowState = WindowState.Minimized; Feedback("托盘暂不可用，已保留任务栏窗口，可再次打开 EXE 恢复。"); } } };
-        Find<Button>("ExitApp").Click += (s,e) => Exit();
         Find<Button>("Start").Click += (s, e) => Send("start"); Find<Button>("Stop").Click += (s, e) => Send("stop"); Find<Button>("Restart").Click += (s, e) => Send("restartBridge");
         Find<Button>("Pause").Click += (s, e) => { paused = !paused; Find<Button>("Pause").Content = paused ? "继续滚动" : "暂停滚动"; };
         Find<Button>("Clear").Click += (s, e) => { logs.Clear(); Find<TextBox>("Logs").Clear(); };

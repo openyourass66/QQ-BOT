@@ -45,10 +45,16 @@ try {
     $deadline = [datetime]::UtcNow.AddSeconds(5)
     do { $fixtureWindow = Find-FixtureWindow; if (!$fixtureWindow) { Start-Sleep -Milliseconds 100 } } until ($fixtureWindow -or [datetime]::UtcNow -gt $deadline)
     if (!$fixtureWindow) { throw 'Clicking the native tray icon did not restore the window' }
-    $exitButton = $fixtureWindow.FindFirst([Windows.Automation.TreeScope]::Descendants, [Windows.Automation.PropertyCondition]::new([Windows.Automation.AutomationElement]::AutomationIdProperty, 'ExitApp'))
-    $exitButton.GetCurrentPattern([Windows.Automation.InvokePattern]::Pattern).Invoke()
+    Add-Type -TypeDefinition 'using System; using System.Runtime.InteropServices; public static class TraySmokeMessages { [DllImport("user32.dll")] public static extern bool PostMessage(IntPtr handle, uint message, IntPtr wParam, IntPtr lParam); }'
+    # Route the existing tray context-menu callback, then invoke its real exit command.
+    [void][TraySmokeMessages]::PostMessage([IntPtr]$fixtureWindow.Current.NativeWindowHandle, 0x800B, [IntPtr]::Zero, [IntPtr]0x7B)
+    $deadline = [datetime]::UtcNow.AddSeconds(5)
+    $quitCondition = [Windows.Automation.PropertyCondition]::new([Windows.Automation.AutomationElement]::AutomationIdProperty, 'Tray-quit')
+    do { $quitItem = $automationRoot.FindFirst([Windows.Automation.TreeScope]::Descendants, $quitCondition); if (!$quitItem) { Start-Sleep -Milliseconds 100 } } until ($quitItem -or [datetime]::UtcNow -gt $deadline)
+    if (!$quitItem) { throw 'Tray exit menu item did not appear' }
+    $quitItem.GetCurrentPattern([Windows.Automation.InvokePattern]::Pattern).Invoke()
     if (!$interactive.WaitForExit(10000)) { throw 'Fixture did not exit' }
-    Write-Output 'PASS: Windows notification icon exists, actual tray invoke restores window, exit button closes application'
+    Write-Output 'PASS: Windows notification icon exists, actual tray invoke restores window, tray menu exits application'
 } finally {
     if ($interactive -and !$interactive.HasExited) { Stop-Process -Id $interactive.Id }
     # The generated isolated directory is retained for inspection; it contains no real credentials.
