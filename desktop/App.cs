@@ -243,6 +243,11 @@ class App
         };
         Find<Button>("Minimize").Click += (s,e) => window.WindowState = WindowState.Minimized;
         Find<Button>("Maximize").Click += (s,e) => window.WindowState = window.WindowState == WindowState.Maximized ? WindowState.Normal : WindowState.Maximized;
+        window.StateChanged += (s,e) => {
+            bool maximized = window.WindowState == WindowState.Maximized;
+            Find<System.Windows.Shapes.Path>("MaximizeGlyph").Data = Geometry.Parse(maximized ? "M3.5,1.5 H10.5 V8.5 H8.5 M1.5,3.5 H8.5 V10.5 H1.5 Z" : "M1.5,1.5 H10.5 V10.5 H1.5 Z");
+            Find<Button>("Maximize").ToolTip = maximized ? "还原" : "最大化";
+        };
         Find<Button>("CloseWindow").Click += (s,e) => window.Close();
         if (args.Length > 0 && args[0] == "--preview") {
             if (args.Length > 4) { window.Width = int.Parse(args[3]); window.Height = int.Parse(args[4]); }

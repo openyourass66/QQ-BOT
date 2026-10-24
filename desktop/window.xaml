@@ -40,9 +40,28 @@
   <Style x:Key="Quiet" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
    <Setter Property="Background" Value="Transparent"/><Setter Property="BorderBrush" Value="Transparent"/><Setter Property="Foreground" Value="#5B6D94"/><Setter Property="Padding" Value="10,7"/>
   </Style>
-  <Style x:Key="Caption" TargetType="Button" BasedOn="{StaticResource Quiet}">
-   <Setter Property="Width" Value="40"/><Setter Property="Height" Value="34"/><Setter Property="Padding" Value="12"/>
+  <Style x:Key="CaptionFocus" TargetType="Control">
+   <Setter Property="Template"><Setter.Value><ControlTemplate><Rectangle Margin="6" Stroke="#4B68E8" StrokeThickness="1" StrokeDashArray="2,2" IsHitTestVisible="False"/></ControlTemplate></Setter.Value></Setter>
+  </Style>
+  <Style x:Key="Caption" TargetType="Button">
+   <Setter Property="Width" Value="46"/><Setter Property="Height" Value="40"/><Setter Property="Padding" Value="0"/>
+   <Setter Property="Background" Value="Transparent"/><Setter Property="Foreground" Value="#60708C"/>
+   <Setter Property="HorizontalContentAlignment" Value="Center"/><Setter Property="VerticalContentAlignment" Value="Center"/>
+   <Setter Property="FocusVisualStyle" Value="{StaticResource CaptionFocus}"/>
    <Setter Property="shell:WindowChrome.IsHitTestVisibleInChrome" Value="True"/>
+   <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="Button">
+    <Border Background="{TemplateBinding Background}"><ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/></Border>
+   </ControlTemplate></Setter.Value></Setter>
+   <Style.Triggers>
+    <Trigger Property="IsMouseOver" Value="True"><Setter Property="Background" Value="#E9EEF7"/></Trigger>
+    <Trigger Property="IsPressed" Value="True"><Setter Property="Background" Value="#DCE5F3"/></Trigger>
+   </Style.Triggers>
+  </Style>
+  <Style x:Key="CaptionClose" TargetType="Button" BasedOn="{StaticResource Caption}">
+   <Style.Triggers>
+    <Trigger Property="IsMouseOver" Value="True"><Setter Property="Background" Value="#D94555"/><Setter Property="Foreground" Value="White"/></Trigger>
+    <Trigger Property="IsPressed" Value="True"><Setter Property="Background" Value="#BA3444"/><Setter Property="Foreground" Value="White"/></Trigger>
+   </Style.Triggers>
   </Style>
   <Style TargetType="TextBox">
    <Setter Property="Padding" Value="12,9"/><Setter Property="Background" Value="#FAFBFD"/><Setter Property="Foreground" Value="{StaticResource Text}"/>
@@ -107,10 +126,10 @@
    <Grid.RowDefinitions><RowDefinition Height="40"/><RowDefinition Height="*"/></Grid.RowDefinitions>
    <Grid.ColumnDefinitions><ColumnDefinition Width="186"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
    <Border Grid.ColumnSpan="2" Background="#FCFDFF" BorderBrush="#E8EDF5" BorderThickness="0,0,0,1">
-    <DockPanel><StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,4,0">
-     <Button x:Name="Minimize" Style="{StaticResource Caption}" ToolTip="最小化" AutomationProperties.Name="最小化"><Path Stroke="#60708C" StrokeThickness="1.5" Data="M1,6 H11"/></Button>
-     <Button x:Name="Maximize" Style="{StaticResource Caption}" ToolTip="最大化 / 还原" AutomationProperties.Name="最大化或还原"><Rectangle Stroke="#60708C" Width="10" Height="10" RadiusX="1" RadiusY="1"/></Button>
-     <Button x:Name="CloseWindow" Style="{StaticResource Caption}" ToolTip="关闭窗口" AutomationProperties.Name="关闭窗口"><Path Stroke="#60708C" StrokeThickness="1.5" Data="M1,1 L10,10 M1,10 L10,1"/></Button>
+    <DockPanel><StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
+     <Button x:Name="Minimize" Style="{StaticResource Caption}" ToolTip="最小化" AutomationProperties.Name="最小化"><Grid Width="12" Height="12"><Path Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1" Data="M1,6.5 H11"/></Grid></Button>
+     <Button x:Name="Maximize" Style="{StaticResource Caption}" ToolTip="最大化" AutomationProperties.Name="最大化或还原"><Grid Width="12" Height="12"><Path x:Name="MaximizeGlyph" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1" Data="M1.5,1.5 H10.5 V10.5 H1.5 Z"/></Grid></Button>
+     <Button x:Name="CloseWindow" Style="{StaticResource CaptionClose}" ToolTip="关闭窗口" AutomationProperties.Name="关闭窗口"><Grid Width="12" Height="12"><Path Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.2" Data="M1.5,1.5 L10.5,10.5 M1.5,10.5 L10.5,1.5"/></Grid></Button>
     </StackPanel><TextBlock Text="小鲸工作台" Foreground="#7A879D" FontSize="11" Margin="19,0,0,0" VerticalAlignment="Center"/></DockPanel>
    </Border>
    <Border Grid.Row="1" Background="White" BorderBrush="#E8EDF5" BorderThickness="0,0,1,0">
