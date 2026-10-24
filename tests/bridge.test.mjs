@@ -20,8 +20,6 @@ test('完整桥接链路：群上下文、连续回复顺序、超时恢复、DS
   let output = '';
   let releaseLogin;
   const loginGate = new Promise((resolve) => { releaseLogin = resolve; });
-  let adminReadyResolve;
-  const adminReady = new Promise((resolve) => { adminReadyResolve = resolve; });
   const replyWaiters = new Set();
   const http = createServer(async (req, res) => {
     let body = '';
@@ -87,42 +85,16 @@ test('完整桥接链路：群上下文、连续回复顺序、超时恢复、DS
         BOT_DSH_BIN: wrapper, BOT_WORKSPACE: dir, BOT_DSH_PROFILE: 'acp',
         BOT_SETTINGS_FILE: settings, SESSION_STORE: join(dir, 'sessions.json'),
         BOT_USAGE_STORE: join(dir, 'daily-usage.json'), BOT_ACTION_TOKEN: '', BOT_ACTION_URL: '',
-        TURN_TIMEOUT_MS: '2000', ADMIN_UI_PORT: '0', ADMIN_UI_TOKEN: 'test',
+        TURN_TIMEOUT_MS: '2000',
         QUEUE_PER_CONVERSATION: '2', QUEUE_TOTAL: '3', MAX_CONCURRENT_TURNS: '1',
       },
       stdio: ['ignore', 'pipe', 'pipe'],
     });
-    child.stdout.on('data', (chunk) => {
-      output += chunk;
-      const match = /\[admin\] (http:\/\/127\.0\.0\.1:\d+)/.exec(output);
-      if (match) adminReadyResolve(match[1]);
-    });
+    child.stdout.on('data', (chunk) => { output += chunk; });
     child.stderr.on('data', (chunk) => { output += chunk; });
     const exited = once(child, 'exit');
     const [socket] = await withTimeout(socketReady, 8000);
-    const adminUrl = await withTimeout(adminReady, 2000);
-    const getStatus = async () => (await fetch(`${adminUrl}/api/status`, { headers: { 'x-admin-token': 'test' } })).json();
-    const waitStatus = async (predicate) => {
-      const deadline = Date.now() + 2000;
-      while (Date.now() < deadline) {
-        const current = await getStatus();
-        if (predicate(current)) return current;
-        await new Promise((resolve) => setTimeout(resolve, 10));
-      }
-      assert.fail('状态没有按预期更新');
-    };
-    const heartbeat = (online) => socket.send(JSON.stringify({
-      post_type: 'meta_event', meta_event_type: 'heartbeat', status: { online },
-    }));
-    heartbeat(true);
-    await waitStatus((status) => status.qqOnline === true);
-    heartbeat(false);
-    await waitStatus((status) => status.qqOnline === false);
     releaseLogin();
-    const loginStatus = await waitStatus((status) => status.nickname === 'test');
-    assert.equal(loginStatus.qqOnline, false, '较晚完成的登录查询不能覆盖新的离线心跳');
-    heartbeat(true);
-    await waitStatus((status) => status.qqOnline === true);
     const send = (text, group = false, userId = 20001) => socket.send(JSON.stringify({
       post_type: 'message', message_type: group ? 'group' : 'private',
       time: 0, self_id: 10000, user_id: userId, message_id: nextMessage++,
@@ -177,10 +149,7 @@ test('完整桥接链路：群上下文、连续回复顺序、超时恢复、DS
     await waitReply((r) => r.message.includes('走神'), after);
     await waitReply((r) => r.message.includes('排队成功'), after);
     assert.equal(replies.filter((r) => r.message.includes('这条还没接上')).length, 1);
-    const status = await getStatus();
-    assert.equal(status.messagesDropped, 2);
-    assert.equal(status.wsConnected, true);
-    assert.ok(status.pendingMessages <= 1);
+    assert.equal((output.match(/\[queue\] private:20001 rejected;/g) ?? []).length, 2);
     send('恢复成功');
     await waitReply((r) => r.message.includes('恢复成功'));
     after = replies.length;

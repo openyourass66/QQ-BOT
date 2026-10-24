@@ -1,6 +1,5 @@
 import { spawn } from 'node:child_process';
 import { Readable, Writable } from 'node:stream';
-import { readFile, writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import process from 'node:process';
 import { randomBytes } from 'node:crypto';
@@ -14,9 +13,8 @@ import {
   type MessageEvent,
 } from './onebot.js';
 import { SessionStore } from './store.js';
-import { getSettings, loadSettings, watchSettings, saveSettings, flushSettings, type BotSettings } from './settings.js';
+import { getSettings, loadSettings, watchSettings, flushSettings, type BotSettings } from './settings.js';
 import { log, status } from './state.js';
-import { startAdmin } from './admin.js';
 import { ConversationQueue, QueueFullError, withTimeout } from './runtime.js';
 import { RecentMessages, splitForQq } from './message-utils.js';
 import { GroupContextStore, groupTrigger, formatGroupEntry } from './group-context.js';
@@ -31,7 +29,6 @@ const store = new SessionStore(sessionStorePath);
 const groupContext = new GroupContextStore(process.env.BOT_GROUP_CONTEXT_STORE ?? resolve(dirname(sessionStorePath), 'group-context.json'), Date.now,
   (error) => log('error', `[context] 保存失败：${String(error)}`));
 const usage = new DailyUsageStore(process.env.BOT_USAGE_STORE ?? resolve(dirname(sessionStorePath), 'daily-usage.json'));
-const personaPath = resolve(config.dsh.workspace, 'AGENTS.md');
 
 const sessions = new Map<string, acp.ActiveSession>();
 const creating = new Map<string, Promise<acp.ActiveSession>>();
@@ -52,7 +49,6 @@ const lastGroupReply = new Map<number, number>();
 
 let selfId = config.bot.selfId;
 let acpCtx: acp.ClientContext | undefined;
-let admin: { close(): Promise<void>; url: string } | undefined;
 let actionServer: ActionServer | undefined;
 let dshChild: ReturnType<typeof spawn> | undefined;
 let ws: OneBotWs | undefined;
@@ -499,47 +495,6 @@ function startBridge(): void {
     });
 }
 
-async function startAdminServer(): Promise<void> {
-  try {
-    admin = await startAdmin({
-      getSettings: () => getSettings(),
-      saveSettings: (input) => saveSettings(input),
-      getPersona: async () => {
-        try {
-          return await readFile(personaPath, 'utf8');
-        } catch {
-          return '';
-        }
-      },
-      savePersona: async (content) => {
-        await writeFile(personaPath, content, 'utf8');
-      },
-      getSessions: () => store.list(),
-      deleteSession: async (key) => {
-        if (queue.has(key)) throw new Error('会话正在处理消息，请稍后删除');
-        store.delete(key);
-        sessions.get(key)?.dispose();
-        sessions.delete(key);
-        sessionContexts.delete(key);
-        if (/^group:\d+$/.test(key)) {
-          groupContext.clear(selfId, Number(key.slice(6)));
-          await groupContext.flush();
-        }
-        status.sessions = sessions.size;
-        log('info', `[admin] session ${key} removed`);
-      },
-      testSend: async (text) => {
-        const target = getSettings().approval.adminQq;
-        if (!target) throw new Error('请先在配置里填写管理员 QQ');
-        return api.sendPrivate(target, text);
-      },
-      getLoginInfo: () => api.call('get_login_info'),
-    });
-  } catch (error) {
-    log('error', `[admin] 启动失败: ${String(error)}`);
-  }
-}
-
 async function main(): Promise<void> {
   await loadSettings();
   await store.load();
@@ -599,8 +554,6 @@ async function main(): Promise<void> {
   });
   ws.start();
 
-  await startAdminServer();
-
   log('info', `[bridge] ready; ${store.list().length} saved session(s), resumed on demand`);
 }
 
@@ -626,7 +579,7 @@ async function shutdown(code = 0): Promise<void> {
   };
   try {
     await withTimeout(Promise.all([
-      actionServer?.close(), usage.flush(), store.flush(), groupContext.flush(), flushSettings(), admin?.close(), stopChild(),
+      actionServer?.close(), usage.flush(), store.flush(), groupContext.flush(), flushSettings(), stopChild(),
     ]), 5000);
   } catch (error) {
     log('error', `[shutdown] ${String(error)}`);

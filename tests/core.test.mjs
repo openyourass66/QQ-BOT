@@ -1,15 +1,14 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { mkdtemp, mkdir, readFile, writeFile, rename, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, writeFile, rename, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { once } from 'node:events';
-import { createServer, request } from 'node:http';
+import { createServer } from 'node:http';
 import { SessionStore } from '../dist/store.js';
 import { ConversationQueue, withTimeout } from '../dist/runtime.js';
 import { permissionOutcome, parseApprovalReply } from '../dist/permissions.js';
 import { OneBotHttp } from '../dist/onebot.js';
-import { startAdmin } from '../dist/admin.js';
 
 test('拒绝审批时不选择允许项；缺失或空选项取消审批', () => {
   const allow = { kind: 'allow_once', optionId: 'yes' };
@@ -139,46 +138,4 @@ test('OneBot 文本按纯文本发送且 API 错误向上传递', async () => {
     assert.equal(requests[0].auth, 'Bearer test-token');
     await assert.rejects(api.call('bad'), /测试失败/);
   } finally { await new Promise((resolve) => server.close(resolve)); }
-});
-
-test('管理服务捕获端口占用；API 验证 token 并拒绝跨站请求', async () => {
-  process.env.ADMIN_UI_PORT = '0';
-  process.env.ADMIN_UI_TOKEN = 'test-admin';
-  const admin = await startAdmin({ getSettings: () => ({}) });
-  try {
-    assert.equal((await fetch(`${admin.url}/api/settings`)).status, 401);
-    assert.equal((await fetch(`${admin.url}/api/settings`, { headers: { 'x-admin-token': 'test-admin' } })).status, 200);
-    assert.equal((await fetch(`${admin.url}/api/settings`, {
-      headers: { 'x-admin-token': 'test-admin', origin: 'https://other.example' },
-    })).status, 403);
-    const invalidHostStatus = await new Promise((resolve, reject) => {
-      const req = request(`${admin.url}/api/settings`, {
-        headers: { 'x-admin-token': 'test-admin', host: 'other.example' },
-      }, (res) => { res.resume(); resolve(res.statusCode); });
-      req.on('error', reject);
-      req.end();
-    });
-    assert.equal(invalidHostStatus, 403);
-    process.env.ADMIN_UI_PORT = new URL(admin.url).port;
-    await assert.rejects(startAdmin({}), /EADDRINUSE/);
-  } finally { await admin.close(); }
-});
-
-test('静态文件可访问；编码后的路径不能越过 public 目录', async () => {
-  const dir = await mkdtemp(join(tmpdir(), 'qq-static-'));
-  process.env.ADMIN_UI_PORT = '0';
-  process.env.ADMIN_UI_DIR = join(dir, 'public');
-  let admin;
-  try {
-    await mkdir(join(dir, 'public'));
-    await mkdir(join(dir, 'public-private'));
-    await writeFile(join(dir, 'public', 'index.html'), 'test page');
-    await writeFile(join(dir, 'public-private', 'secret.txt'), 'private');
-    admin = await startAdmin({});
-    assert.equal(await (await fetch(admin.url)).text(), 'test page');
-    assert.equal((await fetch(`${admin.url}/..%2fpublic-private%2fsecret.txt`)).status, 403);
-  } finally {
-    await admin?.close();
-    await rm(dir, { recursive: true, force: true });
-  }
 });

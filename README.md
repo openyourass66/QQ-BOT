@@ -17,7 +17,6 @@ QQ-BOT\
 ├─ src\store.ts        QQ 会话 → DSH 会话 映射
 ├─ src\config.ts       环境变量
 ├─ src\settings.ts     动态配置、校验与热加载
-├─ src\admin.ts        本地管理 API
 ├─ src\runtime.ts      会话队列与超时控制
 ├─ src\message-utils.ts 消息去重与文本分片
 ├─ src\permissions.ts  审批选项与回复解析
@@ -63,63 +62,40 @@ DeepSeek 登录态；也可以在 `~\.dsh\.env` 里写 `DEEPSEEK_API_KEY`。
 
 首次启动会创建 `bot.config.json`（可通过 `BOT_SETTINGS_FILE` 改路径）。文件中的显式值优先，缺失字段从 `.env` 的对应配置或默认值补齐；已有文件中的值不会因修改 `.env` 自动改变。配置保存后热更新，支持编辑器通过原子替换保存文件。无效配置会报错，原文件保留。
 
-### Windows 桌面控制台
+### 启动与停止
 
-控制台采用蓝色小鲸鱼主题：云白背景、浅蓝导航、圆角卡片与鲸鱼插画。生成桌面 EXE 和快捷方式：
+先启动 NapCat 并完成 QQ 登录，再运行 `npm start`。停止机器人时在终端按 `Ctrl+C`，程序会保存会话与额度数据，并清理自己启动的 DSH 子进程。
 
-```powershell
-npm run desktop:build
-```
+人设直接编辑 `bot-workspace/AGENTS.md`，新建会话会读取最新人设。动态设置直接编辑 `bot.config.json`，有效修改会自动热加载。
 
-之后双击项目根目录的 `QQ-BOT.exe` 或桌面上的 `QQ-BOT` 快捷方式即可启动，无需打开终端。EXE 是桌面启动入口，须与项目文件一起保留，使用已安装的 Node.js。需要自带 Node 的便携目录时运行 `npm run desktop:portable`，产物位于 `release/QQ-BOT`，将整个目录一起移动；目录不包含本机 `.env`、账号、NapCat、聊天记录或人设，请根据 `.env.example` 配置连接及 DSH，并准备 NapCat 环境。
+### 可选：NapCat 独立 Node 运行环境
 
-开发时也可直接运行：
+如果 Shell 方式的 NapCat 在加载 QQ 时崩溃，可使用 `scripts/napcat-node.mjs`。它从 `BOT_QQ_DIR` 读取 QQ 版本，将所需文件复制到 `napcat/node-runtime`，不修改系统 QQ。先解压官方 NapCat Shell 到 `napcat/shell`，并将官方 Node 运行适配库 `QQNT.dll` 放入 `napcat/node-runtime/QQNT.dll`；此适配库与系统 QQ 的同名文件用途不同。在 `.env` 中设置 `BOT_QQ_DIR`，然后在独立终端运行：
 
 ```powershell
-npm run ui
+npm run napcat
 ```
 
-使用 Windows 自带的 WPF 与 Windows PowerShell 5.1，沿用项目的 Node.js 22+，不需要 Electron、WebView 或浏览器，也不新增 npm 依赖。首次使用先 `npm install`；启动命令自动构建后打开原生桌面窗口，不会自动启动机器人。
-
-控制台提供启动、停止、重启、连接状态、消息统计、动态配置、人设编辑、会话重置、日志筛选和管理员测试消息。机器人停止后仍可编辑配置、查看日志并重新启动。关闭窗口会隐藏到系统托盘，机器人继续运行，未保存的编辑保留；单击或双击鲸鱼托盘图标，或右键选择“打开控制台”即可恢复。彻底退出请右键托盘图标选择“退出并停止机器人”，此时会停止本窗口启动的机器人并清理 DSH 子进程，有未保存的配置或人设时会提示确认。配置和人设保存失败会保留输入。
-
-完成构建后，也可以双击 `desktop/launch.vbs` 启动，后台不显示命令行窗口。连接地址、OneBot 令牌、DSH 路径等启动参数通过“连接配置 (.env)”打开本地记事本编辑，保存后需要从托盘彻底退出并重新打开控制台。运行中的 `npm start` 桥接需先退出，再交由桌面控制台启动，避免重复连接和数据文件争用。同一项目的桌面窗口通过系统互斥量限制为一个实例；再次启动 EXE 会通知已有实例恢复窗口，保留机器人运行和未保存的编辑。
-
-桌面窗口通过本机随机端口与独立控制进程通信，每次启动使用独立随机令牌；该接口仅作进程间通信，不提供网页界面。日志最多保留 500 条，最小化或隐藏到托盘时暂停状态轮询，关闭日志页后停止拉取日志。桌面 UI 的自检可运行：
-
-```powershell
-powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File desktop/start.ps1 -ValidateOnly
-```
-
-如果本机 Shell 方式的 NapCat 在加载 QQ 时崩溃，可使用独立 Node 运行环境。`desktop/napcat-node.mjs` 从 `BOT_QQ_DIR` 中读取当前 QQ 版本，把所需文件复制到项目的 `napcat/node-runtime`，不修改系统 QQ。需先解压官方 NapCat Shell 到 `napcat/shell`，并将官方 Node 运行适配库 `QQNT.dll` 部署到 `napcat/node-runtime/QQNT.dll`；它与系统 QQ 的同名文件用途不同。参考 [官方 Node 环境准备脚本](https://github.com/NapNeko/NapCatQQ/blob/main/packages/napcat-develop/loadNapCat.cjs)。本地 `.env` 配置示例：
-
-```dotenv
-BOT_NAPCAT_ENTRY=desktop/napcat-node.mjs
-BOT_QQ_DIR=D:\app\qq
-```
-
-配置后，点击启动时若 OneBot HTTP 端口尚未监听，控制台会启动该 Node 运行环境；停止、重启、从托盘彻底退出会清理控制台自己启动的 NapCat。已在外部运行的 NapCat 会复用并保持独立。首次部署会复制 `napcat/shell/config` 中对应 `BOT_SELF_ID` 的账号与 OneBot 配置；后续配置以 `napcat/node-runtime/config` 为准。首次登录可能需要扫码。连接尚未完成时，概览会显示“等待 NapCat”或“等待 QQ 登录”，测试发送按钮保持禁用。
-
-直接运行 `npm start` 时，本地管理 API 默认位于 `http://127.0.0.1:6080`，可通过 `ADMIN_UI_PORT` 修改端口，设置 `ADMIN_UI_TOKEN` 后请求需携带 `x-admin-token`。接口包括 `/api/status`、`/api/settings`、`/api/persona`、`/api/logs`、`/api/sessions`、`/api/login-info` 和 `/api/test`。直接桥接模式不提供进程启停接口。
+启动后按需扫码登录 QQ，再在另一个终端运行 `npm start`。停止桥接不会结束这个独立运行的 NapCat，需在其终端中单独停止。首次部署会复用 Shell 目录中的账号配置，后续配置以 `napcat/node-runtime/config` 为准。
 
 `requireMention=false` 会允许群消息无需 @ 或前缀直接触发；`contextLines=0` 关闭附加的最近群聊摘要，不清除 Agent 已有会话上下文。
 
 ### 群聊对话与上下文
 
-群友发言、机器人实际发送成功的回复及群消息工具的发送结果会加入本地群记录；按机器人账号与群号隔离。默认文件为 `SESSION_STORE` 同目录下的 `group-context.json`，可通过 `BOT_GROUP_CONTEXT_STORE` 指定路径。每群保留最近 24 小时最多 80 条、单条最多 2000 字符，总计最多 100 个群；过期条目在读取上下文和后续落盘时淘汰。重启会恢复记录；在控制台重置群会话时，也会清空该群的附加记录。
+群友发言、机器人实际发送成功的回复及群消息工具的发送结果会加入本地群记录；按机器人账号与群号隔离。默认文件为 `SESSION_STORE` 同目录下的 `group-context.json`，可通过 `BOT_GROUP_CONTEXT_STORE` 指定路径。每群保留最近 24 小时最多 80 条、单条最多 2000 字符，总计最多 100 个群；过期条目在读取上下文和后续落盘时淘汰。重启会恢复记录。
 
 每次模型真正开始处理时，才从群记录选取 `chat.group.contextLines` 条背景，包括前一轮刚发出的机器人回答，不把排队期间更晚到达的其他问题混入当前问题。ACP 自身的会话恢复继续保留。
 
 - @ 机器人、叫配置名称 / QQ 昵称、使用前缀，以及引用最近记录中的机器人消息，都算直接对话；即使只有 @ 没正文，也会自然接一句。
 - 直接对话不受 `cooldownMs` 静默丢弃，仍受消息队列容量限制；忙碌、模型超时或空回复时会有简短反馈，同群忙碌提示最多每 15 秒一条。
-- `chat.group.followUpMs` 默认 90000：机器人回应后，同一群友在 90 秒内说“那为什么”“这个呢”等追问，不用重新 @。设为 0 可关闭；控制台配置中可调整。引用第三方或 @ 其他人时不自动当成追问。
+- `chat.group.followUpMs` 默认 90000：机器人回应后，同一群友在 90 秒内说“那为什么”“这个呢”等追问，不用重新 @。设为 0 可关闭；在 `bot.config.json` 中可调整。引用第三方或 @ 其他人时不自动当成追问。
 - 普通旁聊仍由 `requireMention` 和冷却控制，避免插话刷屏；普通回答由桥接直接发送，不消耗 QQ 工具的主动消息额度。
 
 OneBot 的消息段数组与 CQ 字符串格式均可识别 @ 和引用。群记录存储普通文本及媒体占位说明，不保存图片内容。
 
 ## QQ 工具额度
 
-QQ MCP 的主动发消息、点赞和空间发布由桥接统一执行，多个会话的 MCP 子进程共享额度。普通对话回复、审批通知及管理 API 的测试消息不计入主动消息额度。
+QQ MCP 的主动发消息、点赞和空间发布由桥接统一执行，多个会话的 MCP 子进程共享额度。普通对话回复及审批通知不计入主动消息额度。
 
 | 配置 | 实际行为 |
 | --- | --- |
