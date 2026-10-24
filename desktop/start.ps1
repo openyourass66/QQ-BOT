@@ -1,11 +1,14 @@
-﻿param([switch]$ValidateOnly, [string]$PreviewPath, [switch]$TestMode)
+﻿param([switch]$ValidateOnly, [string]$PreviewPath, [switch]$TestMode, [ValidateRange(0,4)][int]$PreviewPage = 0, [int]$PreviewWidth = 1100, [int]$PreviewHeight = 740)
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName PresentationFramework, PresentationCore, WindowsBase, System.Net.Http
+Add-Type -AssemblyName System.Windows.Forms, System.Drawing
 $script:projectRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $xaml = [IO.File]::ReadAllText((Join-Path $PSScriptRoot 'window.xaml'), [Text.Encoding]::UTF8)
 $reader = [Xml.XmlReader]::Create([IO.StringReader]::new($xaml))
 $script:window = [Windows.Markup.XamlReader]::Load($reader)
 $reader.Close()
+$iconPath = Join-Path $projectRoot 'QQ-BOT.ico'
+if ([IO.File]::Exists($iconPath)) { $window.Icon = [Windows.Media.Imaging.BitmapFrame]::Create([uri]$iconPath) }
 $script:controls = @{}
 foreach ($match in [regex]::Matches($xaml, 'x:Name="([^"]+)"')) {
     $script:controls[$match.Groups[1].Value] = $window.FindName($match.Groups[1].Value)
@@ -22,6 +25,26 @@ $script:backendUrl = ''
 $script:backend = $null
 $script:closing = $false
 $script:allowClose = $false
+$script:exitRequested = $false
+$script:tray = $null
+
+function Restore-Console {
+    $window.Show()
+    $window.WindowState = 'Normal'
+    [void]$window.Activate()
+    $script:lastPoll = [datetime]::MinValue
+}
+
+function Hide-Console {
+    $window.Hide()
+    if ($tray -and !$TestMode) { $tray.ShowBalloonTip(2500, '小鲸鱼还在这里', '已收进系统托盘，机器人继续运行。右键托盘图标可彻底退出。', [Windows.Forms.ToolTipIcon]::Info) }
+}
+
+function Request-Exit {
+    $script:exitRequested = $true
+    Restore-Console
+    $window.Close()
+}
 $script:lastPoll = [datetime]::MinValue
 $script:controlPending = $false
 $script:ready = $false
@@ -250,7 +273,7 @@ function Control-Bot([string]$Action) {
 
 $pages = @('OverviewPage', 'SettingsPage', 'PersonaPage', 'SessionsPage', 'LogsPage')
 $titles = @('运行概览', '机器人配置', '角色与人设', '会话管理', '运行日志')
-$descriptions = @('掌握连接状态，让每一次对话稳定发生。', '调整对话策略、审批规则与每日额度。', '定义机器人的身份、语气和行为边界。', '查看会话映射，按需重新开始上下文。', '从每一条事件中，了解机器人的运行情况。')
+$descriptions = @('今天也一起，把每一句话好好接住。', '调整对话策略、审批规则与每日额度。', '定义机器人的身份、语气和行为边界。', '查看会话映射，按需重新开始上下文。', '从每一条事件中，了解机器人的运行情况。')
 $controls.Navigation.Add_SelectionChanged({
     $index = $controls.Navigation.SelectedIndex
     for ($i = 0; $i -lt $pages.Count; $i++) { $controls[$pages[$i]].Visibility = if ($i -eq $index) { 'Visible' } else { 'Collapsed' } }
@@ -278,17 +301,18 @@ $controls.EnvButton.Add_Click({
     $path = Join-Path $projectRoot '.env'
     if (![IO.File]::Exists($path)) { [IO.File]::Copy((Join-Path $projectRoot '.env.example'), $path) }
     Start-Process notepad.exe -ArgumentList ('"' + $path + '"')
-    Show-Feedback '编辑 .env 后，请关闭并重新打开控制台，使连接配置生效。'
+    Show-Feedback '编辑 .env 后，请从托盘彻底退出并重新打开控制台，使连接配置生效。'
 })
 $controls.PauseLogsButton.Add_Click({ $script:paused = !$paused; $controls.PauseLogsButton.Content = if ($paused) { '继续刷新' } else { '暂停刷新' } })
 $controls.LogSearch.Add_TextChanged({ Render-Logs })
 
 if ($ValidateOnly -or $PreviewPath) {
     if ($PreviewPath) {
+        $controls.Navigation.SelectedIndex = $PreviewPage
         $root = $window.Content
         $root.Background = $window.Background
-        $root.Measure([Windows.Size]::new(1100, 740)); $root.Arrange([Windows.Rect]::new(0, 0, 1100, 740)); $root.UpdateLayout()
-        $bitmap = [Windows.Media.Imaging.RenderTargetBitmap]::new(1100, 740, 96, 96, [Windows.Media.PixelFormats]::Pbgra32)
+        $root.Measure([Windows.Size]::new($PreviewWidth, $PreviewHeight)); $root.Arrange([Windows.Rect]::new(0, 0, $PreviewWidth, $PreviewHeight)); $root.UpdateLayout()
+        $bitmap = [Windows.Media.Imaging.RenderTargetBitmap]::new($PreviewWidth, $PreviewHeight, 96, 96, [Windows.Media.PixelFormats]::Pbgra32)
         $bitmap.Render($root); $encoder = [Windows.Media.Imaging.PngBitmapEncoder]::new(); $encoder.Frames.Add([Windows.Media.Imaging.BitmapFrame]::Create($bitmap))
         $stream = [IO.File]::Create($PreviewPath); try { $encoder.Save($stream) } finally { $stream.Dispose() }
     }
@@ -302,7 +326,8 @@ try {
     $mutexSuffix = if ($TestMode) { '-test-' + $PID } else { '' }
     $script:desktopMutex = [Threading.Mutex]::new($true, ('Local\QQBotDesktop-' + $lockKey + $mutexSuffix), [ref]$script:ownsMutex)
     if (!$ownsMutex) { [Windows.MessageBox]::Show('此项目的桌面控制台已经打开，请使用已有窗口。', 'QQ BOT', 'OK', 'Information') | Out-Null; return }
-    $node = (Get-Command node.exe -ErrorAction Stop).Source
+    $node = Join-Path $projectRoot 'runtime/node.exe'
+    if (![IO.File]::Exists($node)) { $node = (Get-Command node.exe -ErrorAction Stop).Source }
     if (![IO.File]::Exists((Join-Path $projectRoot 'dist/console.js'))) { throw '缺少构建产物，请先运行 npm run build，或使用 npm run ui 启动。' }
     $tokenBytes = New-Object byte[] 24
     $rng = [Security.Cryptography.RandomNumberGenerator]::Create(); $rng.GetBytes($tokenBytes); $rng.Dispose()
@@ -353,7 +378,7 @@ try {
             }
             Complete-Requests
             $controls.SettingsFields.IsEnabled = @($requests | Where-Object { $_.Path -eq 'settings' -and $_.Method -eq 'PUT' }).Count -eq 0
-            if ($ready -and ((Get-Date) - $lastPoll).TotalSeconds -ge 3 -and $window.WindowState -ne 'Minimized') {
+            if ($ready -and ((Get-Date) - $lastPoll).TotalSeconds -ge 3 -and $window.IsVisible -and $window.WindowState -ne 'Minimized') {
                 $script:lastPoll = Get-Date
                 Send-Api 'status' 'GET' $null { param($data) Update-Status $data }
                 if (!$paused -and $controls.Navigation.SelectedIndex -eq 4) { Send-Api 'logs' 'GET' $null { param($data) $script:logs = @($data.logs); Render-Logs } }
@@ -364,26 +389,47 @@ try {
     })
     $window.Add_Closing({
         param($sender, $eventArgs)
+        if (!$exitRequested -and !$allowClose) {
+            $eventArgs.Cancel = $true
+            Hide-Console
+            return
+        }
         if ($allowClose -or !$backend -or $backend.HasExited) { return }
         $eventArgs.Cancel = $true
         if ($closing) { return }
         if ($settingsDirty -or $personaDirty) {
             $answer = [Windows.MessageBox]::Show($window, '有尚未保存的修改。关闭会丢弃这些修改，并停止机器人。是否继续？', '关闭控制台', 'YesNo', 'Warning')
-            if ($answer -ne 'Yes') { return }
+            if ($answer -ne 'Yes') { $script:exitRequested = $false; return }
         }
         $script:closing = $true; $script:closeAt = Get-Date
         Show-Feedback '正在停止机器人并清理进程，请稍候…'
         $controls.Navigation.IsEnabled = $false
         $backend.StandardInput.WriteLine('shutdown'); $backend.StandardInput.Close()
     })
+    $script:tray = [Windows.Forms.NotifyIcon]::new()
+    $tray.Text = '小鲸鱼 · QQ-BOT 控制台'
+    $tray.Icon = if ([IO.File]::Exists($iconPath)) { [Drawing.Icon]::new($iconPath) } else { [Drawing.SystemIcons]::Application.Clone() }
+    $menu = [Windows.Forms.ContextMenuStrip]::new()
+    $openItem = $menu.Items.Add('打开控制台')
+    $openItem.Add_Click({ Restore-Console })
+    [void]$menu.Items.Add([Windows.Forms.ToolStripSeparator]::new())
+    $exitItem = $menu.Items.Add('退出并停止机器人')
+    $exitItem.Add_Click({ Request-Exit })
+    $tray.ContextMenuStrip = $menu
+    $tray.Add_DoubleClick({ Restore-Console })
+    $tray.Visible = !$TestMode
     $timer.Start()
     if ($TestMode) {
         $window.WindowStartupLocation = 'Manual'; $window.Left = -32000; $window.Top = -32000; $window.ShowInTaskbar = $false
     }
-    [void]$window.ShowDialog()
+    $script:application = [Windows.Application]::new()
+    $application.ShutdownMode = 'OnExplicitShutdown'
+    $window.Add_Closed({ $script:application.Shutdown() })
+    [void]$application.Run($window)
 } catch {
     [Windows.MessageBox]::Show($_.Exception.Message, 'QQ BOT 启动失败', 'OK', 'Error') | Out-Null
 } finally {
+    if ($tray) { $tray.Visible = $false; $tray.Icon.Dispose(); $tray.Dispose(); $menu.Dispose() }
     if ($timer) { $timer.Stop() }
     if ($backend -and !$backend.HasExited) {
         try { $backend.StandardInput.Close(); if (!$backend.WaitForExit(12000)) { $killer = [Diagnostics.ProcessStartInfo]::new('taskkill.exe', "/PID $($backend.Id) /T /F"); $killer.UseShellExecute = $false; $killer.CreateNoWindow = $true; [Diagnostics.Process]::Start($killer).Dispose() } } catch { }

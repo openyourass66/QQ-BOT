@@ -65,17 +65,27 @@ DeepSeek 登录态；也可以在 `~\.dsh\.env` 里写 `DEEPSEEK_API_KEY`。
 
 ### Windows 桌面控制台
 
+控制台采用蓝色小鲸鱼主题：云白背景、浅蓝导航、圆角卡片与鲸鱼插画。生成桌面 EXE 和快捷方式：
+
+```powershell
+npm run desktop:build
+```
+
+之后双击项目根目录的 `QQ-BOT.exe` 或桌面上的 `QQ-BOT` 快捷方式即可启动，无需打开终端。EXE 是桌面启动入口，须与项目文件一起保留，使用已安装的 Node.js。需要自带 Node 的便携目录时运行 `npm run desktop:portable`，产物位于 `release/QQ-BOT`，将整个目录一起移动；目录不包含本机 `.env`、账号、NapCat、聊天记录或人设，请根据 `.env.example` 配置连接及 DSH，并准备 NapCat 环境。
+
+开发时也可直接运行：
+
 ```powershell
 npm run ui
 ```
 
 使用 Windows 自带的 WPF 与 Windows PowerShell 5.1，沿用项目的 Node.js 22+，不需要 Electron、WebView 或浏览器，也不新增 npm 依赖。首次使用先 `npm install`；启动命令自动构建后打开原生桌面窗口，不会自动启动机器人。
 
-控制台提供启动、停止、重启、连接状态、消息统计、动态配置、人设编辑、会话重置、日志筛选和管理员测试消息。机器人停止后仍可编辑配置、查看日志并重新启动。关闭窗口会停止由该窗口启动的机器人并清理 DSH 子进程；有未保存的配置或人设时会提示确认。配置和人设保存失败会保留输入。
+控制台提供启动、停止、重启、连接状态、消息统计、动态配置、人设编辑、会话重置、日志筛选和管理员测试消息。机器人停止后仍可编辑配置、查看日志并重新启动。关闭窗口会隐藏到系统托盘，机器人继续运行，未保存的编辑保留；双击鲸鱼托盘图标或右键选择“打开控制台”即可恢复。彻底退出请右键托盘图标选择“退出并停止机器人”，此时会停止本窗口启动的机器人并清理 DSH 子进程，有未保存的配置或人设时会提示确认。配置和人设保存失败会保留输入。
 
-完成构建后，也可以双击 `desktop/launch.vbs` 启动，后台不显示命令行窗口。连接地址、OneBot 令牌、DSH 路径等启动参数通过“连接配置 (.env)”打开本地记事本编辑，保存后需要关闭并重新打开控制台。运行中的 `npm start` 桥接需先退出，再交由桌面控制台启动，避免重复连接和数据文件争用。同一项目的桌面窗口通过系统互斥量限制为一个实例。
+完成构建后，也可以双击 `desktop/launch.vbs` 启动，后台不显示命令行窗口。连接地址、OneBot 令牌、DSH 路径等启动参数通过“连接配置 (.env)”打开本地记事本编辑，保存后需要从托盘彻底退出并重新打开控制台。运行中的 `npm start` 桥接需先退出，再交由桌面控制台启动，避免重复连接和数据文件争用。同一项目的桌面窗口通过系统互斥量限制为一个实例。
 
-桌面窗口通过本机随机端口与独立控制进程通信，每次启动使用独立随机令牌；该接口仅作进程间通信，不提供网页界面。日志最多保留 500 条，最小化时暂停状态轮询，关闭日志页后停止拉取日志。桌面 UI 的自检可运行：
+桌面窗口通过本机随机端口与独立控制进程通信，每次启动使用独立随机令牌；该接口仅作进程间通信，不提供网页界面。日志最多保留 500 条，最小化或隐藏到托盘时暂停状态轮询，关闭日志页后停止拉取日志。桌面 UI 的自检可运行：
 
 ```powershell
 powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File desktop/start.ps1 -ValidateOnly
@@ -88,7 +98,7 @@ BOT_NAPCAT_ENTRY=desktop/napcat-node.mjs
 BOT_QQ_DIR=D:\app\qq
 ```
 
-配置后，点击启动时若 OneBot HTTP 端口尚未监听，控制台会启动该 Node 运行环境；停止、重启、关闭窗口会清理控制台自己启动的 NapCat。已在外部运行的 NapCat 会复用并保持独立。首次部署会复制 `napcat/shell/config` 中对应 `BOT_SELF_ID` 的账号与 OneBot 配置；后续配置以 `napcat/node-runtime/config` 为准。首次登录可能需要扫码。连接尚未完成时，概览会显示“等待 NapCat”或“等待 QQ 登录”，测试发送按钮保持禁用。
+配置后，点击启动时若 OneBot HTTP 端口尚未监听，控制台会启动该 Node 运行环境；停止、重启、从托盘彻底退出会清理控制台自己启动的 NapCat。已在外部运行的 NapCat 会复用并保持独立。首次部署会复制 `napcat/shell/config` 中对应 `BOT_SELF_ID` 的账号与 OneBot 配置；后续配置以 `napcat/node-runtime/config` 为准。首次登录可能需要扫码。连接尚未完成时，概览会显示“等待 NapCat”或“等待 QQ 登录”，测试发送按钮保持禁用。
 
 直接运行 `npm start` 时，本地管理 API 默认位于 `http://127.0.0.1:6080`，可通过 `ADMIN_UI_PORT` 修改端口，设置 `ADMIN_UI_TOKEN` 后请求需携带 `x-admin-token`。接口包括 `/api/status`、`/api/settings`、`/api/persona`、`/api/logs`、`/api/sessions`、`/api/login-info` 和 `/api/test`。直接桥接模式不提供进程启停接口。
 

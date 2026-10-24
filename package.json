@@ -4,6 +4,8 @@
   "type": "module",
   "version": "0.1.0",
   "scripts": {
+    "desktop:build": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File desktop/build.ps1 -Shortcut",
+    "desktop:portable": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File desktop/build.ps1 -Portable",
     "ui": "npm run build && powershell.exe -NoProfile -STA -ExecutionPolicy Bypass -File desktop/start.ps1",
     "build": "tsc -p tsconfig.json",
     "start": "node --env-file=.env dist/bridge.js",

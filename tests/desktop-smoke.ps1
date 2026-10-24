@@ -57,16 +57,28 @@ $smokeTimer.Add_Tick({
                     $controls.PauseLogsButton.RaiseEvent([Windows.RoutedEventArgs]::new([Windows.Controls.Button]::ClickEvent))
                     if (!$paused) { throw 'Log pause failed' }
                     $controls.PauseLogsButton.RaiseEvent([Windows.RoutedEventArgs]::new([Windows.Controls.Button]::ClickEvent))
-                    $script:smokeStage = 5
-                    $smokeTimer.Stop()
+                    $script:personaDirty = $true
                     $window.Close()
+                    if ($window.IsVisible -or $backend.HasExited -or $closing) { throw 'Hiding must preserve the backend' }
+                    if (!$personaDirty -or $controls.PersonaText.Text -ne 'Native persona test') { throw 'Hiding must preserve unsaved edits' }
+                    $script:smokeStage = 5
                 }
+            }
+            5 {
+                    if ($window.IsVisible -or $backend.HasExited -or $closing) { throw 'Backend must survive a dispatcher tick while hidden' }
+                    $openItem.PerformClick()
+                    if (!$window.IsVisible -or $window.WindowState -ne 'Normal') { throw 'Restore from tray failed' }
+                    $script:personaDirty = $false
+                    $script:smokeStage = 6
+                    $smokeTimer.Stop()
+                    $exitItem.PerformClick()
             }
         }
     } catch {
         $script:smokeFailure = $_.Exception.Message
         $smokeTimer.Stop()
         $script:settingsDirty = $false; $script:personaDirty = $false
+        $script:exitRequested = $true
         $window.Close()
     }
 })
@@ -74,5 +86,5 @@ $smokeTimer.Start()
 . (Join-Path $PSScriptRoot '../desktop/start.ps1') -TestMode
 $smokeTimer.Stop()
 if ($smokeFailure) { Write-Error $smokeFailure; exit 1 }
-if ($smokeStage -ne 5) { Write-Error "Native UI exited at stage $smokeStage"; exit 1 }
+if ($smokeStage -ne 6) { Write-Error "Native UI exited at stage $smokeStage"; exit 1 }
 Write-Output 'Native UI smoke passed: async status, settings, persona, navigation, sessions, logs, close.'

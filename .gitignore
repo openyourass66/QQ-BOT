@@ -3,6 +3,9 @@ node_modules/
 
 # 构建产物
 dist/
+release/
+QQ-BOT.exe
+QQ-BOT.ico
 
 # 本地环境与密钥
 .env
