@@ -76,7 +76,7 @@ async function config(action, data) {
     worker.send({ action, data });
   });
 }
-async function check() { const result = await diagnose(root); emit({ type: 'diagnostics', ...result }); return result; }
+async function check() { const result = await diagnose(root, { externalOnebot: children.has('napcat') || await onebotOnline(root) }); emit({ type: 'diagnostics', ...result }); return result; }
 async function command({ action, data }) {
   if (action === 'model') { const result = await config(action, data); emit({ type: 'model', ...result }); return; }
   if (action === 'knowledge') { const result = await config(action, data); emit({ type: 'knowledge', ...result }); return; }
@@ -104,6 +104,7 @@ async function command({ action, data }) {
   if (action === 'diagnose') { await check(); return; }
   if (busy) return;
   busy = true; state();
+  let completed = false;
   try {
     if (['start', 'restart', 'restartBridge'].includes(action)) {
       const diagnostics = await check();
@@ -117,7 +118,8 @@ async function command({ action, data }) {
       }
       if (!children.has('bridge')) launch('bridge', 'dist/bridge.js');
     } else if (action === 'stop' || action === 'quit') { await stop(); if (action === 'quit') quitting = true; }
-  } finally { busy = false; state(); if (quitting) process.exit(); }
+    completed = true;
+  } finally { busy = false; emit({ type: 'control', action, ok: completed }); state(); if (quitting) process.exit(); }
 }
 const input = createInterface({ input: process.stdin });
 let queue = Promise.resolve();

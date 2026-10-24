@@ -56,16 +56,30 @@ export class SocialEngine {
     if ((mode === 'confirm' || (mode === 'sensitive' && sensitive)) && !await this.confirm(`QQ 操作：${tool}\n来源：${ctx.chat}`, ctx.signal)) throw new Error('操作未获确认');
     this.check(ctx);
   }
-  private async quota(ctx: ToolContext, key: string, extra: Quota[] = []): Promise<void> {
-    await this.usage.consume(() => {
-      this.check(ctx);
-      return [{ key: 'social-actions', amount: 1, limit: this.settings().social.actionsPerDay, label: 'QQ 动作' }, ...extra];
-    });
+  actionQuotas(ctx: ToolContext, key = ctx.chat): Quota[] {
+    this.check(ctx);
     const now = Date.now();
     const times = (this.rates.get(key) ?? []).filter(t => now - t < 60000);
     if (times.length >= this.settings().social.messagesPerMinute) throw new Error('当前会话操作过于频繁，请稍后再试');
-    times.push(now); this.rates.set(key, times);
+    return [{ key: 'social-actions', amount: 1, limit: this.settings().social.actionsPerDay, label: 'QQ 动作' }];
+  }
+  recordAction(key: string): void {
+    const now = Date.now();
+    this.rates.set(key, [...(this.rates.get(key) ?? []).filter(t => now - t < 60000), now]);
     if (this.rates.size > 5000) this.rates.delete(this.rates.keys().next().value!);
+  }
+  private async quota(ctx: ToolContext, key: string, extra: Quota[] | (() => Quota[]) = []): Promise<void> {
+    await this.usage.consume(() => [...this.actionQuotas(ctx, key), ...(typeof extra === 'function' ? extra() : extra)], () => this.recordAction(key));
+  }
+  private proactiveQuotas(ctx: ToolContext, target: string, proactive = false): Quota[] {
+    if (!proactive && !ctx.proactive && target === ctx.chat) return [];
+    const s = this.settings();
+    const quotas: Quota[] = [{ key: 'proactive', amount: 1, limit: s.budgets.proactiveMessagesPerDay, label: '主动消息' }];
+    if (target.startsWith('group:')) {
+      if (!s.chat.group.proactive.enabled) throw new Error('群聊主动发言已关闭');
+      quotas.push({ key: `group:${target.split(':')[1]}`, amount: 1, limit: s.chat.group.proactive.perGroupPerDay, label: '该群主动消息' });
+    }
+    return quotas;
   }
   private serial<T>(chat: string, fn: () => Promise<T>): Promise<T> {
     const previous = this.sending.get(chat) ?? Promise.resolve();
@@ -77,16 +91,7 @@ export class SocialEngine {
   async send(ctx: ToolContext, segments: Segment[], target = ctx.chat, proactive = false): Promise<unknown> {
     return this.serial(target, async () => {
       await this.target(ctx, target);
-      const extra: Quota[] = [];
-      if (proactive || ctx.proactive || target !== ctx.chat) {
-        const s = this.settings();
-        extra.push({ key: 'proactive', amount: 1, limit: s.budgets.proactiveMessagesPerDay, label: '主动消息' });
-        if (target.startsWith('group:')) {
-          if (!s.chat.group.proactive.enabled) throw new Error('群聊主动发言已关闭');
-          extra.push({ key: `group:${target.split(':')[1]}`, amount: 1, limit: s.chat.group.proactive.perGroupPerDay, label: '该群主动消息' });
-        }
-      }
-      await this.quota(ctx, target, extra);
+      await this.quota(ctx, target, () => this.proactiveQuotas(ctx, target, proactive));
       this.check(ctx, target);
       const [kind, id] = target.split(':');
       const plain = segments.length === 1 && segments[0].type === 'text';
@@ -102,10 +107,9 @@ export class SocialEngine {
   async normalReply(ctx: ToolContext, text: string): Promise<unknown> {
     return this.send(ctx, [{ type: 'text', data: { text } }]);
   }
-  async reserveAction(ctx: ToolContext): Promise<void> { await this.quota(ctx, ctx.chat); }
   private async decorators(ctx: ToolContext, args: Record<string, unknown>): Promise<Segment[]> {
     const parts: Segment[] = [];
-    if (args.reply_to !== undefined) { this.store.message(ctx.chat, Number(args.reply_to)); parts.push({ type: 'reply', data: { id: String(args.reply_to) } }); }
+    if (args.reply_to !== undefined) { this.message(ctx, Number(args.reply_to)); parts.push({ type: 'reply', data: { id: String(args.reply_to) } }); }
     if (args.at_user !== undefined) {
       if (!ctx.chat.startsWith('group:')) throw new Error('私聊不支持 @ 群成员');
       const members = await this.api.call<Array<{ user_id: number }>>('get_group_member_list', { group_id: Number(ctx.chat.split(':')[1]) }, ctx.signal);
@@ -160,9 +164,9 @@ export class SocialEngine {
         }
         return this.store.messages(ctx.chat, a.limit, a.offset, a.query).filter(m => !this.settings().social.blockedUsers.includes(String(m.user)));
       }
-      case 'qq_message': return this.store.message(ctx.chat, a.message_id);
+      case 'qq_message': return this.message(ctx, a.message_id);
       case 'qq_read_forward': {
-        const entry = this.store.message(ctx.chat, a.message_id);
+        const entry = this.message(ctx, a.message_id);
         const segment = entry.segments.find(s => s.type === 'forward');
         if (!segment) throw new Error('该消息不是合并转发');
         const result = await this.api.call<Record<string, unknown>>('get_forward_msg', { message_id: String(segment.data.id ?? a.message_id) }, ctx.signal);
@@ -193,13 +197,14 @@ export class SocialEngine {
       }
       case 'qq_poke': {
         const [kind, id] = ctx.chat.split(':'); const target = a.user_id ?? (kind === 'private' ? Number(id) : undefined);
+        if (kind === 'private' && target !== Number(id)) throw new Error('私聊戳一戳只能操作当前私聊对象');
         if (!target || this.settings().social.blockedUsers.includes(String(target))) throw new Error('请指定当前群里未屏蔽的成员');
         if (kind === 'group') await this.decorators(ctx, { at_user: target });
         await this.quota(ctx, ctx.chat);
         return this.api.call(kind === 'group' ? 'group_poke' : 'friend_poke', { ...(kind === 'group' ? { group_id: Number(id) } : {}), user_id: target }, ctx.signal);
       }
       case 'qq_images': {
-        this.feature('mediaEnabled'); const entry = this.store.message(ctx.chat, a.message_id);
+        this.feature('mediaEnabled'); const entry = this.message(ctx, a.message_id);
         const sources = entry.segments.filter(s => s.type === 'image').slice(0, 4);
         if (!sources.length) throw new Error('该消息没有图片');
         const images = [];
@@ -215,7 +220,7 @@ export class SocialEngine {
       }
       case 'qq_stickers': this.feature('stickersEnabled'); return state().stickers.filter(s => `${s.note} ${s.tags.join(' ')}`.includes(a.query)).slice(0, a.limit).map(({ file, ...rest }) => rest);
       case 'qq_collect_sticker': {
-        this.feature('stickersEnabled'); const entry = this.store.message(ctx.chat, a.message_id);
+        this.feature('stickersEnabled'); const entry = this.message(ctx, a.message_id);
         const segment = entry.segments.find(s => s.type === 'image'); if (!segment) throw new Error('该消息没有图片');
         const { buffer } = await this.media.bytes(await this.source(segment, ctx), ctx.signal); const mime = imageMime(buffer);
         const file = await this.media.save(buffer, '.' + mime.split('/')[1]);
@@ -271,7 +276,7 @@ export class SocialEngine {
       }
       case 'qq_video': this.feature('mediaEnabled'); return this.media.video(await this.messageSource(ctx, a.message_id, 'video'), a.question, ctx.signal);
       case 'qq_file': {
-        this.feature('filesEnabled'); const entry = this.store.message(ctx.chat, a.message_id); const segment = entry.segments.find(s => s.type === 'file'); if (!segment) throw new Error('该消息没有文件');
+        this.feature('filesEnabled'); const entry = this.message(ctx, a.message_id); const segment = entry.segments.find(s => s.type === 'file'); if (!segment) throw new Error('该消息没有文件');
         const { buffer } = await this.media.bytes(await this.source(segment, ctx), ctx.signal, 25_000_000);
         const extension = extname(String(segment.data.name ?? '')).toLowerCase();
         const file = await this.media.save(buffer, /^\.[a-z0-9]{1,8}$/.test(extension) ? extension : '.bin');
@@ -309,9 +314,14 @@ export class SocialEngine {
       case 'qq_send_file': {
         this.feature('filesEnabled'); const { buffer } = await this.media.bytes(a.source, ctx.signal, 25_000_000);
         const file = await this.media.save(buffer, extname(a.name).replace(/[^.a-zA-Z0-9]/g,'').slice(0,10) || '.bin');
-        await this.quota(ctx, ctx.chat); const [kind, id] = ctx.chat.split(':');
-        const result = await this.api.call(kind === 'group' ? 'upload_group_file' : 'upload_private_file', { [kind === 'group' ? 'group_id' : 'user_id']: Number(id), file, name: a.name }, ctx.signal);
-        ctx.sent++; this.onSent(ctx.chat, 0, [{ type: 'file', data: { name: a.name } }]); return result;
+        return this.serial(ctx.chat, async () => {
+          await this.quota(ctx, ctx.chat, () => this.proactiveQuotas(ctx, ctx.chat));
+          const [kind, id] = ctx.chat.split(':');
+          let result;
+          try { result = await this.api.call(kind === 'group' ? 'upload_group_file' : 'upload_private_file', { [kind === 'group' ? 'group_id' : 'user_id']: Number(id), file, name: a.name }, ctx.signal); }
+          catch (error) { ctx.silent = true; throw error; }
+          ctx.sent++; this.onSent(ctx.chat, 0, [{ type: 'file', data: { name: a.name } }]); return result;
+        });
       }
       case 'qq_search': {
         if (!process.env.BOT_SEARCH_URL) throw new Error('QQ 搜索服务未配置，请使用 DSH 已有搜索工具；或在连接配置中填写搜索适配服务');
@@ -337,10 +347,21 @@ export class SocialEngine {
     }
   }
   private async messageSource(ctx: ToolContext, id: number, type: string): Promise<string> {
-    const s = this.store.message(ctx.chat, id).segments.find(s => s.type === type); if (!s) throw new Error('该消息没有所需媒体');
+    const s = this.message(ctx, id).segments.find(s => s.type === type); if (!s) throw new Error('该消息没有所需媒体');
     return this.source(s, ctx);
   }
+  private message(ctx: ToolContext, id: number) {
+    const message = this.store.message(ctx.chat, id);
+    if (this.settings().social.blockedUsers.includes(String(message.user))) throw new Error('该消息的发送者已屏蔽，不能读取或引用');
+    return message;
+  }
   private async source(s: Segment, ctx: ToolContext): Promise<string> {
+    const reference = s.data.file_id ?? s.data.file;
+    if (s.type === 'record' && typeof reference === 'string' && !/^(?:https?:|file:|[A-Za-z]:[\\/]|\/)/.test(reference)) {
+      const result = await this.api.call<{ url?: string; file?: string }>('get_record', { file: reference, out_format: 'wav' }, ctx.signal);
+      if (!result.file && !result.url) throw new Error('协议端未返回可读取的转码语音');
+      return result.file ?? result.url!;
+    }
     if (typeof s.data.url === 'string' && /^https?:/.test(s.data.url)) return s.data.url;
     if (typeof s.data.file === 'string' && /^(?:https?:|file:|[A-Za-z]:[\\/]|\/)/.test(s.data.file)) return s.data.file;
     if (s.type === 'file' && s.data.file_id) {
@@ -349,7 +370,7 @@ export class SocialEngine {
       if (!result.url && !result.file) throw new Error('协议端未返回文件地址');
       return result.url ?? result.file!;
     }
-    const action = { image: 'get_image', record: 'get_record', video: 'get_video', file: 'get_file' }[s.type];
+    const action = { image: 'get_image', record: 'get_record', video: 'get_file', file: 'get_file' }[s.type];
     if (!action) throw new Error('媒体无法定位');
     const result = await this.api.call<{ url?: string; file?: string }>(action, { file: s.data.file ?? s.data.file_id, file_id: s.data.file_id, out_format: 'wav' }, ctx.signal);
     const source = result.url ?? result.file;
@@ -358,6 +379,7 @@ export class SocialEngine {
   }
   async legacy(tool: string, args: Record<string, any>, ctx: ToolContext): Promise<unknown> {
     this.check(ctx);
+    if (tool === 'qq_set_profile' && Object.keys(args).length === 0) throw new Error('请至少填写一项要修改的资料');
     if (tool === 'qq_self_info') {
       if (args.group_id) { await this.target(ctx, `group:${args.group_id}`); return this.api.call('get_group_member_info', { group_id: args.group_id, user_id: ctx.self, no_cache: true }, ctx.signal); }
       return this.api.call('get_login_info', {}, ctx.signal);
@@ -388,7 +410,7 @@ export class SocialEngine {
         const file = await this.media.save(Buffer.from(image.data, 'base64'), '.' + image.mimeType.split('/')[1]);
         result = await this.api.call('set_qq_avatar', { file: toFile(file) }, ctx.signal);
       } else if (tool === 'qq_recall') {
-        const message = this.store.message(ctx.chat, args.message_id);
+        const message = this.message(ctx, args.message_id);
         if (!message.self || message.user !== ctx.self) throw new Error('只能撤回本账号在当前会话发送的消息');
         result = await this.api.call('delete_msg', { message_id: args.message_id }, ctx.signal);
         await this.store.update(d => { const m = d.messages.find(m => m.chat === ctx.chat && m.id === args.message_id); if (m) m.recalled = true; });

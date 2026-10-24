@@ -6,7 +6,7 @@ import { readChatModelConfig } from '../dist/chat-model.js';
 export async function environment(root) {
   return { ...process.env, ...parseEnv(await readFile(join(root, '.env'), 'utf8').catch(e => { if (e.code === 'ENOENT') return ''; throw e; })) };
 }
-export async function diagnose(root) {
+export async function diagnose(root, { externalOnebot = false } = {}) {
   const env = await environment(root), rows = [];
   const add = (name, ok, detail, required = true) => rows.push({ name, ok, detail, required });
   try { const model = readChatModelConfig(env); add('对话模型配置', true, model.mode === 'profile' ? '沿用 DSH Profile' : `${model.model} · ${model.mode === 'project' ? '本项目 API Key' : 'DeepSeek 账号'}`); }
@@ -23,9 +23,9 @@ export async function diagnose(root) {
   const profilePath = resolve(env.BOT_DSH_HOME || join(homedir(), '.dsh'), 'profiles', profile, 'cordis.yml');
   try { const fd = await open(profilePath, 'r+'); await fd.close(); add('DSH Profile 写入权限', true, '配置文件可写'); }
   catch (e) { add('DSH Profile 写入权限', e.code === 'ENOENT', e.code === 'ENOENT' ? '首次启动由 DSH 创建' : `无法写入 cordis.yml（${e.code}），请关闭占用该文件的程序并检查访问权限`); }
-  add('NapCat Shell', await exists(resolve(root, env.BOT_NAPCAT_DIR || 'napcat/shell', 'napcat.mjs')), '缺失时请部署官方 NapCat Shell');
-  add('NapCat Node 适配库', await exists(join(root, 'napcat/node-runtime/QQNT.dll')), '需要官方 Node 模式 QQNT.dll');
-  add('QQ 安装目录', !!env.BOT_QQ_DIR && await exists(resolve(root, env.BOT_QQ_DIR, 'versions/config.json')), '在连接设置中选择 QQ.exe 所在文件夹');
+  add('NapCat Shell', await exists(resolve(root, env.BOT_NAPCAT_DIR || 'napcat/shell', 'napcat.mjs')), externalOnebot ? '复用运行中的 OneBot，当前无需本地 Shell' : '缺失时请部署官方 NapCat Shell', !externalOnebot);
+  add('NapCat Node 适配库', await exists(join(root, 'napcat/node-runtime/QQNT.dll')), externalOnebot ? '复用运行中的 OneBot，当前无需本地适配库' : '需要官方 Node 模式 QQNT.dll', !externalOnebot);
+  add('QQ 安装目录', !!env.BOT_QQ_DIR && await exists(resolve(root, env.BOT_QQ_DIR, 'versions/config.json')), externalOnebot ? '复用运行中的 OneBot，当前无需本地 QQ 目录' : '在连接设置中选择 QQ.exe 所在文件夹', !externalOnebot);
   for (const [key, protocols] of [['ONEBOT_HTTP_URL', ['http:', 'https:']], ['ONEBOT_WS_URL', ['ws:', 'wss:']]]) {
     let ok = false; try { ok = protocols.includes(new URL(env[key]).protocol); } catch {}
     add(key, ok, '检查 OneBot 连接地址和协议');

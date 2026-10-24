@@ -104,7 +104,7 @@ partial class App
         ((TextBlock)Find<StackPanel>("LogEmpty").Children[0]).Text = logs.Count == 0 ? "还没有工作日志" : "没有匹配的日志";
         ((TextBlock)Find<StackPanel>("LogEmpty").Children[1]).Text = logs.Count == 0 ? "启动机器人后，连接与运行记录会出现在这里。" : "试试其他关键词或日志分类。";
         Find<TextBlock>("LogCount").Text = "显示 " + lines.Count() + " / " + logs.Count + " 条 · 最近 1500 条";
-        if (Find<TextBox>("Logs").Text != text) { Find<TextBox>("Logs").Text = text; if (!paused) Find<TextBox>("Logs").ScrollToEnd(); }
+        if (Find<TextBox>("Logs").Text != text) { var editor=Find<TextBox>("Logs");double offset=editor.VerticalOffset;editor.Text=text;if(paused)editor.ScrollToVerticalOffset(offset);else editor.ScrollToEnd(); }
     }
     static void Capture(string path, int page) {
         Find<TabControl>("Tabs").SelectedIndex = page; window.UpdateLayout();
@@ -164,6 +164,9 @@ partial class App
         else if (type == "social") { RenderActivity(message); }
         else if (type == "knowledge") { RenderKnowledge(message); }
         else if (type == "memory") { RenderKnowledgeMemories(message); }
+        else if (type == "control" && connectionRestartPending && new[]{"restart","restartBridge"}.Contains(message["action"] as string)) {
+            Find<TextBlock>("RuntimeHint").Text=(bool)message["ok"]?"机器人已重新启动，等待连接就绪。":"配置已保存，重新启动未完成，请查看启动诊断。";connectionRestartPending=false;
+        }
         else if (type == "config") {
             loading = true;
             settings = (Dictionary<string, object>)message["settings"];
@@ -190,7 +193,6 @@ partial class App
             bool bridge = (bool)message["bridge"], napcat = (bool)message["napcat"], busy = (bool)message["busy"];
             Find<TextBlock>("State").Text = busy ? "小鲸正在安排工作…" : bridge && napcat ? "小鲸已出发，等待连接就绪" : bridge || napcat ? "部分进程运行中，请查看日志" : "小鲸休息中，随时可以出发";
             runtimeBusy=busy;
-            if(connectionRestartPending&&!busy){Find<TextBlock>("RuntimeHint").Text=bridge?"机器人已重新启动，等待连接就绪。":"配置已保存，启动未完成，请查看启动诊断。";connectionRestartPending=false;}
             Find<Button>("Start").IsEnabled = !busy && !(bridge && napcat); Find<Button>("Stop").IsEnabled = !busy && (bridge || napcat); Find<Button>("Restart").IsEnabled = !busy; Find<Button>("RestartBot").IsEnabled = !busy && (bridge || napcat); Find<Button>("RestartBot").Content=busy?"正在处理…":"重新启动";UpdateConnectionEditing();
             if (!bridge) Find<TextBlock>("Stats").Text = "桥接已停止 · NapCat " + (napcat ? "运行中" : "已停止");
             Find<TextBlock>("NapcatState").Text = napcat ? (message.ContainsKey("externalNapcat") && (bool)message["externalNapcat"] ? "复用外部 NapCat" : "NapCat 运行中") : "NapCat 等待启动";

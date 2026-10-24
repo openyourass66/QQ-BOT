@@ -2,10 +2,10 @@ import http from 'node:http';
 import https from 'node:https';
 import { lookup } from 'node:dns/promises';
 import { isIP } from 'node:net';
-import { readFile, writeFile, mkdir, stat, realpath, readdir } from 'node:fs/promises';
+import { readFile, writeFile, mkdir, stat, realpath, readdir, rename, rm } from 'node:fs/promises';
 import { resolve, dirname, relative, isAbsolute } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import type { SocialSettings } from './social-settings.js';
 
@@ -54,8 +54,15 @@ export function imageMime(buffer: Buffer): string {
 
 export class MediaService {
   readonly root: string;
+  private saves: Promise<void> = Promise.resolve();
   constructor(root: string, private readonly settings: () => SocialSettings) { this.root = resolve(root); }
-  async save(buffer: Buffer, extension: string): Promise<string> {
+  save(buffer: Buffer, extension: string): Promise<string> {
+    const task = this.saves.then(() => this.saveFile(buffer, extension));
+    this.saves = task.then(() => undefined, () => undefined);
+    return task;
+  }
+  private async saveFile(buffer: Buffer, extension: string): Promise<string> {
+    if (!/^\.[a-z0-9]{1,10}$/i.test(extension)) throw new Error('媒体文件扩展名无效');
     await mkdir(this.root, { recursive: true });
     const file = resolve(this.root, createHash('sha256').update(buffer).digest('hex') + extension);
     if (await stat(file).then(s => s.isFile(), () => false)) return file;
@@ -63,7 +70,10 @@ export class MediaService {
     for (const name of await readdir(this.root)) total += await stat(resolve(this.root,name)).then(s => s.isFile() ? s.size : 0, () => 0);
     const limit = Number(process.env.BOT_MEDIA_MAX_BYTES || 536870912);
     if (!Number.isFinite(limit) || total + buffer.length > limit) throw new Error('媒体库空间额度不足，请清理不再使用的媒体或调整 BOT_MEDIA_MAX_BYTES');
-    await writeFile(file, buffer); return file;
+    const temp = file + '.' + randomUUID() + '.tmp';
+    try { await writeFile(temp, buffer); await rename(temp, file); }
+    finally { await rm(temp, { force: true }).catch(() => undefined); }
+    return file;
   }
   async bytes(source: string, signal: AbortSignal, max = 12_000_000): Promise<{ buffer: Buffer; mime: string }> {
     if (/^https?:\/\//i.test(source)) return downloadPublic(source, signal, max);

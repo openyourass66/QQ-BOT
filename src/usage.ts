@@ -40,7 +40,7 @@ export class DailyUsageStore {
   }
 
   /** 在远端动作前持久化预扣。远端失败或结果未知时不退回额度。 */
-  consume(getQuotas: () => Quota[]): Promise<void> {
+  consume(getQuotas: () => Quota[], onReserved: () => void = () => undefined): Promise<void> {
     return this.queue.run('usage', async () => {
       const date = shanghaiDate(this.now());
       const next: Usage = this.data.date === date
@@ -66,6 +66,7 @@ export class DailyUsageStore {
         await rm(temp, { force: true }).catch(() => undefined);
       }
       this.data = next;
+      onReserved();
     });
   }
 

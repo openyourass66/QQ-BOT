@@ -33,7 +33,7 @@ export class QqActionPolicy {
     private readonly onMessageSent: () => void = () => undefined,
   ) {}
 
-  async execute(input: unknown, signal: AbortSignal): Promise<unknown> {
+  async execute(input: unknown, signal: AbortSignal, additionalQuotas: () => Quota[] = () => [], onReserved: () => void = () => undefined): Promise<unknown> {
     const action = QqActionSchema.parse(input);
     signal.throwIfAborted();
     let confirmed = false;
@@ -67,19 +67,15 @@ export class QqActionPolicy {
           quotas.push({ key: `group:${action.target_id}`, amount: 1, limit: proactive.perGroupPerDay, label: '该群主动消息' });
         }
       }
-      return quotas;
-    });
+      return [...additionalQuotas(), ...quotas];
+    }, onReserved);
     signal.throwIfAborted();
 
     if (action.action === 'like') {
       return this.api.call('send_like', { user_id: action.user_id, times: action.times }, signal);
     }
     if (action.action === 'qzone_post') {
-      const message = [
-        { type: 'text', data: { text: action.text } },
-        ...(action.images ?? []).map((file) => ({ type: 'image', data: { file } })),
-      ];
-      return this.api.call('send_qzone_msg', { message }, signal);
+      return this.api.call('send_qzone_msg', { content: action.text, images: action.images ?? [] }, signal);
     }
     const result = action.target_type === 'group'
       ? await this.api.sendGroup(action.target_id, action.text, signal)

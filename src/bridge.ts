@@ -44,7 +44,7 @@ const media = new MediaService(process.env.BOT_MEDIA_DIR || resolve(dirname(sess
 const shutdownSignal = new AbortController();
 const activeConversations = new Map<string, ToolContext>();
 const activeTopics = new Map<string, { topic: string; until: number }>();
-const batchLatest = new Map<string, number>();
+const batches = new Map<string, { latest: number; direct: boolean; parts: Array<{ id: number; user: number; name: string; body: string }> }>();
 const engine = new SocialEngine(socialStore, media, api, usage, getSettings, askAdmin, (chat, id, segments, source) => {
   status.messagesOut++;
   if (chat.startsWith('group:') && id) rememberBotReply(Number(chat.split(':')[1]), id, segmentsToText(segments), source === chat);
@@ -82,7 +82,12 @@ const ready = new Promise<void>((done, reject) => {
   readyReject = reject;
 });
 
-const sleep = (ms: number): Promise<void> => new Promise((done) => setTimeout(done, ms));
+const sleep = (ms: number): Promise<void> => new Promise((done) => {
+  if (shutdownSignal.signal.aborted) return done();
+  const finish = () => { clearTimeout(timer); shutdownSignal.signal.removeEventListener('abort', finish); done(); };
+  const timer = setTimeout(finish, ms);
+  shutdownSignal.signal.addEventListener('abort', finish, { once: true });
+});
 const rand = (min: number, max: number): number =>
   min + Math.floor(Math.random() * Math.max(1, max - min));
 
@@ -326,11 +331,12 @@ function shouldReply(event: MessageEvent, text: string): { ok: boolean; body: st
   if (topic && topic.until > Date.now()) return { ...base, ok: true, reason: 'active-topic' };
   const social = settings.social;
   const profile = socialStore.profile(keyOf(event));
-  const mode = profile && profile.responseMode !== 'inherit' ? profile.responseMode : social.responseMode;
+  const override = profile && profile.responseMode !== 'inherit' ? profile : undefined;
+  const mode = override?.responseMode ?? social.responseMode;
   if (mode === 'legacy') return base;
   if (mode === 'all') return { ...base, ok: true, reason: 'all' };
-  const keyword = (profile && profile.responseMode !== 'inherit' ? profile.keywords : social.keywords).some(word => text.includes(word));
-  return { ...base, ok: mode !== 'mention' && (keyword || (mode === 'probability' && Math.random() * 100 < (profile?.probability ?? social.responseProbability))), reason: keyword ? 'keyword' : mode };
+  const keyword = (override?.keywords ?? social.keywords).some(word => text.includes(word));
+  return { ...base, ok: mode !== 'mention' && (keyword || (mode === 'probability' && Math.random() * 100 < (override?.probability ?? social.responseProbability))), reason: keyword ? 'keyword' : mode };
 }
 
 function socialPrompt(key: string): string {
@@ -358,7 +364,8 @@ function buildPrompt(event: MessageEvent, body: string, seq: number, direct: boo
     const lines = getSettings().chat.group.contextLines;
     const history = groupContext.context(event.self_id, event.group_id!, seq, lines).filter(e => !getSettings().social.blockedUsers.includes(String(e.userId))).map(formatGroupEntry).join('\n');
     const quoteId = event.message.find((segment) => segment.type === 'reply')?.data.id;
-    const quoted = quoteId !== undefined ? groupContext.find(event.self_id, event.group_id!, Number(quoteId)) : undefined;
+    const candidate = quoteId !== undefined ? groupContext.find(event.self_id, event.group_id!, Number(quoteId)) : undefined;
+    const quoted = candidate && !getSettings().social.blockedUsers.includes(String(candidate.userId)) ? candidate : undefined;
     return [
       `【QQ群 ${event.group_id}】`,
       '最近的群聊：',
@@ -426,6 +433,7 @@ async function onMessage(event: MessageEvent): Promise<void> {
 
   if (!allowedChat(getSettings().social, keyOf(event), event.user_id)) return;
   await socialStore.account(event.self_id);
+  if (stopping) return;
   await socialStore.record(event, getSettings().social.retentionDays, getSettings().social.messagesPerChat);
 
   const seq = remember(event, text);
@@ -435,10 +443,17 @@ async function onMessage(event: MessageEvent): Promise<void> {
   const key = keyOf(event);
   const batchMs = getSettings().social.batchWindowMs;
   if (batchMs > 0) {
-    batchLatest.set(key, event.message_id);
+    const batch = batches.get(key) ?? { latest: event.message_id, direct: false, parts: [] };
+    batch.latest = event.message_id; batch.direct ||= trigger.direct;
+    batch.parts.push({ id: event.message_id, user: event.user_id, name: event.sender.card || event.sender.nickname, body: trigger.body });
+    batches.set(key, batch);
     await sleep(batchMs);
-    if (batchLatest.get(key) !== event.message_id) return;
-    batchLatest.delete(key);
+    if (stopping || batches.get(key)?.latest !== event.message_id) return;
+    batches.delete(key);
+    const parts = batch.parts.filter(part => allowedChat(getSettings().social, key, part.user));
+    if (!parts.length) return;
+    trigger.direct = batch.direct;
+    trigger.body = parts.length === 1 ? parts[0].body : '【合并消息】\n' + parts.map(part => `[消息 #${part.id} · ${part.name}(QQ ${part.user})]\n${part.body}`).join('\n\n');
   }
   const now = Date.now();
   if (event.message_type === 'group' && !trigger.direct) {
@@ -451,7 +466,7 @@ async function onMessage(event: MessageEvent): Promise<void> {
   log('info', `[msg] ${key} (${trigger.reason}) <- ${trigger.body.slice(0, 60)}`);
 
   await queue.run(key, async () => {
-    if (stopping) return;
+    if (stopping || !allowedChat(getSettings().social, key, event.user_id)) return;
     const turn: ToolContext = { chat: key, self: event.self_id, user: event.user_id, signal: shutdownSignal.signal, sent: 0, silent: false };
     activeConversations.set(key, turn);
     if (event.message_type === 'group') activeGroupTurns.set(event.group_id!, { seq, userId: event.user_id });
@@ -654,7 +669,7 @@ async function main(): Promise<void> {
       try {
         if (validated.action === 'send_message') {
           result = await engine.send(callCtx, [{ type: 'text', data: { text: validated.text } }], `${validated.target_type}:${validated.target_id}`, true);
-        } else { await engine.reserveAction(callCtx); result = await policy.execute(validated, callCtx.signal); }
+        } else { result = await policy.execute(validated, callCtx.signal, () => engine.actionQuotas(callCtx), () => engine.recordAction(callCtx.chat)); }
         await socialStore.endAction(audit, 'success', '已完成');
       } catch (e) { await socialStore.endAction(audit, 'unknown', String(e)); throw e; }
       return result;
@@ -717,6 +732,7 @@ async function shutdown(code = 0): Promise<void> {
   if (stopping) return;
   stopping = true;
   shutdownSignal.abort();
+  batches.clear();
   if (scheduler) clearInterval(scheduler);
   log('info', '[bridge] shutting down');
   ws?.stop();
@@ -736,9 +752,10 @@ async function shutdown(code = 0): Promise<void> {
     } else dshChild.kill('SIGTERM');
   };
   try {
-    await withTimeout(Promise.all([
-      actionServer?.close(), usage.flush(), store.flush(), groupContext.flush(), socialStore.flush(), flushSettings(), stopChild(),
-    ]), 5000);
+    await withTimeout((async () => {
+      await Promise.all([actionServer?.close(), stopChild(), queue.drain()]);
+      await Promise.all([usage.flush(), store.flush(), groupContext.flush(), socialStore.flush(), flushSettings()]);
+    })(), 5000);
   } catch (error) {
     log('error', `[shutdown] ${String(error)}`);
     code = 1;

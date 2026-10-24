@@ -9,7 +9,7 @@ try {
     Copy-Item -LiteralPath (Join-Path $projectRoot 'dist') -Destination $testRoot -Recurse
     Copy-Item -LiteralPath (Join-Path $projectRoot 'package.json') -Destination $testRoot
     # Resolve the existing dependency tree without copying runtime data or credentials.
-    [IO.File]::WriteAllText((Join-Path $testRoot '.env'), "BOT_WORKSPACE=$($testRoot.Replace('\', '/'))`n", [Text.UTF8Encoding]::new($false))
+    [IO.File]::WriteAllText((Join-Path $testRoot '.env'), "BOT_WORKSPACE=$($testRoot.Replace('\', '/'))`nONEBOT_HTTP_URL=http://127.0.0.1:1`nONEBOT_WS_URL=ws://127.0.0.1:1`n", [Text.UTF8Encoding]::new($false))
     [IO.File]::WriteAllText((Join-Path $testRoot 'AGENTS.md'), ([string][char]0x6D4B + [char]0x8BD5 + [char]0x5C0F + [char]0x9CB8 + [char]0x4EBA + [char]0x8BBE), [Text.UTF8Encoding]::new($false))
     foreach ($fixtureDirectory in @('.whale', 'memory', 'data')) { [void][IO.Directory]::CreateDirectory((Join-Path $testRoot $fixtureDirectory)) }
     $fixturePersonas = @{ version = 1; personas = @(@{ id = 'preset-friendly'; name = 'Friendly'; text = 'Speak warmly and briefly.'; updatedAt = 1 }, @{ id = 'preset-work'; name = 'Work'; text = 'Answer precisely.'; updatedAt = 1 }) } | ConvertTo-Json -Depth 5

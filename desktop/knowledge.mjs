@@ -88,10 +88,12 @@ export async function knowledge(workspacePath, input = { op: 'list' }) {
   if (input.workspace && resolve(input.workspace) !== workspace) fail('工作区已变更，请重新打开工作台后编辑');
   if (!['list', 'save_preset', 'delete_preset', 'save_global', 'apply_preset', 'read_memory', 'save_memory', 'delete_memory'].includes(input.op)) fail('未知的管理操作');
   await mkdir(workspace, { recursive: true });
-  const libraryPath = await scopedPath(workspace, '.whale/personas.json');
-  const personaPath = await scopedPath(workspace, 'AGENTS.md');
-  let raw = await optionalRead(libraryPath), presets = parseLibrary(raw);
-  let global = await optionalRead(personaPath), selectedKey;
+  const warnings = [];
+  let libraryPath, personaPath, raw = null, presets = [], global = null, selectedKey;
+  try { libraryPath = await scopedPath(workspace, '.whale/personas.json'); raw = await optionalRead(libraryPath); presets = parseLibrary(raw); }
+  catch (error) { if (['save_preset', 'delete_preset', 'apply_preset'].includes(input.op)) throw error; warnings.push(error.message); }
+  try { personaPath = await scopedPath(workspace, 'AGENTS.md'); global = await optionalRead(personaPath); }
+  catch (error) { if (['save_global', 'apply_preset'].includes(input.op)) throw error; warnings.push('全局人设读取失败，请检查文件与访问权限。'); }
   if (input.op === 'save_preset' || input.op === 'delete_preset') {
     checkRevision(raw, input.libraryRevision);
     const original = presets.find(item => item.id === input.id);
@@ -133,5 +135,6 @@ export async function knowledge(workspacePath, input = { op: 'list' }) {
     selectedKey = input.op === 'delete_memory' ? '' : 'file:' + name;
   }
   const query = typeof input.query === 'string' ? input.query.slice(0,256) : '';
-  return { op: input.op, workspace, presets, libraryRevision: raw === null ? null : revision(raw), global: global || '', globalRevision: global === null ? null : revision(global), files: await memoryFiles(workspace, query), ...(file ? { file } : {}), ...(selectedKey !== undefined ? { selectedKey } : {}) };
+  const files = await memoryFiles(workspace, query).catch(error => { warnings.push('工作区记忆列表暂不可用：' + (error.message.startsWith('管理操作失败：') ? error.message : '请检查文件与访问权限。')); return []; });
+  return { op: input.op, workspace, presets, libraryRevision: raw === null ? null : revision(raw), global: global || '', globalRevision: global === null ? null : revision(global), files, ...(file ? { file } : {}), ...(selectedKey !== undefined ? { selectedKey } : {}), ...(warnings.length ? { warning: warnings.join('；') } : {}) };
 }

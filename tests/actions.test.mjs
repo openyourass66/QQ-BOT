@@ -60,10 +60,7 @@ test('空间审批展示实际正文与图片；审批后重新校验功能开�
     return true;
   });
   await policy.execute(post, signal());
-  assert.deepEqual(calls[0], { action: 'send_qzone_msg', params: { message: [
-    { type: 'text', data: { text: post.text } },
-    { type: 'image', data: { file: post.images[0] } },
-  ] } });
+  assert.deepEqual(calls[0], { action: 'send_qzone_msg', params: { content: post.text, images: post.images } });
   await assert.rejects(policy.execute(post, signal()), /额度不足/);
   const changed = makePolicy(async () => { settings.features.qzone.enabled = false; return true; });
   await assert.rejects(changed.execute(post, signal()), /已关闭/);

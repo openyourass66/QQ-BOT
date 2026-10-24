@@ -89,6 +89,7 @@ partial class App
         if(data.ContainsKey("selectedKey")) {string selected=(string)data["selectedKey"];if(op=="apply_preset"){knowledgeLoading=true;Find<ListBox>("KnowledgeNav").SelectedIndex=0;knowledgeLoading=false;}knowledgeSelections[KnowledgePage]=selected;}
         SetKnowledgeBusy(false);UpdateDirtySummary();RefreshKnowledgeList();
         if(data.ContainsKey("error"))KnowledgeError((string)data["error"]);
+        else if(data.ContainsKey("warning")) {KnowledgeError((string)data["warning"]);if(op!="list"&&op!="read_memory")Feedback("当前内容已保存；部分其他记录暂不可用，请查看行内提示。");}
         else if(op!="list"&&op!="read_memory")Feedback(op=="apply_preset"||op=="save_global"?"全局人设已保存，新会话生效。":"人设与记忆已保存，其他草稿继续保留。");
     }
     static void RenderKnowledgeMemories(Dictionary<string,object> message) {

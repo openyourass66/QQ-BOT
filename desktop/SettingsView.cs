@@ -209,5 +209,25 @@ partial class App
         if(json.Serialize(Collect(settings,""))!=before)throw new Exception("切换分类或搜索丢失了设置值");
         for(int i=0;i<7;i++){Find<ListBox>("SettingsNav").SelectedIndex=i;Capture(System.IO.Path.Combine(root,"settings-"+i+".png"),2);}
         Find<ListBox>("SettingsNav").SelectedIndex=0;
+        VerifyAuditInteraction();
+    }
+    static void VerifyAuditInteraction() {
+        var originalLogs=logs.ToArray();bool originalPaused=paused;int originalPage=Find<TabControl>("Tabs").SelectedIndex;
+        string originalSearch=Find<TextBox>("LogSearch").Text;int originalFilter=Find<ComboBox>("LogFilter").SelectedIndex;
+        try {
+            Find<TabControl>("Tabs").SelectedIndex=1;Find<TextBox>("LogSearch").Clear();Find<ComboBox>("LogFilter").SelectedIndex=0;
+            logs.Clear();for(int i=0;i<300;i++)logs.Enqueue("[bridge] 审查日志 "+i);paused=false;RefreshLogs();window.UpdateLayout();
+            var editor=Find<TextBox>("Logs");editor.ScrollToVerticalOffset(100);window.UpdateLayout();double offset=editor.VerticalOffset;
+            if(offset<=0)throw new Exception("日志滚动测试没有产生可滚动内容");
+            paused=true;logs.Enqueue("[bridge] 暂停滚动后的新日志");RefreshLogs();window.UpdateLayout();
+            if(Math.Abs(editor.VerticalOffset-offset)>1)throw new Exception("暂停滚动时日志仍跳回顶部或底部");
+        } finally {
+            logs.Clear();foreach(string line in originalLogs)logs.Enqueue(line);paused=originalPaused;
+            Find<TextBox>("LogSearch").Text=originalSearch;Find<ComboBox>("LogFilter").SelectedIndex=originalFilter;RefreshLogs();Find<TabControl>("Tabs").SelectedIndex=originalPage;
+        }
+        string hint=Find<TextBlock>("RuntimeHint").Text;bool pending=connectionRestartPending;
+        connectionRestartPending=true;Event("{\"type\":\"control\",\"action\":\"restartBridge\",\"ok\":false}");
+        if(connectionRestartPending||!Find<TextBlock>("RuntimeHint").Text.Contains("未完成"))throw new Exception("重启失败被误报为完成");
+        connectionRestartPending=pending;Find<TextBlock>("RuntimeHint").Text=hint;
     }
 }

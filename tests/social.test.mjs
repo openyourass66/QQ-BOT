@@ -55,6 +55,49 @@ test('跨会话只允许现有联系人，屏蔽和名单热变更立即生效',
   await assert.rejects(engine.normalReply(ctx(),'不能发'),/名单/);
   assert.equal(calls.some(c=>c.action==='send_group_msg'),false);
 }));
+test('限频拒绝不预扣每日额度', () => fixture(async ({engine,ctx,settings,dir}) => {
+  settings.social.messagesPerMinute=1;
+  await engine.normalReply(ctx(),'第一条');
+  await assert.rejects(engine.normalReply(ctx(),'被限频'),/频繁/);
+  const usage=JSON.parse(await readFile(join(dir,'usage.json'),'utf8'));
+  assert.equal(usage.counters['social-actions'],1);
+}));
+test('主动文件发送受群开关与主动额度约束', () => fixture(async ({call,ctx,settings,calls,dir}) => {
+  const file=await call('qq_create_file',{name:'提醒.md',text:'定期摘要'});
+  const turn={...ctx(),proactive:true};
+  await assert.rejects(call('qq_send_file',{source:file.file,name:file.name},turn),/主动发言已关闭/);
+  settings.chat.group.proactive.enabled=true;settings.budgets.proactiveMessagesPerDay=1;
+  await call('qq_send_file',{source:file.file,name:file.name},turn);
+  await assert.rejects(call('qq_send_file',{source:file.file,name:file.name},turn),/主动消息今日额度不足/);
+  assert.equal(calls.filter(c=>c.action==='upload_group_file').length,1);
+  assert.equal(JSON.parse(await readFile(join(dir,'usage.json'),'utf8')).counters.proactive,1);
+}));
+test('屏蔽用户后，编号读取、转发、图片和引用不能继续访问旧消息', () => fixture(async ({call,store,settings}) => {
+  await store.add(entry(80,{user:20002,segments:[{type:'forward',data:{id:'blocked-forward'}}]}));
+  await store.add(entry(81,{user:20002,segments:[{type:'image',data:{file:'blocked-image'}}]}));
+  settings.social.blockedUsers.push('20002');
+  for(const [tool,args] of [['qq_message',{message_id:80}],['qq_read_forward',{message_id:80}],['qq_images',{message_id:81}],['qq_reply',{text:'引用',reply_to:80}]])await assert.rejects(call(tool,args),/屏蔽/);
+}));
+test('私聊戳一戳限定当前对象；空资料修改明确拒绝', () => fixture(async ({call,ctx,engine,calls}) => {
+  await assert.rejects(call('qq_poke',{user_id:99999},{...ctx(),chat:'private:20001'}),/当前私聊/);
+  assert.equal(calls.some(c=>c.action==='friend_poke'),false);
+  await assert.rejects(engine.legacy('qq_set_profile',{},ctx()),/至少/);
+}));
+
+test('无直链视频用 get_file 定位；语音优先请求转码，不将 SILK 直链当 WAV 上传', () => fixture(async ({call,store,api,media,calls}) => {
+  await store.add(entry(91,{segments:[{type:'video',data:{file:'video-reference'}}]}));
+  await store.add(entry(92,{segments:[{type:'record',data:{file:'record-reference',url:'https://qq.example/raw.silk'}}]}));
+  const original=api.call.bind(api);
+  api.call=async(action,args,signal)=>{
+    if(action==='get_file'){calls.push({action,params:args});return {file:'resolved-video'};}
+    if(action==='get_record'){calls.push({action,params:args});assert.equal(args.out_format,'wav');return {file:'converted-audio.wav'};}
+    return original(action,args,signal);
+  };
+  media.video=async source=>{assert.equal(source,'resolved-video');return {text:'视频已定位'};};
+  media.transcribe=async source=>{assert.equal(source,'converted-audio.wav');return {text:'语音已转码'};};
+  await call('qq_video',{message_id:91});await call('qq_transcribe',{message_id:92});
+  assert.ok(calls.some(c=>c.action==='get_file'));assert.equal(calls.some(c=>c.action==='get_video'),false);
+}));
 test('记忆按会话和 QQ 隔离、去重、删除并跨重启恢复', () => fixture(async ({call,ctx,store,dir}) => {
   const a=await call('qq_memory_append',{user_id:20001,name:'甲',text:'喜欢咖啡'});
   const b=await call('qq_memory_append',{user_id:20001,name:'甲',text:'喜欢咖啡'}); assert.equal(a.id,b.id);

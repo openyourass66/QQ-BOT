@@ -66,7 +66,8 @@ test('工作区文件管理拒绝目录链接越界，外部文件保持原样',
     await assert.rejects(knowledge(root, { op: 'read_memory', name: 'link/outside.md' }), /链接/);
     await assert.rejects(knowledge(root, { op: 'save_memory', name: 'link/outside.md', text: 'bad', revision: null }), /链接/);
     await symlink(external, join(root, '.whale'), process.platform === 'win32' ? 'junction' : 'dir');
-    await assert.rejects(knowledge(root), /链接/);
+    assert.match((await knowledge(root)).warning, /链接/);
+    await assert.rejects(knowledge(root,{op:'save_preset',name:'外部库',text:'不能写入',libraryRevision:null}),/链接/);
     assert.equal(await readFile(join(external, 'outside.md'), 'utf8'), '外部内容');
   } finally { await rm(root, { recursive: true, force: true }); await rm(external, { recursive: true, force: true }); }
 });
@@ -88,11 +89,15 @@ test('全局人设保留外部编辑；人设库损坏时保留原文件且不�
     response = await worker('load');
     assert.equal(response.result.knowledge.presets[0].name, '助手');
     await writeFile(join(root, '.whale/personas.json'), '{broken');
-    await assert.rejects(knowledge(root), /损坏/);
+    assert.match((await knowledge(root)).warning, /损坏/);
     response = await worker('load');
     assert.equal(response.ok, true);
     assert.equal(response.result.persona, '外部编辑');
-    assert.match(response.result.knowledge.error, /损坏/);
+    assert.match(response.result.knowledge.warning, /损坏/);
     assert.equal(await readFile(join(root, '.whale/personas.json'), 'utf8'), '{broken');
+    response=await worker('knowledge',{op:'save_memory',name:'independent.md',text:'人设库损坏时仍可保存工作区记忆',revision:null});
+    assert.equal(response.ok,true);assert.match(response.result.warning,/损坏/);
+    assert.equal(await readFile(join(root,'memory/independent.md'),'utf8'),'人设库损坏时仍可保存工作区记忆');
+    assert.equal(await readFile(join(root,'.whale/personas.json'),'utf8'),'{broken');
   } finally { await rm(root, { recursive: true, force: true }); }
 });
