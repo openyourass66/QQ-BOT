@@ -63,10 +63,15 @@ export async function socialAdmin(input: unknown, store: SocialStore, media: Med
     case 'stickers': for (const t of data.stickers) add(t.id,'',t.note,t.tags.join('、'),`已用 ${t.uses} 次`,t.at,`${t.note}\n标签：${t.tags.join('、')}\n${t.file}`); break;
     case 'tasks': for (const t of [...data.tasks].reverse()) add(t.id,t.chat,t.text,t.error || t.text,{ pending:'等待执行',running:'执行中',sent:'已发送',failed:'失败',unknown:'结果待核对',cancelled:'已取消' }[t.state],t.due,`${t.text}\n${t.error || ''}\n${t.interval ? `每 ${t.interval/60000} 分钟` : '一次性'}`); break;
     case 'events': for (const e of [...data.events].reverse()) add(e.id,e.chat,e.type,String(e.data.comment ?? e.data.sub_type ?? ''),e.handled ? '已处理' : '已记录',e.at,JSON.stringify(e.data,null,2)); break;
-    case 'actions': for (const t of [...data.actions].reverse()) add(t.id,t.chat,t.tool,t.summary,{ running:'执行中',success:'成功',failed:'失败',unknown:'结果待核对' }[t.state],t.at); break;
+    case 'actions': for (const t of [...data.actions].reverse()) {
+      const alias: Record<string,string> = { send_message:'qq_send_message', like:'qq_like', qzone_post:'qq_qzone_post' };
+      const title = [...socialTools,...legacyTools].find(tool => tool.name === (alias[t.tool] ?? t.tool))?.title ?? t.tool;
+      add(t.id,t.chat,title,t.summary,{ running:'执行中',success:'成功',failed:'失败',unknown:'结果待核对' }[t.state],t.at);
+    } break;
     case 'turns': for (const t of [...data.turns].reverse()) add(t.id,t.chat,`${Math.round(t.duration/1000)} 秒`,t.output || t.error,t.error ? '失败' : '完成',t.at,`输入：\n${t.input}\n\n输出：\n${t.output}\n\n工具：${t.tools.join('、')}\n${t.error}\n\n用量：${t.inputTokens === null ? 'DSH 未提供' : t.inputTokens + ' 输入 / ' + t.outputTokens + ' 输出'}`); break;
     case 'capabilities': {
-      for (const [name,value] of Object.entries(media.capabilities())) add(name,'',name,value,value.includes('未配置') ? '未配置' : '可检查',0);
+      const names: Record<string,string> = { images:'图片理解',transcription:'语音识别',speech:'语音合成',video:'视频理解',search:'联网搜索',qzone:'空间动态' };
+      for (const [name,value] of Object.entries(media.capabilities())) add(name,'',names[name] ?? name,value,value.includes('未配置') ? '未配置' : '可检查',0);
       for (const tool of [...socialTools,...legacyTools]) add(tool.name,'',tool.title,tool.description,'已注册',0);
       break;
     }

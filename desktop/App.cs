@@ -15,7 +15,7 @@ using System.Windows.Threading;
 using System.Windows.Interop;
 using Forms = System.Windows.Forms;
 
-class App
+partial class App
 {
     static Window window;
     static Process host;
@@ -35,7 +35,7 @@ class App
     static int ticks;
     static EventWaitHandle restore;
     public class Choice { public string Value { get; set; } public string Label { get; set; } }
-    public class SocialRow { public string Id { get; set; } public string Chat { get; set; } public string Name { get; set; } public string Summary { get; set; } public string Status { get; set; } public string Time { get; set; } public string Detail { get; set; } public string Text { get; set; } }
+    public partial class SocialRow { public string Id { get; set; } public string Chat { get; set; } public string Name { get; set; } public string Summary { get; set; } public string Status { get; set; } public string Time { get; set; } public string Detail { get; set; } public string Text { get; set; } }
     static string[] socialSections = { "contacts", "messages", "memories", "stickers", "tasks", "events", "actions", "turns", "capabilities" };
     static Dictionary<string, Dictionary<string, object>> socialProfiles = new Dictionary<string, Dictionary<string, object>>();
     static Window profileDialog;
@@ -50,11 +50,13 @@ class App
     static T Find<T>(string name) where T : class { return window.FindName(name) as T; }
     static string Label(string key) { return labels.ContainsKey(key) ? labels[key] : key; }
     static void SocialRequest(string op = "list", bool blocked = true) {
+        if (socialBusy) return;
         var row = Find<ListView>("SocialList").SelectedItem as SocialRow;
         if (op != "list" && op != "refresh_contacts" && row == null) { Feedback("请先选择一条记录。"); return; }
         if (dirtySections.Contains("memory") && op != "edit_memory" && MessageBox.Show(window,"记忆编辑尚未保存，继续会放弃编辑。", "群友记忆", MessageBoxButton.YesNo) != MessageBoxResult.Yes) return;
         if ((op == "delete" || op == "reset_session") && MessageBox.Show(window, op == "delete" ? "删除这条记忆/表情，或取消所选提醒？" : "清除该会话的 Agent 上下文？消息存档仍会保留。", "确认操作", MessageBoxButton.YesNo) != MessageBoxResult.Yes) return;
-        Find<TextBlock>("SocialNote").Text = "正在处理，请稍候…";
+        Find<TextBlock>("SocialNote").Text = "正在读取，请稍候…";
+        SetSocialBusy(true);
         Send("social", new { op = op, section = socialSections[Math.Max(0, Find<ComboBox>("SocialSection").SelectedIndex)], query = Find<TextBox>("SocialSearch").Text, id = row == null ? "" : row.Id, chat = op == "list" || op == "refresh_contacts" ? "" : row.Chat, text = Find<TextBox>("SocialDetail").Text, blocked = blocked });
     }
     static void EditProfile() {
@@ -62,7 +64,7 @@ class App
         if (selected == null || selected.Chat.Length == 0) { Feedback("请先在联系人或聊天记录中选一个会话。"); return; }
         Dictionary<string, object> old;
         socialProfiles.TryGetValue(selected.Chat, out old);
-        var dialog = new Window { Title = "会话设置 · " + selected.Chat, Owner = window, Width = 600, Height = 700, MinHeight = 500, WindowStartupLocation = WindowStartupLocation.CenterOwner, Resources = window.Resources, Background = window.Background };
+        var dialog = new Window { Title = selected.Name + " · 会话设置", Owner = window, Width = 600, MinWidth = 540, Height = Math.Min(700,SystemParameters.WorkArea.Height-24), MinHeight = 500, WindowStartupLocation = WindowStartupLocation.CenterOwner, Resources = window.Resources, Background = window.Background, FontFamily=window.FontFamily, FontSize=13, Foreground=window.Foreground };
         var panel = new StackPanel { Margin = new Thickness(24) }; dialog.Content = new ScrollViewer { Content = panel, VerticalScrollBarVisibility = ScrollBarVisibility.Auto }; profileDialog = dialog;
         panel.Children.Add(new TextBlock { Text = "仅对这个会话生效", FontSize = 18, FontWeight = FontWeights.Bold, Margin = new Thickness(0,0,0,14) });
         panel.Children.Add(new TextBlock { Text = "参与方式" });
@@ -84,64 +86,13 @@ class App
     static void Send(string action, object data = null) {
         if (new[] { "settings", "env", "runtime", "persona" }.Contains(action)) Find<TabControl>("Tabs").IsEnabled = false;
         try { if (host == null || host.HasExited) throw new Exception(); hostInput.WriteLine(json.Serialize(new { action = action, data = data })); hostInput.Flush(); }
-        catch { Find<TabControl>("Tabs").IsEnabled = true; Feedback("控制进程不可用，请退出后重新打开控制台。"); }
+        catch { Find<TabControl>("Tabs").IsEnabled = true; SetSocialBusy(false); Feedback("控制进程不可用，请退出后重新打开控制台。"); }
     }
     static void Restore() { window.ShowInTaskbar = true; window.Show(); window.WindowState = WindowState.Normal; window.Activate(); window.Topmost = true; window.Topmost = false; }
     static void MarkDirty(string section) { if (!loading) { dirtySections.Add(section); dirty = true; Find<TextBlock>("SaveState").Text = "有尚未保存的修改"; } }
     static void EditChanged(object sender, TextChangedEventArgs e) { MarkDirty(sender == Find<TextBox>("Env") ? "env" : sender == Find<TextBox>("Persona") ? "persona" : "settings"); }
-    static void MakeFields(Dictionary<string, object> data, string prefix, StackPanel panel) {
-        foreach (var pair in data) {
-            string path = prefix + pair.Key;
-            var nested = pair.Value as Dictionary<string, object>;
-            if (nested != null) {
-                var group = new StackPanel();
-                group.Children.Add(new TextBlock { Text = Label(pair.Key), FontSize = 15, FontWeight = FontWeights.Bold, Margin = new Thickness(0, 4, 0, 15) });
-                MakeFields(nested, path + ".", group);
-                if (prefix.Length == 0) panel.Children.Add(new Border { Child = group, Background = (Brush)new BrushConverter().ConvertFromString("#F7F9FD"), CornerRadius = new CornerRadius(14), Padding = new Thickness(18), Margin = new Thickness(0, 0, 8, 15) });
-                else panel.Children.Add(group);
-                continue;
-            }
-            var row = new Grid { Margin = new Thickness(0, 0, 10, 10) };
-            row.ColumnDefinitions.Add(new ColumnDefinition()); row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(240) });
-            var label = new TextBlock { Text = Label(pair.Key), VerticalAlignment = VerticalAlignment.Center, ToolTip = path };
-            row.Children.Add(label);
-            Control input;
-            if (pair.Value is bool) {
-                var check = new CheckBox { IsChecked = (bool)pair.Value, Content = "开启", ToolTip = path };
-                check.Checked += (s, e) => MarkDirty("settings"); check.Unchecked += (s, e) => MarkDirty("settings"); input = check;
-            } else if (choices.ContainsKey(path)) {
-                var select = new ComboBox { ItemsSource = choices[path].Select(item => new Choice { Value = item.Split('|')[0], Label = item.Split('|')[1] }).ToList(), DisplayMemberPath = "Label", SelectedValuePath = "Value", SelectedValue = pair.Value };
-                select.SelectionChanged += (s,e) => MarkDirty("settings"); input = select;
-            } else {
-                bool array = pair.Value is System.Collections.IEnumerable && !(pair.Value is string);
-                var text = new TextBox { Text = array ? string.Join(", ", ((System.Collections.IEnumerable)pair.Value).Cast<object>().Select(item => Convert.ToString(item))) : Convert.ToString(pair.Value, System.Globalization.CultureInfo.InvariantCulture), ToolTip = array ? "多个值用逗号分隔；留空表示空列表" : path };
-                text.TextChanged += EditChanged; input = text;
-            }
-            System.Windows.Automation.AutomationProperties.SetName(input, Label(pair.Key));
-            fields[path] = input; Grid.SetColumn(input, 1); row.Children.Add(input); panel.Children.Add(row);
-        }
-    }
-    static void RuntimeFields(object value) {
-        var panel = Find<StackPanel>("RuntimeFields"); panel.Children.Clear(); runtimeInputs.Clear();
-        string lastGroup = "";
-        foreach (Dictionary<string, object> field in (System.Collections.IEnumerable)value) {
-            string key = (string)field["key"], group = (string)field["group"], kind = (string)field["kind"];
-            if (group != lastGroup) { panel.Children.Add(new TextBlock { Text = group, FontSize = 15, FontWeight = FontWeights.Bold, Margin = new Thickness(0, 18, 0, 12) }); lastGroup = group; }
-            var row = new Grid { Margin = new Thickness(0, 0, 8, 12) }; row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(220) }); row.ColumnDefinitions.Add(new ColumnDefinition());
-            row.Children.Add(new TextBlock { Text = (string)field["label"], VerticalAlignment = VerticalAlignment.Center, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 0, 12, 0) });
-            Control input;
-            if (kind == "secret") { var password = new PasswordBox { Password = (string)field["value"] }; password.PasswordChanged += (s, e) => MarkDirty("runtime"); input = password; }
-            else { var text = new TextBox { Text = (string)field["value"] }; text.TextChanged += (s, e) => MarkDirty("runtime"); input = text; }
-            runtimeInputs[key] = input; System.Windows.Automation.AutomationProperties.SetName(input, (string)field["label"]);
-            var holder = new DockPanel();
-            if (kind == "file" || kind == "folder") {
-                var browse = new Button { Content = "选择", Padding = new Thickness(9, 7, 9, 7), Margin = new Thickness(7, 0, 0, 0) };
-                browse.Click += (s, e) => { if (kind == "folder") { using (var dialog = new Forms.FolderBrowserDialog()) { if (dialog.ShowDialog() == Forms.DialogResult.OK) ((TextBox)input).Text = dialog.SelectedPath; } } else { var dialog = new Microsoft.Win32.OpenFileDialog { Filter = "所有文件|*.*" }; if (dialog.ShowDialog(window) == true) ((TextBox)input).Text = dialog.FileName; } };
-                DockPanel.SetDock(browse, Dock.Right); holder.Children.Add(browse);
-            }
-            holder.Children.Add(input); Grid.SetColumn(holder, 1); row.Children.Add(holder); panel.Children.Add(row);
-        }
-    }
+    static void MakeFields(Dictionary<string, object> data, string prefix, StackPanel panel) { BuildSettings(data, panel); }
+    static void RuntimeFields(object value) { BuildRuntimeFields(value); }
     static void RefreshLogs() {
         var search = Find<TextBox>("LogSearch").Text;
         int filter = Find<ComboBox>("LogFilter").SelectedIndex;
@@ -190,7 +141,7 @@ class App
         if (type == "error" && profileDialog != null) { profileDialog.IsEnabled = true; MessageBox.Show(profileDialog, (string)message["text"], "会话设置未保存"); }
         if (type == "log") {
             logs.Enqueue((string)message["text"]); while (logs.Count > 1500) logs.Dequeue();
-        } else if (type == "error") { Find<TabControl>("Tabs").IsEnabled = true; string text = (string)message["text"]; Feedback(text); Find<TextBlock>("LastError").Text = text; Find<Border>("ErrorBanner").Visibility = Visibility.Visible; logs.Enqueue("[error] " + text); }
+        } else if (type == "error") { Find<TabControl>("Tabs").IsEnabled = true; SetSocialBusy(false); string text = (string)message["text"]; Feedback(text); Find<TextBlock>("LastError").Text = text; Find<Border>("ErrorBanner").Visibility = Visibility.Visible; logs.Enqueue("[error] " + text); }
         else if (type == "saved") {
             Find<TabControl>("Tabs").IsEnabled = true;
             string section = (string)message["section"];
@@ -198,26 +149,10 @@ class App
                 var result = (Dictionary<string,object>)message["result"]; loading = true; Find<TextBox>("Env").Text = (string)result["env"]; RuntimeFields(result["runtimeFields"]); loading = false;
                 dirtySections.Remove("env"); dirtySections.Remove("runtime");
             }
-            dirtySections.Remove(section); dirty = dirtySections.Count > 0; Find<TextBlock>("SaveState").Text = dirty ? "还有尚未保存的修改" : "所有修改已保存"; Feedback("保存成功。动态设置即时生效；连接参数需重启，人设在新会话生效。");
+            dirtySections.Remove(section); dirty = dirtySections.Count > 0;
+            if (section == "settings") Find<TextBlock>("SettingsSaveHint").Text = "设置已保存并生效"; Find<TextBlock>("SaveState").Text = dirty ? "还有尚未保存的修改" : "所有修改已保存"; Feedback("保存成功。动态设置即时生效；连接参数需重启，人设在新会话生效。");
         }
-        else if (type == "social") {
-            if (profileDialog != null && message.ContainsKey("op") && (string)message["op"] == "profile") profileDialog.Close();
-            loading = true;
-            socialProfiles.Clear();
-            if (message.ContainsKey("profiles")) foreach (Dictionary<string, object> profile in (System.Collections.IEnumerable)message["profiles"]) socialProfiles[(string)profile["chat"]] = profile;
-            if (message.ContainsKey("socialSettings") && settings != null) {
-                var remote = (Dictionary<string, object>)message["socialSettings"];
-                var local = (Dictionary<string, object>)settings["social"];
-                foreach (string key in new[] { "blockedGroups", "blockedUsers", "allowedGroups", "allowedUsers" }) { local[key] = remote[key]; if (fields.ContainsKey("social." + key)) ((TextBox)fields["social." + key]).Text = string.Join(", ", ((System.Collections.IEnumerable)remote[key]).Cast<object>()); }
-            }
-            var rows = new List<SocialRow>();
-            foreach (Dictionary<string, object> row in (System.Collections.IEnumerable)message["rows"]) rows.Add(new SocialRow { Id = (string)row["id"], Chat = (string)row["chat"], Name = (string)row["name"], Summary = (string)row["summary"], Status = (string)row["status"], Time = (string)row["time"], Detail = (string)row["detail"], Text = (string)row["text"] });
-            Find<ListView>("SocialList").ItemsSource = rows; Find<TextBox>("SocialDetail").Text = "";
-            socialSelection = null;
-            Find<TextBlock>("SocialNote").Text = (string)message["note"];
-            dirtySections.Remove("memory"); dirty = dirtySections.Count > 0;
-            loading = false; Feedback("QQ 活动已更新。");
-        }
+        else if (type == "social") { RenderActivity(message); }
         else if (type == "config") {
             loading = true;
             settings = (Dictionary<string, object>)message["settings"];
@@ -288,7 +223,12 @@ class App
         bool smoke = args.Length > 0 && args[0] == "--smoke";
         int smokeStep = 0;
         DateTime smokeDeadline = DateTime.UtcNow.AddSeconds(20);
+        var application = new Application();
+        application.Resources.MergedDictionaries.Add((ResourceDictionary)XamlReader.Parse(File.ReadAllText(Path.Combine(root,"desktop/theme.xaml"),Encoding.UTF8)));
         window = (Window)XamlReader.Parse(File.ReadAllText(Path.Combine(root, "desktop/window.xaml"), Encoding.UTF8));
+        InitSettingsView(); InitActivityView();
+        window.Width = Math.Min(window.Width, SystemParameters.WorkArea.Width - 24);
+        window.Height = Math.Min(window.Height, SystemParameters.WorkArea.Height - 24);
         var iconStream = typeof(App).Assembly.GetManifestResourceStream("whale.ico");
         trayImage = new System.Drawing.Icon(iconStream); iconStream.Position = 0; window.Icon = System.Windows.Media.Imaging.BitmapFrame.Create(iconStream);
         var mascot = (ImageSource)XamlReader.Parse(File.ReadAllText(Path.Combine(root, "desktop/assets/whale.xaml"), Encoding.UTF8));
@@ -317,6 +257,12 @@ class App
         Find<Button>("CloseWindow").Click += (s,e) => window.Close();
         if (args.Length > 0 && args[0] == "--preview") {
             if (args.Length > 4) { window.Width = int.Parse(args[3]); window.Height = int.Parse(args[4]); }
+            if (args.Length > 5) {
+                var preview = json.Deserialize<Dictionary<string, object>>(File.ReadAllText(args[5],Encoding.UTF8));
+                Event(json.Serialize(preview["config"]));
+                if (preview.ContainsKey("social")) Event(json.Serialize(preview["social"]));
+                if (args.Length > 6) Find<ListBox>("SettingsNav").SelectedIndex = int.Parse(args[6]);
+            }
             window.Show(); window.UpdateLayout();
             Capture(args[1], args.Length > 2 ? int.Parse(args[2]) : 0); window.Close(); return;
         }
@@ -343,30 +289,7 @@ class App
         string[] socialKeys = { "autonomy", "allowAll", "allowedGroups", "allowedUsers", "blockedGroups", "blockedUsers", "responseMode", "keywords", "responseProbability", "batchWindowMs", "activeMinutes", "messagesPerMinute", "actionsPerDay", "memoryEnabled", "stickersEnabled", "mediaEnabled", "requestsEnabled", "filesEnabled", "remindersEnabled", "proactiveEnabled", "proactiveIntervalMinutes", "quietStartHour", "quietEndHour", "retentionDays", "messagesPerChat", "visionModel", "transcriptionModel", "speechModel", "speechVoice", "videoFrames" };
         string[] socialLabels = { "QQ 动作执行方式", "允许全部现有好友和群", "允许的群号", "允许的好友 QQ", "屏蔽群号", "屏蔽用户 QQ", "群聊参与方式", "参与关键词", "旁聊参与概率（百分比）", "消息聚合窗口（毫秒）", "话题活跃时间（分钟）", "每会话每分钟动作上限", "每日 QQ 动作上限", "群友长期记忆", "本地表情库", "图片、语音与视频", "好友与群申请处理", "文件收发", "定时提醒", "定时主动聊天机会", "主动机会间隔（分钟）", "安静时段开始（上海时间）", "安静时段结束（上海时间）", "消息保留天数", "每会话消息条数上限", "独立视觉模型（留空使用 DSH）", "语音转写模型（可选）", "语音合成模型（可选）", "合成声音", "视频抽帧数" };
         for (int i=0; i<socialKeys.Length; i++) labels[socialKeys[i]] = socialLabels[i];
-        Find<Button>("SocialRefresh").Click += (s,e) => SocialRequest();
-        Find<Button>("SocialContacts").Click += (s,e) => SocialRequest("refresh_contacts");
-        Find<Button>("SocialBlock").Click += (s,e) => SocialRequest("block");
-        Find<Button>("SocialUnblock").Click += (s,e) => SocialRequest("block", false);
-        Find<Button>("SocialSave").Click += (s,e) => SocialRequest("edit_memory");
-        Find<Button>("SocialDelete").Click += (s,e) => SocialRequest("delete");
-        Find<Button>("SocialReset").Click += (s,e) => SocialRequest("reset_session");
-        Find<Button>("SocialProfile").Click += (s,e) => EditProfile();
-        Find<ComboBox>("SocialSection").SelectionChanged += (s,e) => { if (!loading) SocialRequest(); };
-        Find<ListView>("SocialList").SelectionChanged += (s,e) => {
-            if (loading) return;
-            var row = Find<ListView>("SocialList").SelectedItem as SocialRow;
-            if (dirtySections.Contains("memory") && socialSelection != null && row != socialSelection) {
-                if (MessageBox.Show(window,"记忆尚未保存，放弃这次编辑并切换记录？","群友记忆",MessageBoxButton.YesNo) != MessageBoxResult.Yes) { loading = true; Find<ListView>("SocialList").SelectedItem = socialSelection; loading = false; return; }
-                dirtySections.Remove("memory"); dirty = dirtySections.Count > 0;
-            }
-            socialSelection = row;
-            bool memory = Find<ComboBox>("SocialSection").SelectedIndex == 2;
-            loading = true; Find<TextBox>("SocialDetail").IsReadOnly = !memory; Find<TextBox>("SocialDetail").Text = row == null ? "" : memory ? row.Text : row.Detail; loading = false;
-            Find<Button>("SocialSave").IsEnabled = row != null && memory;
-            Find<Button>("SocialDelete").IsEnabled = row != null && new[] { 2,3,4 }.Contains(Find<ComboBox>("SocialSection").SelectedIndex);
-        };
-        Find<TextBox>("SocialDetail").TextChanged += (s,e) => { if (!Find<TextBox>("SocialDetail").IsReadOnly) MarkDirty("memory"); };
-        Find<Button>("SaveSettings").Click += (s, e) => { try { Send("settings", Collect(settings, "")); } catch (Exception error) { Feedback(error.Message); } };
+        Find<Button>("SaveSettings").Click += (s, e) => { try { if (ValidateSettingsForm()) Send("settings", Collect(settings, "")); } catch (Exception error) { Feedback(error.Message); } };
         Find<Button>("SaveEnv").Click += (s, e) => { if (dirtySections.Contains("runtime") && MessageBox.Show(window,"保存高级文本将覆盖连接表单中尚未保存的编辑，继续吗？","保存连接配置",MessageBoxButton.YesNo) != MessageBoxResult.Yes) return; Send("env", Find<TextBox>("Env").Text); };
         Find<Button>("SaveRuntime").Click += (s,e) => { if (dirtySections.Contains("env") && MessageBox.Show(window,"保存表单将覆盖高级文本中尚未保存的编辑，继续吗？","保存连接配置",MessageBoxButton.YesNo) != MessageBoxResult.Yes) return; var data = runtimeInputs.ToDictionary(pair => pair.Key, pair => pair.Value is PasswordBox ? ((PasswordBox)pair.Value).Password : ((TextBox)pair.Value).Text); Send("runtime", data); };
         Find<Button>("SavePersona").Click += (s, e) => Send("persona", new { text = Find<TextBox>("Persona").Text, path = personaPath });
@@ -386,6 +309,7 @@ class App
             if (smoke && !exiting) {
                 if (DateTime.UtcNow > smokeDeadline) { Environment.ExitCode = 1; File.WriteAllText(Path.Combine(root, "smoke-result.txt"), "FAIL: lifecycle timeout"); exiting = true; Send("quit"); return; }
                 if (smokeStep == 0 && settings != null) {
+                    try { VerifySettingsInteraction(); } catch(Exception error) { Environment.ExitCode=1;File.WriteAllText(Path.Combine(root,"smoke-result.txt"),"FAIL: "+error.Message);exiting=true;Send("quit");return; }
                     if (fields.Count < 53 || runtimeInputs.Count < 20 || Find<TextBox>("Persona").Text != "测试小鲸人设" || !tray.Registered) { Environment.ExitCode = 1; File.WriteAllText(Path.Combine(root, "smoke-result.txt"), "FAIL: config=" + fields.Count + ", runtime=" + runtimeInputs.Count + ", tray=" + tray.Registered + ", personaLength=" + Find<TextBox>("Persona").Text.Length); exiting = true; Send("quit"); return; }
                     foreach (int page in new[] {0,1,2,3,4,5,6}) Capture(Path.Combine(root,"page-" + page + ".png"), page);
                     Send("settings", Collect(settings, ""));
@@ -394,17 +318,29 @@ class App
                     smokeStep = 10;
                 } else if (smokeStep == 10 && Find<ListView>("SocialList").Items.Count > 40 && Find<TabControl>("Tabs").IsEnabled) {
                     Capture(Path.Combine(root,"page-6-loaded.png"), 6);
+                    if(Find<TextBlock>("SocialDetailTitle").Text=="尚未选择记录"||Find<TextBox>("SocialDetail").Text.Length==0){Environment.ExitCode=1;File.WriteAllText(Path.Combine(root,"smoke-result.txt"),"FAIL: activity detail selection");exiting=true;Send("quit");return;}
+                    Find<ComboBox>("SocialSection").IsDropDownOpen=true;
+                    smokeStep=11;
+                } else if(smokeStep==11) {
+                    var combo=Find<ComboBox>("SocialSection");var popup=(System.Windows.Controls.Primitives.Popup)combo.Template.FindName("PART_Popup",combo);
+                    var element=popup.Child as FrameworkElement;
+                    if(element==null||element.ActualWidth<combo.ActualWidth||!popup.IsOpen){Environment.ExitCode=1;File.WriteAllText(Path.Combine(root,"smoke-result.txt"),"FAIL: custom dropdown layout");exiting=true;Send("quit");return;}
+                    var bitmap=new System.Windows.Media.Imaging.RenderTargetBitmap((int)Math.Ceiling(element.ActualWidth),(int)Math.Ceiling(element.ActualHeight),96,96,PixelFormats.Pbgra32);bitmap.Render(element);var encoder=new System.Windows.Media.Imaging.PngBitmapEncoder();encoder.Frames.Add(System.Windows.Media.Imaging.BitmapFrame.Create(bitmap));using(var output=File.Create(Path.Combine(root,"dropdown.png")))encoder.Save(output);
+                    combo.IsDropDownOpen=false;Find<TextBox>("SocialSearch").Text="__no_match__";SocialRequest();smokeStep=12;
+                } else if(smokeStep==12&&!socialBusy&&Find<ListView>("SocialList").Items.Count==0) {
+                    if(Find<StackPanel>("SocialEmpty").Visibility!=Visibility.Visible||Find<StackPanel>("SocialActionPanel").Visibility!=Visibility.Collapsed){Environment.ExitCode=1;File.WriteAllText(Path.Combine(root,"smoke-result.txt"),"FAIL: activity empty state");exiting=true;Send("quit");return;}
+                    Capture(Path.Combine(root,"page-6-empty.png"),6);
                     Find<TabControl>("Tabs").SelectedIndex = 0;
                     window.Close();
                     if (window.IsVisible) throw new Exception("Close did not hide window");
                     Process.Start(new ProcessStartInfo(Path.Combine(root, "QQ-BOT.exe")) { UseShellExecute = false, CreateNoWindow = true });
                     smokeStep = 1;
                 } else if (smokeStep == 1 && window.IsVisible) {
-                    File.WriteAllText(Path.Combine(root, "smoke-result.txt"), "PASS: native config and enum/list roundtrip, QQ activity offline capabilities, Shell tray registration, close to tray, duplicate instance restore, graceful exit");
+                    File.WriteAllText(Path.Combine(root, "smoke-result.txt"), "PASS: seven settings categories, search, numeric stepper and validation, enum/list roundtrip, custom dropdown, activity selection and empty state, Shell tray restore, graceful exit");
                     smokeStep = 2; Exit();
                 }
             }
         };
-        timer.Start(); Send("load"); Send("diagnose"); new Application().Run(window); timer.Stop();
+        timer.Start(); Send("load"); Send("diagnose"); application.Run(window); timer.Stop();
     }
 }

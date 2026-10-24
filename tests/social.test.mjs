@@ -130,6 +130,8 @@ test('控制台记录列表显示动作和会话，记忆管理不改变其他�
   const m=await call('qq_memory_append',{user_id:20001,name:'甲',text:'旧记忆'});
   await socialAdmin({op:'edit_memory',section:'memories',id:m.id,text:'新记忆'},store,media);
   const view=await socialAdmin({op:'list',section:'memories'},store,media); assert.equal(view.rows[0].text,'新记忆');
+  const capabilityView=await socialAdmin({op:'list',section:'capabilities'},store,media); assert.equal(capabilityView.rows.find(row=>row.id==='images').name,'图片理解');
+  const actionView=await socialAdmin({op:'list',section:'actions'},store,media); assert.equal(actionView.rows[0].name,'记录群友印象');
   await socialAdmin({op:'delete',section:'memories',id:m.id},store,media);
   assert.equal(store.snapshot().memories.length,0); assert.ok(store.snapshot().actions.length>0);
 }));
