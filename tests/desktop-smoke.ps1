@@ -73,8 +73,15 @@ $smokeTimer.Add_Tick({
                     $window.Close()
                     $openItem.PerformClick()
                     if (!$window.IsVisible) { throw 'Tray menu must restore the console' }
-                    $script:personaDirty = $false
+                    $window.Close()
+                    [void]$restoreSignal.Set()
                     $script:smokeStage = 6
+            }
+            6 {
+                    if (!$window.IsVisible) { return }
+                    if ($backend.HasExited -or !$personaDirty) { throw 'Reopening must preserve backend and unsaved edits' }
+                    $script:personaDirty = $false
+                    $script:smokeStage = 7
                     $smokeTimer.Stop()
                     $exitItem.PerformClick()
             }
@@ -91,5 +98,5 @@ $smokeTimer.Start()
 . (Join-Path $PSScriptRoot '../desktop/start.ps1') -TestMode
 $smokeTimer.Stop()
 if ($smokeFailure) { Write-Error $smokeFailure; exit 1 }
-if ($smokeStage -ne 6) { Write-Error "Native UI exited at stage $smokeStage"; exit 1 }
+if ($smokeStage -ne 7) { Write-Error "Native UI exited at stage $smokeStage"; exit 1 }
 Write-Output 'Native UI smoke passed: async status, settings, persona, navigation, sessions, logs, close.'

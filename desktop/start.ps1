@@ -50,6 +50,7 @@ $script:controlPending = $false
 $script:ready = $false
 $script:timer = $null
 $script:desktopMutex = $null
+$script:restoreSignal = $null
 $script:ownsMutex = $false
 $script:http = [Net.Http.HttpClient]::new()
 $http.Timeout = [timespan]::FromSeconds(25)
@@ -324,8 +325,9 @@ try {
     $hasher = [Security.Cryptography.SHA256]::Create()
     try { $lockKey = [BitConverter]::ToString($hasher.ComputeHash([Text.Encoding]::UTF8.GetBytes($projectRoot.ToLowerInvariant()))).Replace('-', '') } finally { $hasher.Dispose() }
     $mutexSuffix = if ($TestMode) { '-test-' + $PID } else { '' }
+    $script:restoreSignal = [Threading.EventWaitHandle]::new($false, [Threading.EventResetMode]::AutoReset, ('Local\QQBotDesktopRestore-' + $lockKey + $mutexSuffix))
     $script:desktopMutex = [Threading.Mutex]::new($true, ('Local\QQBotDesktop-' + $lockKey + $mutexSuffix), [ref]$script:ownsMutex)
-    if (!$ownsMutex) { [Windows.MessageBox]::Show('此项目的桌面控制台已经打开，请使用已有窗口。', 'QQ BOT', 'OK', 'Information') | Out-Null; return }
+    if (!$ownsMutex) { [void]$restoreSignal.Set(); return }
     $node = Join-Path $projectRoot 'runtime/node.exe'
     if (![IO.File]::Exists($node)) { $node = (Get-Command node.exe -ErrorAction Stop).Source }
     if (![IO.File]::Exists((Join-Path $projectRoot 'dist/console.js'))) { throw '缺少构建产物，请先运行 npm run build，或使用 npm run ui 启动。' }
@@ -346,6 +348,7 @@ try {
     $script:timer = [Windows.Threading.DispatcherTimer]::new(); $timer.Interval = [timespan]::FromMilliseconds(250)
     $timer.Add_Tick({
         try {
+            if ($restoreSignal.WaitOne(0) -and !$closing) { Restore-Console }
             if ($backend.HasExited -and $closing) { $script:allowClose = $true; $window.Close(); return }
             if ($closing) {
                 if (((Get-Date) - $script:closeAt).TotalSeconds -gt 18) {
@@ -442,4 +445,5 @@ try {
     $http.Dispose()
     if ($backend) { $backend.Dispose() }
     if ($desktopMutex) { if ($ownsMutex) { $desktopMutex.ReleaseMutex() }; $desktopMutex.Dispose() }
+    if ($restoreSignal) { $restoreSignal.Dispose() }
 }
