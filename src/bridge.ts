@@ -593,6 +593,12 @@ process.on('SIGTERM', () => { void shutdown(); });
 process.on('message', (message) => {
   if (message === 'shutdown') void shutdown();
 });
+if (process.send) {
+  const report = setInterval(() => {
+    if (process.connected) process.send?.({ type: 'status', ...status }, () => {});
+  }, 1000);
+  report.unref();
+}
 process.on('disconnect', () => { void shutdown(); });
 export type { BotSettings };
 void main().catch((error) => {

@@ -58,6 +58,19 @@ DeepSeek 登录态；也可以在 `~\.dsh\.env` 里写 `DEEPSEEK_API_KEY`。
 
 ## 配置与管理
 
+### Windows 桌面控制台
+
+运行 `npm run desktop` 编译并打开“小鲸的工作台”。也可运行 `npm run desktop:build` 后双击项目根目录的 `QQ-BOT.exe`；EXE 需与 `desktop`、`dist`、`node_modules` 目录保留在一起。需要 Windows 10/11 自带的 .NET Framework 4.8 和 Node.js 22 以上，不需要安装 Electron、浏览器服务或 .NET SDK。生成桌面快捷方式：`powershell -NoProfile -ExecutionPolicy Bypass -File desktop/build.ps1 -Shortcut`。
+
+- 开始工作 / 休息一下 / 重新启动，同时管理独立 Node 模式 NapCat 与机器人桥接。请先按下文部署 NapCat 官方运行库及 QQ，首次登录按 NapCat 日志完成扫码；未登录时不会显示 QQ 在线。
+- 关闭窗口隐藏到托盘，单击图标恢复；重复打开 EXE 唤回已有窗口。右键托盘选择“退出并停止机器人”才会停止两个受管进程并退出，不接管外部终端启动的实例。
+- 机器人设置提供现有全部动态字段，沿用机器人自身的范围与类型校验，保存后热更新。浏览器字段目前只保存配置，尚未接入外部 MCP。
+- 连接与运行页直接编辑完整 `.env`，支持 `.env.example` 中所有参数以及可选存储路径；保存后重启机器人生效。`bot.config.json` 的显式值仍优先于 `.env` 的同名默认值。连接页包含凭据，请妥善保管。
+- 人设页编辑 `BOT_WORKSPACE/AGENTS.md`，新建会话生效；可打开工作区记忆目录管理文件。修改 `BOT_WORKSPACE` 后请重新打开控制台再编辑人设。
+- 停止桥接先发送 IPC 退出请求，等待保存会话与额度；超时后清理该受管进程树。托盘退出同样执行此流程。NapCat 使用进程树终止。
+
+桌面端采用原生 WPF 与标准输入输出 JSON 通信，不监听额外网络端口。日志仅保留最近 1500 行；暂停滚动不影响机器人运行。不要同时从终端和桌面端启动同一机器人，避免账号与数据目录冲突。
+
 需要 Node.js 22 或以上版本。`npm start` 运行已有构建产物，修改源码后先执行 `npm run build`。
 
 首次启动会创建 `bot.config.json`（可通过 `BOT_SETTINGS_FILE` 改路径）。文件中的显式值优先，缺失字段从 `.env` 的对应配置或默认值补齐；已有文件中的值不会因修改 `.env` 自动改变。配置保存后热更新，支持编辑器通过原子替换保存文件。无效配置会报错，原文件保留。
@@ -134,6 +147,8 @@ OneBot WebSocket 握手最多等待 10 秒，连接后每 30 秒发送 ping；�
 ```powershell
 npm run typecheck
 npm test
+# Windows 原生窗口、托盘隐藏与重复启动恢复（先 npm run desktop:build）
+powershell -NoProfile -ExecutionPolicy Bypass -File tests/desktop-smoke.ps1
 ```
 
 测试使用临时目录、假的 ACP / OneBot 服务与真实 QQ MCP 子进程，验证消息顺序、超时恢复、审批取消、配置热更新、并发额度、重启计数、跨日重置、突发消息限流、握手超时及心跳重连，不连接真实 QQ 或调用模型。

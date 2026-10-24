@@ -3,6 +3,9 @@ node_modules/
 
 # 构建产物
 dist/
+QQ-BOT.exe
+desktop-preview*.png
+*.desktop.tmp
 
 # 本地环境与密钥
 .env

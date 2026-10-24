@@ -4,6 +4,8 @@
   "type": "module",
   "version": "0.1.0",
   "scripts": {
+    "desktop:build": "npm run build && powershell -NoProfile -ExecutionPolicy Bypass -File desktop/build.ps1",
+    "desktop": "npm run desktop:build && powershell -NoProfile -Command \"Start-Process -FilePath ./QQ-BOT.exe -WindowStyle Hidden\"",
     "build": "tsc -p tsconfig.json",
     "start": "node --env-file=.env dist/bridge.js",
     "mcp": "node --env-file=.env dist/mcp-qq.js",
