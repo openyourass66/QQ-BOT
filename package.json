@@ -2,7 +2,7 @@
   "name": "qq-bot-bridge",
   "private": true,
   "type": "module",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "scripts": {
     "desktop:build": "npm run build && powershell -NoProfile -ExecutionPolicy Bypass -File desktop/build.ps1",
     "desktop": "powershell -NoProfile -ExecutionPolicy Bypass -File desktop/start.ps1",

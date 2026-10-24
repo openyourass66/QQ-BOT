@@ -31,6 +31,8 @@ test('完整桥接链路：群上下文、连续回复顺序、超时恢复、DS
       data = { user_id: 10000, nickname: 'test' };
     }
     if (req.url === '/send_like') likes++;
+    if (req.url === '/get_friend_list') data = [{ user_id: 12345, nickname: '管理员' }, { user_id: 20001, nickname: '测试' }];
+    if (req.url === '/get_group_list') data = [{ group_id: 30001, group_name: '测试群' }];
     if (req.url === '/send_qzone_msg') posts++;
     if (req.url === '/send_private_msg' || req.url === '/send_group_msg') {
       replies.push(params);

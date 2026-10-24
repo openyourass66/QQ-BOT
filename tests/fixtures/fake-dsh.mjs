@@ -46,6 +46,20 @@ lines.on('line', async (line) => {
     }
     if (text.includes('测试超时')) return;
     if (text.includes('测试崩溃')) { process.exit(3); }
+    if (text.includes('SOCIAL_REPLY') || text.includes('SOCIAL_SILENT') || text.includes('SOCIAL_MEMORY')) {
+      const server = sessionServers.get(params.sessionId).find(entry => entry.name === 'qq');
+      const client = new Client({ name:'social-agent',version:'1' });
+      try {
+        await client.connect(new StdioClientTransport({command:server.command,args:server.args,env:Object.fromEntries(server.env.map(({name,value})=>[name,value])),stderr:'pipe'}));
+        let tool;
+        if(text.includes('SOCIAL_REPLY')) tool={name:'qq_reply',arguments:{text:'工具回复已送出',reply_to:Number(text.match(/当前消息编号 #(-?\d+)/)[1])}};
+        if(text.includes('SOCIAL_SILENT')) tool={name:'qq_finish',arguments:{reason:'这段无需回应'}};
+        if(text.includes('SOCIAL_MEMORY')) tool={name:'qq_memory_append',arguments:{user_id:20001,name:'测试群友',text:'喜欢咖啡'}};
+        const result=await client.callTool(tool); if(result.isError) throw new Error(result.content[0].text);
+      } finally { await client.close(); }
+      notify('session/update',{sessionId:params.sessionId,update:{sessionUpdate:'agent_message_chunk',content:{type:'text',text:text.includes('SOCIAL_MEMORY')?'记住了':'重复文本不应发送'}}});
+      respond(id,{stopReason:'end_turn',usage:{inputTokens:120,outputTokens:30,totalTokens:150}});return;
+    }
     if (text.includes('MCP点赞') || text.includes('MCP空间')) {
       const qzone = text.includes('MCP空间');
       const server = sessionServers.get(params.sessionId)?.find((entry) => entry.name === 'qq');
@@ -63,6 +77,8 @@ lines.on('line', async (line) => {
         text = result.isError ? `MCP拒绝:${result.content[0].text}` : qzone ? 'MCP空间成功' : 'MCP调用成功';
       } finally { await client.close(); }
     }
+    text = text.split('\n\n【QQ 工具约定】')[0];
+    text = text.split('\n【当前消息编号')[0];
     notify('session/update', {
       sessionId: params.sessionId,
       update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text } },

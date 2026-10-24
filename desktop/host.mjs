@@ -9,6 +9,8 @@ process.chdir(root);
 const logDir = join(root, 'data/desktop'); mkdirSync(logDir, { recursive: true });
 const logPath = join(logDir, 'console.log');
 const children = new Map();
+const socialRequests = new Map();
+let socialSequence = 0;
 let busy = false, quitting = false, externalNapcat = false;
 let secrets = [];
 async function refreshSecrets() { const env = await environment(root); secrets = Object.entries(env).filter(([key, value]) => /TOKEN|SECRET|PASSWORD|API_KEY/i.test(key) && value?.length >= 4).map(([, value]) => value); }
@@ -39,7 +41,11 @@ function launch(name, script) {
       if (/EPERM.*cordis\.yml/.test(text)) emit({ type: 'error', text: 'DSH 无法写入 Profile 的 cordis.yml。请关闭占用该文件的程序、检查文件访问权限，再点击“重连模型”。NapCat 会继续保持登录。' });
     });
   }
-  child.on('message', message => { if (name === 'bridge' && message?.type === 'status') emit(message); });
+  child.on('message', message => {
+    if (name !== 'bridge') return;
+    if (message?.type === 'status') emit(message);
+    if (message?.type === 'social-result') { const pending = socialRequests.get(message.id); if (pending) { socialRequests.delete(message.id); clearTimeout(pending.timer); message.error ? pending.reject(new Error(message.error)) : pending.done(message.result); } }
+  });
   child.on('error', error => emit({ type: 'error', text: `${name} 启动失败：${error.code || error.message}` }));
   child.on('exit', (code, signal) => { if (children.get(name) === child) children.delete(name); emit({ type: code ? 'error' : 'log', text: `[${name}] 已退出，代码 ${code ?? signal}` }); state(); });
 }
@@ -72,6 +78,18 @@ async function config(action, data) {
 }
 async function check() { const result = await diagnose(root); emit({ type: 'diagnostics', ...result }); return result; }
 async function command({ action, data }) {
+  if (action === 'social') {
+    const bridge = children.get('bridge');
+    let result;
+    if (bridge?.connected) result = await new Promise((done, reject) => {
+      const id = String(++socialSequence);
+      const timer = setTimeout(() => { socialRequests.delete(id); reject(new Error('QQ 活动操作超时，请确认机器人运行状态')); }, 30000);
+      socialRequests.set(id, { done, reject, timer });
+      bridge.send({ type: 'social', id, data }, error => { if (error) { clearTimeout(timer); socialRequests.delete(id); reject(error); } });
+    });
+    else result = await config('social', data);
+    emit({ type: 'social', ...result }); return;
+  }
   if (action === 'load' || ['settings', 'env', 'runtime', 'persona'].includes(action)) {
     const result = await config(action, data);
     emit(action === 'load' ? { type: 'config', ...result } : { type: 'saved', section: action, result });

@@ -213,6 +213,34 @@
      <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto"><StackPanel x:Name="Diagnostics"/></ScrollViewer>
      <Button x:Name="OpenLogs" Grid.Row="2" Content="打开日志目录" HorizontalAlignment="Right" Margin="0,15,0,0"/>
     </Grid></Border></TabItem>
+    <TabItem Header="QQ 活动"><Border Style="{StaticResource Surface}"><Grid>
+     <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="2*"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+     <WrapPanel Margin="0,0,0,12">
+      <TextBlock Text="查看" VerticalAlignment="Center" Margin="0,0,8,0"/>
+      <ComboBox x:Name="SocialSection" Width="125" SelectedIndex="0" AutomationProperties.Name="活动类型"><ComboBoxItem Content="联系人与群"/><ComboBoxItem Content="聊天记录"/><ComboBoxItem Content="群友记忆"/><ComboBoxItem Content="表情库"/><ComboBoxItem Content="定时提醒"/><ComboBoxItem Content="QQ 事件"/><ComboBoxItem Content="动作结果"/><ComboBoxItem Content="模型会话"/><ComboBoxItem Content="能力状态"/></ComboBox>
+      <TextBox x:Name="SocialSearch" Width="145" Margin="8,0" AutomationProperties.Name="搜索活动" ToolTip="按名字、会话或内容搜索"/>
+      <Button x:Name="SocialRefresh" Content="查询" Padding="14,7"/>
+      <Button x:Name="SocialContacts" Content="同步 QQ 联系人" Margin="8,0,0,0" Padding="14,7"/>
+     </WrapPanel>
+     <TextBlock x:Name="SocialNote" Grid.Row="1" Text="选择活动类型后查询。机器人停止时也能查看已有记录。" TextWrapping="Wrap" Foreground="{StaticResource Muted}" Margin="0,0,0,10"/>
+     <ListView x:Name="SocialList" Grid.Row="2" AutomationProperties.Name="QQ 活动记录" ScrollViewer.HorizontalScrollBarVisibility="Auto"><ListView.View><GridView>
+      <GridViewColumn Header="对象 / 功能" Width="135" DisplayMemberBinding="{Binding Name}"/>
+      <GridViewColumn Header="内容" Width="210" DisplayMemberBinding="{Binding Summary}"/>
+      <GridViewColumn Header="会话" Width="125" DisplayMemberBinding="{Binding Chat}"/>
+      <GridViewColumn Header="状态" Width="90" DisplayMemberBinding="{Binding Status}"/>
+      <GridViewColumn Header="时间" Width="145" DisplayMemberBinding="{Binding Time}"/>
+     </GridView></ListView.View></ListView>
+     <TextBlock Grid.Row="3" Text="选中记录查看详情；群友记忆可在下方修改并保存。" Foreground="{StaticResource Muted}" FontSize="11" Margin="0,12,0,8"/>
+     <TextBox x:Name="SocialDetail" Grid.Row="4" AcceptsReturn="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" IsReadOnly="True" AutomationProperties.Name="记录详情或记忆内容"/>
+     <WrapPanel Grid.Row="5" Margin="0,12,0,0">
+      <Button x:Name="SocialBlock" Content="屏蔽对象" Padding="12,7"/>
+      <Button x:Name="SocialUnblock" Content="解除屏蔽" Margin="8,0,0,0" Padding="12,7"/>
+      <Button x:Name="SocialSave" Content="保存记忆" Margin="8,0,0,0" Padding="12,7"/>
+      <Button x:Name="SocialDelete" Content="删除 / 取消" Margin="8,0,0,0" Padding="12,7"/>
+      <Button x:Name="SocialReset" Content="重置会话" Margin="8,0,0,0" Padding="12,7"/>
+      <Button x:Name="SocialProfile" Content="会话人设与参与" Margin="8,0,0,0" Padding="12,7"/>
+     </WrapPanel>
+    </Grid></Border></TabItem>
    </TabControl>
    <Border x:Name="ErrorBanner" Grid.Row="1" Grid.Column="1" VerticalAlignment="Top" Margin="28,96,28,0" Background="#FFF1F2" BorderBrush="#F5D7DD" BorderThickness="1" CornerRadius="9" Padding="13,10" Visibility="Collapsed" Panel.ZIndex="10">
     <DockPanel><TextBlock x:Name="LastError" Foreground="#A43D52" TextWrapping="Wrap" FontSize="11"/></DockPanel>

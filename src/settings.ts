@@ -3,6 +3,7 @@ import { watch } from 'node:fs';
 import { basename, dirname, resolve } from 'node:path';
 import { z } from 'zod';
 import { config } from './config.js';
+import { SocialSettingsSchema } from './social-settings.js';
 
 const GroupSchema = z
   .object({
@@ -22,6 +23,7 @@ const GroupSchema = z
 
 const SettingsSchema = z
   .object({
+    social: SocialSettingsSchema,
     identity: z
       .object({
         name: z.string().min(1).max(32).default('小深'),

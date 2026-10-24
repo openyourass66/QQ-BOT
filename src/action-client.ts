@@ -1,6 +1,7 @@
 import type { QqAction } from './qq-actions.js';
+import type { SocialCall } from './social-tools.js';
 
-export async function requestQqAction(action: QqAction, signal?: AbortSignal): Promise<unknown> {
+export async function requestQqAction(action: QqAction | SocialCall | { action: 'legacy'; tool: string; args: Record<string, unknown> }, signal?: AbortSignal): Promise<unknown> {
   const url = process.env.BOT_ACTION_URL;
   const token = process.env.BOT_ACTION_TOKEN;
   if (!url || !token) throw new Error('动作策略服务未连接；请使用 bridge 自动挂载的 QQ MCP');

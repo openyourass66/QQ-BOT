@@ -122,6 +122,7 @@ export interface OneBotWsOptions {
   onState?: (connected: boolean) => void;
   onLog?: (message: string) => void;
   onHeartbeat?: (online: boolean) => void;
+  onNotice?: (event: Record<string, unknown>) => void;
   heartbeatIntervalMs?: number;
   reconnectDelayMs?: number;
   handshakeTimeoutMs?: number;
@@ -199,6 +200,9 @@ export class OneBotWs {
           const event = parseMessageEvent(parsed);
           if (event) this.options.onEvent(event);
           else this.options.onLog?.('[onebot] invalid message event ignored');
+        } else if (frame.post_type === 'notice' || frame.post_type === 'request') {
+          if (Number.isSafeInteger(frame.self_id) && Number(frame.self_id) > 0 &&
+            (typeof frame.notice_type === 'string' || typeof frame.request_type === 'string')) this.options.onNotice?.(frame);
         } else if (frame.post_type === 'meta_event' && frame.meta_event_type === 'heartbeat') {
           const status = frame.status as { online?: unknown } | undefined;
           if (typeof status?.online === 'boolean') this.options.onHeartbeat?.(status.online);
@@ -260,6 +264,8 @@ export function segmentsToText(segments: Segment[]): string {
       case 'reply':
         parts.push('[引用消息]');
         break;
+      case 'forward': parts.push('[合并转发聊天记录]'); break;
+      case 'file': parts.push(`[文件：${String(segment.data.name ?? '未知文件')}]`); break;
       default:
         break;
     }

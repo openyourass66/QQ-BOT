@@ -17,6 +17,16 @@ process.once('message', async ({ action, data }) => {
       result = { settings: await settings.loadSettings(), env, runtimeFields: describeEnv(env), persona: await read(personaPath), personaPath };
     }
     else if (action === 'settings') result = await settings.saveSettings(data);
+    else if (action === 'social') {
+      await settings.loadSettings();
+      const { SocialStore } = await import('../dist/social-store.js');
+      const { MediaService } = await import('../dist/media.js');
+      const { socialAdmin } = await import('../dist/social-admin.js');
+      const folder = dirname(resolve(process.env.SESSION_STORE || 'data/sessions.json'));
+      const store = new SocialStore(process.env.BOT_SOCIAL_STORE || resolve(folder, 'social.json')); await store.load();
+      const media = new MediaService(process.env.BOT_MEDIA_DIR || resolve(folder, 'media'), () => settings.getSettings().social);
+      result = await socialAdmin(data, store, media);
+    }
     else if (action === 'env' || action === 'runtime') {
       if (action === 'runtime') {
         const allowed = new Set(runtimeFields.map(field => field[1]));

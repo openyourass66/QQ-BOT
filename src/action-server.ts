@@ -41,7 +41,7 @@ export async function startActionServer(
       let size = 0;
       for await (const chunk of req) {
         size += chunk.length;
-        if (size > 65_536) {
+        if (size > 262_144) {
           send(413, { error: '请求体过大' });
           return;
         }
