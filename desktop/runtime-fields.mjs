@@ -1,5 +1,5 @@
 import { parseEnv } from 'node:util';
-import { readChatModelConfig, defaultChatBaseUrl, defaultChatModel } from '../dist/chat-model.js';
+import { readChatModelConfig, defaultChatBaseUrl, defaultChatModel, normalizeChatBaseUrl } from '../dist/chat-model.js';
 
 export const chatRuntimeKeys = new Set(['BOT_CHAT_MODE', 'BOT_CHAT_MODEL', 'BOT_CHAT_BASE_URL', 'QQ_BOT_DEEPSEEK_API_KEY']);
 
@@ -23,7 +23,8 @@ export function mergeRuntimeEnv(original, data) {
   if (!data || typeof data !== 'object' || Array.isArray(data)) throw new Error('连接配置格式无效');
   const allowed = new Set(runtimeFields.map(field => field[1]));
   let text = original;
-  for (const [key, value] of Object.entries(data)) {
+  for (const [key, input] of Object.entries(data)) {
+    const value = key === 'BOT_CHAT_BASE_URL' && typeof input === 'string' && input.trim() ? normalizeChatBaseUrl(input) : input;
     if (!allowed.has(key) || typeof value !== 'string' || /[\r\n\0"]/u.test(value)) throw new Error('连接配置格式无效：输入不可包含换行或双引号');
     const quote = value.includes("'") ? '"' : "'";
     const line = `${key}=${quote}${value}${quote}`;

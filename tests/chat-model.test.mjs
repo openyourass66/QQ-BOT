@@ -5,7 +5,7 @@ import { once } from 'node:events';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { readChatModelConfig, chatModelPatches, chatModelSelection, prepareChatModelPatch, listChatModels, testChatModel } from '../dist/chat-model.js';
+import { readChatModelConfig, normalizeChatBaseUrl, chatModelPatches, chatModelSelection, prepareChatModelPatch, listChatModels, testChatModel } from '../dist/chat-model.js';
 
 test('项目模型配置：独立凭据引用、不在覆盖文件中写入密钥、兼容沿用 Profile', async () => {
   assert.equal(chatModelSelection(readChatModelConfig({})), undefined);
@@ -59,4 +59,30 @@ test('模型连接：使用输入的项目 Key、Messages 实际回复、模型�
     status = 402; await assert.rejects(testChatModel(config), /余额不足/);
     await assert.rejects(listChatModels(readChatModelConfig({ BOT_CHAT_MODE: 'account' })), /本项目 API Key/);
   } finally { http.closeAllConnections(); await new Promise(done => http.close(done)); }
+});
+
+test('官方根地址和 /v1 自动转为 Messages 入口，测试、保存和运行使用相同地址', async t => {
+  const expected = 'https://api.deepseek.com/anthropic';
+  const env = { BOT_CHAT_MODE: 'project', QQ_BOT_DEEPSEEK_API_KEY: 'project-fixture-key' };
+  for (const url of ['https://api.deepseek.com', 'https://api.deepseek.com/', 'https://api.deepseek.com/v1', ' https://api.deepseek.com/v1/ ']) {
+    const config = readChatModelConfig({ ...env, BOT_CHAT_BASE_URL: url });
+    assert.equal(config.baseUrl, expected);
+    assert.equal(chatModelPatches(config).find(p => p.id === 'llm-deepseek').config.baseURL, expected);
+  }
+  for (const url of ['https://proxy.example.test', 'https://proxy.example.test/v1', 'https://api.deepseek.com:444', expected, expected + '/v1', 'https://api.deepseek.com.example.test']) {
+    assert.equal(normalizeChatBaseUrl(url), url);
+  }
+  assert.throws(() => readChatModelConfig({ ...env, BOT_CHAT_BASE_URL: 'https://api.deepseek.com/?key=x' }), /API 地址/);
+  const calls = [];
+  t.mock.method(globalThis, 'fetch', async (url, options) => {
+    calls.push(String(url));
+    return new Response(JSON.stringify(options.method === 'GET' ? { data: [{ id: 'deepseek-flash' }] } : { content: [{ type: 'text', text: 'OK' }] }), { headers: { 'content-type': 'application/json' } });
+  });
+  const config = readChatModelConfig({ ...env, BOT_CHAT_BASE_URL: 'https://api.deepseek.com' });
+  await listChatModels(config); await testChatModel(config);
+  assert.deepEqual(calls, ['https://api.deepseek.com/models', expected + '/v1/messages']);
+  const { mergeRuntimeEnv, validateRuntimeEnv } = await import('../desktop/runtime-fields.mjs');
+  const saved = mergeRuntimeEnv('', { ...env, BOT_CHAT_BASE_URL: 'https://api.deepseek.com' });
+  assert.match(saved, /BOT_CHAT_BASE_URL='https:\/\/api.deepseek.com\/anthropic'/);
+  validateRuntimeEnv(saved);
 });

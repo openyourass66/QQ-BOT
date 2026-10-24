@@ -5,6 +5,16 @@ export const projectChatKey = 'QQ_BOT_DEEPSEEK_API_KEY';
 export const defaultChatBaseUrl = 'https://api.deepseek.com/anthropic';
 export const defaultChatModel = 'deepseek-flash';
 
+export function normalizeChatBaseUrl(value: string): string {
+  const baseUrl = value.trim().replace(/\/+$/, '');
+  try {
+    const url = new URL(baseUrl);
+    if (url.origin === 'https://api.deepseek.com' && !url.username && !url.password && !url.search && !url.hash
+      && (url.pathname === '/' || url.pathname === '/v1')) return defaultChatBaseUrl;
+  } catch { /* Configuration validation reports invalid addresses below. */ }
+  return baseUrl;
+}
+
 export interface ChatModelConfig {
   mode: 'profile' | 'project' | 'account';
   model: string;
@@ -16,7 +26,7 @@ export function readChatModelConfig(env: Record<string, string | undefined>): Ch
   const mode = env.BOT_CHAT_MODE || 'profile';
   if (!['profile', 'project', 'account'].includes(mode)) throw new Error('连接配置格式无效：对话模型使用方式无效');
   const model = (env.BOT_CHAT_MODEL || defaultChatModel).trim();
-  const baseUrl = (env.BOT_CHAT_BASE_URL || defaultChatBaseUrl).trim().replace(/\/+$/, '');
+  const baseUrl = normalizeChatBaseUrl(env.BOT_CHAT_BASE_URL || defaultChatBaseUrl);
   const apiKey = (env[projectChatKey] || '').trim();
   if (mode !== 'profile') {
     if (!model || model.length > 128 || /[\s\x00-\x1f\x7f]/u.test(model)) throw new Error('连接配置格式无效：模型 ID 应为 1–128 个字符，不可包含空白');

@@ -53,6 +53,7 @@ node --env-file=.env.test dist/bridge.js
 
 项目独立配置使用 `.env` 的 `BOT_CHAT_MODE=project`、`BOT_CHAT_MODEL`、`BOT_CHAT_BASE_URL` 和
 `QQ_BOT_DEEPSEEK_API_KEY`；API 地址默认是 DeepSeek 官方 Messages 入口，自定义地址也需支持 Messages 协议。
+填写官方根地址 `https://api.deepseek.com` 或其 `/v1` 地址时，会自动转换为 `/anthropic` 入口，保存、测试和实际模型调用使用同一地址。
 密钥不会写入 DSH 全局凭据；启动时在 `SESSION_STORE` 同目录的 `dsh/chat-model.patch.json` 生成不含密钥的覆盖配置。
 `BOT_CHAT_MODE=account` 复用 DSH 已登录的 DeepSeek 账号；`profile` 沿用已有 Profile，保留原来的调用方式。
 只修改对话模型时，「保存并重新启动」会重连模型并保留 QQ 登录；其他连接参数变化仍完整重启。
