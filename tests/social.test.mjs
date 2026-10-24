@@ -130,12 +130,16 @@ test('控制台记录列表显示动作和会话，记忆管理不改变其他�
   const m=await call('qq_memory_append',{user_id:20001,name:'甲',text:'旧记忆'});
   await socialAdmin({op:'edit_memory',section:'memories',id:m.id,text:'新记忆'},store,media);
   const view=await socialAdmin({op:'list',section:'memories'},store,media); assert.equal(view.rows[0].text,'新记忆');
+  assert.equal((await socialAdmin({op:'list',section:'memories',query:'20001'},store,media)).rows.length,1);
+  await assert.rejects(socialAdmin({op:'edit_memory',section:'memories',id:m.id,text:'过期编辑',expectedText:'旧记忆'},store,media),/其他操作修改/);
+  await assert.rejects(socialAdmin({op:'delete',section:'memories',id:m.id,expectedText:'旧记忆'},store,media),/其他操作修改/);
+  await assert.rejects(socialAdmin({op:'edit_memory',section:'memories',id:m.id,text:'x'.repeat(2001)},store,media),/2000/);
   const capabilityView=await socialAdmin({op:'list',section:'capabilities'},store,media); assert.equal(capabilityView.rows.find(row=>row.id==='images').name,'图片理解');
   const actionView=await socialAdmin({op:'list',section:'actions'},store,media); assert.equal(actionView.rows[0].name,'记录群友印象');
   await socialAdmin({op:'delete',section:'memories',id:m.id},store,media);
   assert.equal(store.snapshot().memories.length,0); assert.ok(store.snapshot().actions.length>0);
 }));
-test('生成文件、发送文件和动作核对形成闭环；每会话人设持久化', () => fixture(async ({call,store,media,calls,ctx}) => {
+test('生成文件、发送文件和动作核对形成闭环；每会话人设持久化', () => fixture(async ({dir,call,store,media,calls,ctx}) => {
   const file=await call('qq_create_file',{name:'聊天摘要.md',text:'# 今天\n喝咖啡'});
   const turn=ctx(); await call('qq_send_file',{source:file.file,name:file.name},turn);
   assert.equal(turn.sent,1); assert.equal(calls.find(c=>c.action==='upload_group_file').params.name,'聊天摘要.md');
@@ -143,6 +147,11 @@ test('生成文件、发送文件和动作核对形成闭环；每会话人设�
   await socialAdmin({op:'profile',chat:'group:30001',text:'安静的群友',responseMode:'keywords',keywords:'咖啡,天气',probability:20,proactive:false},store,media);
   assert.equal(store.snapshot().profiles[0].persona,'安静的群友');
   assert.deepEqual(store.snapshot().profiles[0].keywords,['咖啡','天气']);
+  const presetText='详细的自定义人设。'.repeat(500);
+  await socialAdmin({op:'profile',chat:'private:20001',text:presetText},store,media);
+  assert.equal(store.profile('private:20001').persona,presetText);
+  const restored=new SocialStore(join(dir,'social.json'));await restored.load();assert.equal(restored.profile('private:20001').persona,presetText);
+  await assert.rejects(socialAdmin({op:'profile',chat:'private:20001',text:'x'.repeat(10001)},store,media));
 }));
 test('周期提醒重新安排未来执行；主动机会受间隔与会话开关限制', () => fixture(async ({call,store,engine,ctx,settings}) => {
   settings.chat.group.proactive.enabled=true; settings.chat.group.proactive.perGroupPerDay=5;

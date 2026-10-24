@@ -9,10 +9,10 @@ const requestSchema = z.object({
   op: z.enum(['list', 'edit_memory', 'delete', 'block', 'allow', 'refresh_contacts', 'reset_session', 'profile']),
   section: z.enum(['contacts','messages','memories','stickers','tasks','events','actions','turns','capabilities']).default('contacts'),
   chat: z.string().max(64).default(''), query: z.string().max(256).default(''), id: z.string().max(128).default(''),
-  text: z.string().max(2000).default(''), blocked: z.boolean().default(true),
+  text: z.string().max(10000).default(''), expectedText: z.string().max(2000).optional(), blocked: z.boolean().default(true),
   responseMode: z.enum(['inherit','mention','keywords','probability','all']).default('inherit'),
   probability: z.number().int().min(0).max(100).default(10), keywords: z.string().max(1000).default(''), proactive: z.boolean().default(true),
-}).strict();
+}).strict().refine(value => value.op === 'profile' || value.text.length <= 2000, { message: '记忆内容最多 2000 字', path: ['text'] });
 
 export async function socialAdmin(input: unknown, store: SocialStore, media: MediaService,
   live?: { refresh(): Promise<void>; reset(chat: string): Promise<void> }): Promise<unknown> {
@@ -35,10 +35,10 @@ export async function socialAdmin(input: unknown, store: SocialStore, media: Med
   }
   if (a.op === 'edit_memory') {
     if (!a.text.trim()) throw new Error('记忆内容不能为空');
-    await store.update(d => { const m = d.memories.find(m => m.id === a.id); if (!m) throw new Error('记忆不存在'); m.text = a.text; });
+    await store.update(d => { const m = d.memories.find(m => m.id === a.id); if (!m) throw new Error('记忆不存在'); if (a.expectedText !== undefined && m.text !== a.expectedText) throw new Error('记忆已被其他操作修改，请刷新后核对；当前编辑仍保留'); m.text = a.text; });
   }
   if (a.op === 'delete') await store.update(d => {
-    if (a.section === 'memories') d.memories = d.memories.filter(m => m.id !== a.id);
+    if (a.section === 'memories') { const m = d.memories.find(m => m.id === a.id); if (!m) throw new Error('记忆不存在'); if (a.expectedText !== undefined && m.text !== a.expectedText) throw new Error('记忆已被其他操作修改，请刷新后核对；当前编辑仍保留'); d.memories = d.memories.filter(m => m.id !== a.id); }
     else if (a.section === 'stickers') d.stickers = d.stickers.filter(s => s.id !== a.id);
     else if (a.section === 'tasks') { const t = d.tasks.find(t => t.id === a.id); if (!t || t.state !== 'pending') throw new Error('只能取消尚未执行的提醒'); t.state = 'cancelled'; }
     else throw new Error('该列表不支持删除');
@@ -49,7 +49,7 @@ export async function socialAdmin(input: unknown, store: SocialStore, media: Med
   const rows: Row[] = [];
   const add = (id: string, chat: string, name: string, summary: string, status: string, at: number, detail = summary, text = '') => {
     if (a.op === 'list' && a.chat && chat !== a.chat) return;
-    if (a.query && !`${name} ${summary} ${chat}`.includes(a.query)) return;
+    if (a.query && !`${name} ${summary} ${chat} ${a.section === 'memories' ? detail : ''}`.toLowerCase().includes(a.query.toLowerCase())) return;
     rows.push({ id, chat, name, summary: summary.slice(0,160), status, time: date(at), detail, text });
   };
   switch (a.section) {

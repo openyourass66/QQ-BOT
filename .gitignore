@@ -19,6 +19,7 @@ bot.config.json.tmp
 # 运行时数据（QQ 会话映射、记忆等）
 data/
 bot-workspace/memory/
+bot-workspace/.whale/
 
 # NapCat 运行时（含账号配置与依赖）
 napcat/

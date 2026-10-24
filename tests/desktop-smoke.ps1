@@ -10,6 +10,12 @@ try {
     # Resolve the existing dependency tree without copying runtime data or credentials.
     [IO.File]::WriteAllText((Join-Path $testRoot '.env'), "BOT_WORKSPACE=$($testRoot.Replace('\', '/'))`n", [Text.UTF8Encoding]::new($false))
     [IO.File]::WriteAllText((Join-Path $testRoot 'AGENTS.md'), ([string][char]0x6D4B + [char]0x8BD5 + [char]0x5C0F + [char]0x9CB8 + [char]0x4EBA + [char]0x8BBE), [Text.UTF8Encoding]::new($false))
+    foreach ($fixtureDirectory in @('.whale', 'memory', 'data')) { [void][IO.Directory]::CreateDirectory((Join-Path $testRoot $fixtureDirectory)) }
+    $fixturePersonas = @{ version = 1; personas = @(@{ id = 'preset-friendly'; name = 'Friendly'; text = 'Speak warmly and briefly.'; updatedAt = 1 }, @{ id = 'preset-work'; name = 'Work'; text = 'Answer precisely.'; updatedAt = 1 }) } | ConvertTo-Json -Depth 5
+    [IO.File]::WriteAllText((Join-Path $testRoot '.whale/personas.json'), $fixturePersonas, [Text.UTF8Encoding]::new($false))
+    [IO.File]::WriteAllText((Join-Path $testRoot 'memory/notes.md'), 'Remember the fixture workspace.', [Text.UTF8Encoding]::new($false))
+    $fixtureSocial = @{ version = 1; account = 0; messages = @(); contacts = @(); memories = @(@{ id = 'memory-fixture'; chat = 'private:10001'; user = '10001'; name = 'Fixture friend'; text = 'Does not drink coffee.'; at = 1 }); stickers = @(); tasks = @(); events = @(); actions = @(); turns = @(); profiles = @() } | ConvertTo-Json -Depth 5
+    [IO.File]::WriteAllText((Join-Path $testRoot 'data/social.json'), $fixtureSocial, [Text.UTF8Encoding]::new($false))
     # Use the installed dependencies while keeping settings and persona isolated.
     New-Item -ItemType Junction -Path (Join-Path $testRoot 'node_modules') -Target (Join-Path $projectRoot 'node_modules') | Out-Null
     $process = Start-Process -FilePath (Join-Path $testRoot 'QQ-BOT.exe') -ArgumentList '--smoke' -WindowStyle Hidden -PassThru
@@ -21,22 +27,23 @@ try {
     $automationRoot = [Windows.Automation.AutomationElement]::RootElement
     $interactive = Start-Process -FilePath (Join-Path $testRoot 'QQ-BOT.exe') -ArgumentList '--tray-check' -WindowStyle Hidden -PassThru
     $pidCondition = [Windows.Automation.PropertyCondition]::new([Windows.Automation.AutomationElement]::ProcessIdProperty, $interactive.Id)
+    $fixtureCondition = [Windows.Automation.AndCondition]::new($pidCondition, [Windows.Automation.PropertyCondition]::new([Windows.Automation.AutomationElement]::ControlTypeProperty, [Windows.Automation.ControlType]::Window))
     function Find-FixtureWindow {
-        $automationRoot.FindFirst([Windows.Automation.TreeScope]::Children, $pidCondition)
+        $automationRoot.FindFirst([Windows.Automation.TreeScope]::Children, $fixtureCondition)
     }
     $deadline = [datetime]::UtcNow.AddSeconds(15)
     do { $fixtureWindow = Find-FixtureWindow; if (!$fixtureWindow) { Start-Sleep -Milliseconds 100 } } until ($fixtureWindow -or [datetime]::UtcNow -gt $deadline)
     if (!$fixtureWindow) { throw 'Fixture window did not open' }
     $fixtureWindow.GetCurrentPattern([Windows.Automation.WindowPattern]::Pattern).Close()
-    $trayTitle = 'Whale UI tray check'
+    $trayTitle = 'Whale UI tray check ' + [IO.Path]::GetFileName($testRoot)
     $trayCondition = [Windows.Automation.PropertyCondition]::new([Windows.Automation.AutomationElement]::NameProperty, $trayTitle)
     $trayElement = $automationRoot.FindFirst([Windows.Automation.TreeScope]::Descendants, $trayCondition)
     if (!$trayElement) {
         $overflowName = ([string][char]0x663E + [char]0x793A + [char]0x9690 + [char]0x85CF + [char]0x7684 + [char]0x56FE + [char]0x6807)
         $overflow = $automationRoot.FindFirst([Windows.Automation.TreeScope]::Descendants, [Windows.Automation.PropertyCondition]::new([Windows.Automation.AutomationElement]::NameProperty, $overflowName))
-        for ($attempt=0; $attempt -lt 2 -and !$trayElement; $attempt++) {
+        for ($attempt=0; $attempt -lt 3 -and !$trayElement; $attempt++) {
             if ($overflow) { $overflow.GetCurrentPattern([Windows.Automation.InvokePattern]::Pattern).Invoke() }
-            $deadline = [datetime]::UtcNow.AddSeconds(2)
+            $deadline = [datetime]::UtcNow.AddSeconds(3)
             do { $trayElement = $automationRoot.FindFirst([Windows.Automation.TreeScope]::Descendants, $trayCondition); if (!$trayElement) { Start-Sleep -Milliseconds 100 } } until ($trayElement -or [datetime]::UtcNow -gt $deadline)
         }
     }
@@ -49,7 +56,7 @@ try {
     # Route the existing tray context-menu callback, then invoke its real exit command.
     [void][TraySmokeMessages]::PostMessage([IntPtr]$fixtureWindow.Current.NativeWindowHandle, 0x800B, [IntPtr]::Zero, [IntPtr]0x7B)
     $deadline = [datetime]::UtcNow.AddSeconds(5)
-    $quitCondition = [Windows.Automation.PropertyCondition]::new([Windows.Automation.AutomationElement]::AutomationIdProperty, 'Tray-quit')
+    $quitCondition = [Windows.Automation.AndCondition]::new($pidCondition, [Windows.Automation.PropertyCondition]::new([Windows.Automation.AutomationElement]::AutomationIdProperty, 'Tray-quit'))
     do { $quitItem = $automationRoot.FindFirst([Windows.Automation.TreeScope]::Descendants, $quitCondition); if (!$quitItem) { Start-Sleep -Milliseconds 100 } } until ($quitItem -or [datetime]::UtcNow -gt $deadline)
     if (!$quitItem) { throw 'Tray exit menu item did not appear' }
     $quitItem.GetCurrentPattern([Windows.Automation.InvokePattern]::Pattern).Invoke()

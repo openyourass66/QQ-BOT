@@ -3,6 +3,7 @@ import { resolve, dirname } from 'node:path';
 import { loadEnvFile } from 'node:process';
 import { parseEnv } from 'node:util';
 import { runtimeFields, mergeRuntimeEnv, validateRuntimeEnv } from './runtime-fields.mjs';
+import { knowledge } from './knowledge.mjs';
 try { loadEnvFile('.env'); } catch (e) { if (e.code !== 'ENOENT') throw e; }
 const settings = await import('../dist/settings.js');
 const read = async (p) => readFile(p, 'utf8').catch(e => { if (e.code === 'ENOENT') return ''; throw e; });
@@ -14,9 +15,12 @@ process.once('message', async ({ action, data }) => {
     let result;
     if (action === 'load') {
       const env = await read('.env') || await read('.env.example');
-      result = { settings: await settings.loadSettings(), env, runtimeFields: describeEnv(env), persona: await read(personaPath), personaPath };
+      const persona = await read(personaPath);
+      const library = await knowledge(dirname(personaPath)).catch(error => ({ workspace: dirname(personaPath), global: persona, globalRevision: null, libraryRevision: null, presets: [], files: [], error: /^管理操作失败：/.test(error.message) ? error.message : '无法读取人设与记忆，请检查文件权限后刷新。' }));
+      result = { settings: await settings.loadSettings(), env, runtimeFields: describeEnv(env), persona, personaPath, knowledge: library };
     }
     else if (action === 'settings') result = await settings.saveSettings(data);
+    else if (action === 'knowledge') result = await knowledge(dirname(personaPath), data);
     else if (action === 'social') {
       await settings.loadSettings();
       const { SocialStore } = await import('../dist/social-store.js');
@@ -58,7 +62,7 @@ process.once('message', async ({ action, data }) => {
     process.send({ ok: true, result }, () => process.disconnect());
   } catch (e) {
     const error = e.issues ? e.issues.map(issue => `${issue.path.join('.')}: ${issue.message}`).join('；')
-      : /工作区已变更|协议无效|配置格式无效/.test(e.message) ? e.message : '配置操作失败，请检查文件格式与访问权限；原有文件保留。';
+      : /工作区已变更|协议无效|配置格式无效|^管理操作失败：/.test(e.message) ? e.message : '配置操作失败，请检查文件格式与访问权限；原有文件保留。';
     process.send({ ok: false, error }, () => process.disconnect());
   }
 });

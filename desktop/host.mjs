@@ -78,7 +78,9 @@ async function config(action, data) {
 }
 async function check() { const result = await diagnose(root); emit({ type: 'diagnostics', ...result }); return result; }
 async function command({ action, data }) {
-  if (action === 'social') {
+  if (action === 'knowledge') { const result = await config(action, data); emit({ type: 'knowledge', ...result }); return; }
+  if (action === 'social' || action === 'memory') {
+    if (action === 'memory') data = { ...data, section: 'memories' };
     const bridge = children.get('bridge');
     let result;
     if (bridge?.connected) result = await new Promise((done, reject) => {
@@ -88,7 +90,7 @@ async function command({ action, data }) {
       bridge.send({ type: 'social', id, data }, error => { if (error) { clearTimeout(timer); socialRequests.delete(id); reject(error); } });
     });
     else result = await config('social', data);
-    emit({ type: 'social', ...result }); return;
+    emit({ type: action === 'memory' ? 'memory' : 'social', ...result }); return;
   }
   if (action === 'load' || ['settings', 'env', 'runtime', 'connection', 'persona'].includes(action)) {
     const result = await config(action, data);
@@ -118,7 +120,7 @@ async function command({ action, data }) {
 }
 const input = createInterface({ input: process.stdin });
 let queue = Promise.resolve();
-input.on('line', line => { queue = queue.then(async () => { try { await command(JSON.parse(line)); } catch (error) { emit({ type: 'error', text: error.message }); } }); });
+input.on('line', line => { queue = queue.then(async () => { let request; try { request = JSON.parse(line); await command(request); } catch (error) { emit({ type: 'error', action: request?.action, text: error.message }); } }); });
 input.on('close', () => { queue.finally(async () => { await stop(); process.exit(); }); });
 try { for (const text of readFileSync(logPath, 'utf8').trim().split('\n').slice(-100)) if (text) process.stdout.write(JSON.stringify({ type: 'log', text: redact(text), historical: true }) + '\n'); } catch {}
 state();

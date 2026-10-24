@@ -109,12 +109,38 @@
      </StackPanel></ScrollViewer>
      <Border Grid.Row="2" BorderBrush="{StaticResource Line}" BorderThickness="0,1,0,0" Padding="0,15,0,0" Margin="0,16,0,0"><DockPanel><StackPanel DockPanel.Dock="Right" Orientation="Horizontal"><Button x:Name="SaveRuntime" Content="保存配置" Margin="0,0,10,0"/><Button x:Name="SaveRuntimeRestart" Content="保存并重新启动" Style="{StaticResource Primary}"/></StackPanel><TextBlock x:Name="RuntimeHint" Text="连接参数重启生效；媒体模型保存即生效。" Foreground="{StaticResource Muted}" FontSize="10" TextWrapping="Wrap" Margin="0,0,16,0" VerticalAlignment="Center"/></DockPanel></Border>
     </Grid></TabItem>
-    <TabItem Header="人设与记忆"><Border Style="{StaticResource Surface}"><Grid>
-     <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
-     <DockPanel Margin="0,0,0,16"><Button x:Name="Memory" Content="打开记忆目录" DockPanel.Dock="Right" Padding="12,8"/><StackPanel Margin="0,0,16,0"><TextBlock Text="人设文档" FontSize="14" FontWeight="SemiBold"/><TextBlock x:Name="PersonaHint" Text="新会话将读取保存后的人设。" Foreground="{StaticResource Muted}" FontSize="10" Margin="0,6,0,0" TextWrapping="Wrap" MaxWidth="420"/></StackPanel></DockPanel>
-     <TextBox x:Name="Persona" Grid.Row="1" AcceptsReturn="True" AcceptsTab="True" TextWrapping="Wrap" FontSize="13" VerticalScrollBarVisibility="Auto" Padding="18"/>
-     <DockPanel Grid.Row="2" Margin="0,17,0,0"><StackPanel DockPanel.Dock="Right" Orientation="Horizontal"><Button x:Name="SavePersona" Content="保存人设" Style="{StaticResource Primary}"/></StackPanel><TextBlock Text="已有会话不会自动重置" Foreground="#8390A6" FontSize="10" VerticalAlignment="Center"/></DockPanel>
-    </Grid></Border></TabItem>
+    <TabItem Header="人设与记忆"><Grid>
+     <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+     <Border Background="White" CornerRadius="12" BorderBrush="{StaticResource Line}" BorderThickness="1" Padding="6" Margin="0,0,0,16"><ListBox x:Name="KnowledgeNav" Background="Transparent" BorderThickness="0" ItemContainerStyle="{StaticResource SettingsNavItem}" ScrollViewer.HorizontalScrollBarVisibility="Disabled" ScrollViewer.VerticalScrollBarVisibility="Disabled" AutomationProperties.Name="人设与记忆分类"><ListBox.ItemsPanel><ItemsPanelTemplate><WrapPanel/></ItemsPanelTemplate></ListBox.ItemsPanel></ListBox></Border>
+     <Grid Grid.Row="1" Margin="0,0,0,12"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+      <TextBox x:Name="KnowledgeSearch" Tag="搜索名称或内容" AutomationProperties.Name="搜索人设或记忆" Margin="0,0,10,0"/>
+      <Button x:Name="KnowledgeRefresh" Grid.Column="1" Content="刷新列表" Margin="0,0,8,0"/>
+      <Button x:Name="KnowledgeNew" Grid.Column="2" Content="新建人设" Style="{StaticResource Primary}"/>
+      <Button x:Name="Memory" Grid.Column="3" Content="打开目录" Visibility="Collapsed" Margin="8,0,0,0"/>
+     </Grid>
+     <DockPanel Grid.Row="2" Margin="2,0,2,12"><TextBlock x:Name="KnowledgeCount" Text="人设库" FontSize="13" FontWeight="SemiBold"/><TextBlock x:Name="KnowledgeStatus" Text="保存多套人设，在会话设置中自由选择。" Foreground="{StaticResource Muted}" FontSize="10" HorizontalAlignment="Right" VerticalAlignment="Center"/></DockPanel>
+     <Grid Grid.Row="3"><Grid.ColumnDefinitions><ColumnDefinition Width="0.85*" MinWidth="220"/><ColumnDefinition Width="16"/><ColumnDefinition Width="2*" MinWidth="360"/></Grid.ColumnDefinitions>
+      <Border Background="White" CornerRadius="14" BorderBrush="{StaticResource Line}" BorderThickness="1" Padding="8"><Grid>
+       <ListView x:Name="KnowledgeList" AutomationProperties.Name="人设与记忆列表"><ListView.ItemTemplate><DataTemplate><StackPanel>
+        <TextBlock Text="{Binding Name}" FontWeight="SemiBold" FontSize="12" TextTrimming="CharacterEllipsis"/>
+        <TextBlock Text="{Binding Meta}" FontSize="10" Foreground="{StaticResource Muted}" Margin="0,5,0,0" TextTrimming="CharacterEllipsis"/>
+        <TextBlock Text="{Binding Summary}" FontSize="10" Foreground="{StaticResource Muted}" Margin="0,5,0,0" TextTrimming="CharacterEllipsis"/>
+       </StackPanel></DataTemplate></ListView.ItemTemplate></ListView>
+       <TextBlock x:Name="KnowledgeEmpty" Text="暂无记录" TextWrapping="Wrap" TextAlignment="Center" Foreground="{StaticResource Muted}" FontSize="12" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="15" IsHitTestVisible="False" Visibility="Collapsed"/>
+      </Grid></Border>
+      <GridSplitter Grid.Column="1" Width="6" HorizontalAlignment="Center" VerticalAlignment="Stretch" Background="Transparent" ResizeDirection="Columns" ResizeBehavior="PreviousAndNext" AutomationProperties.Name="调整人设列表和编辑区宽度"/>
+      <Border Grid.Column="2" Background="White" CornerRadius="14" BorderBrush="{StaticResource Line}" BorderThickness="1" Padding="20"><Grid>
+       <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+       <StackPanel><TextBlock x:Name="KnowledgeDetailTitle" Text="当前全局人设" FontSize="18" FontWeight="SemiBold"/><TextBlock x:Name="PersonaHint" Text="全局人设用于未指定专属人设的会话。" TextWrapping="Wrap" Foreground="{StaticResource Muted}" FontSize="10" LineHeight="17" Margin="0,7,0,12"/></StackPanel>
+       <StackPanel Grid.Row="1" Margin="0,0,0,12"><TextBlock x:Name="KnowledgeNameLabel" Text="名称" FontSize="11" Margin="0,0,0,6"/><TextBox x:Name="KnowledgeName" Tag="为这套人设起一个名字" AutomationProperties.Name="人设名称或记忆文件名"/></StackPanel>
+       <TextBox x:Name="Persona" Grid.Row="2" AcceptsReturn="True" AcceptsTab="True" TextWrapping="Wrap" VerticalContentAlignment="Top" FontSize="12" VerticalScrollBarVisibility="Auto" Padding="12" AutomationProperties.Name="人设或记忆内容"/>
+       <StackPanel Grid.Row="3" Margin="0,12,0,0"><TextBlock x:Name="KnowledgeError" Foreground="{StaticResource Danger}" FontSize="11" TextWrapping="Wrap" Visibility="Collapsed" Margin="0,0,0,8"/>
+        <DockPanel><TextBlock x:Name="KnowledgeWordCount" Foreground="{StaticResource Muted}" FontSize="10" VerticalAlignment="Center"/><Button x:Name="SavePersona" Content="保存全局人设" Style="{StaticResource Primary}" HorizontalAlignment="Right"/></DockPanel>
+        <WrapPanel Margin="0,8,0,0"><Button x:Name="ApplyPersona" Content="设为全局人设" Style="{StaticResource Quiet}" Padding="8,7" Visibility="Collapsed"/><Button x:Name="CopyPersona" Content="另存为人设" Style="{StaticResource Quiet}" Padding="8,7" Visibility="Collapsed"/><Button x:Name="DiscardKnowledge" Content="放弃编辑" Style="{StaticResource Quiet}" Padding="8,7" Visibility="Collapsed"/><Button x:Name="DeleteKnowledge" Content="删除" Style="{StaticResource Quiet}" Foreground="{StaticResource Danger}" Padding="8,7" Visibility="Collapsed"/></WrapPanel>
+       </StackPanel>
+      </Grid></Border>
+     </Grid>
+    </Grid></TabItem>
     <TabItem Header="启动诊断"><Border Style="{StaticResource Surface}"><Grid>
      <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
      <DockPanel Margin="0,0,0,18"><Button x:Name="RunDiagnostics" Content="重新检查" Style="{StaticResource Primary}" DockPanel.Dock="Right"/><StackPanel><TextBlock x:Name="DiagnosticSummary" Text="正在检查启动环境…" FontSize="16" FontWeight="SemiBold"/><TextBlock Text="检查依赖、配置路径和访问权限。" Foreground="{StaticResource Muted}" FontSize="11" Margin="0,7,0,0"/></StackPanel></DockPanel>
