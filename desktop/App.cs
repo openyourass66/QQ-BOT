@@ -102,6 +102,10 @@ class App
         int filter = Find<ComboBox>("LogFilter").SelectedIndex;
         var lines = logs.Where(line => (search.Length == 0 || line.IndexOf(search, StringComparison.OrdinalIgnoreCase) >= 0) && (filter == 0 || filter == 1 && (line.IndexOf("error", StringComparison.OrdinalIgnoreCase) >= 0 || line.Contains("失败") || line.Contains("EPERM")) || filter == 2 && line.Contains("[bridge]") || filter == 3 && line.Contains("[napcat]")));
         var text = string.Join(Environment.NewLine, lines);
+        Find<StackPanel>("LogEmpty").Visibility = text.Length == 0 ? Visibility.Visible : Visibility.Collapsed;
+        ((TextBlock)Find<StackPanel>("LogEmpty").Children[0]).Text = logs.Count == 0 ? "还没有工作日志" : "没有匹配的日志";
+        ((TextBlock)Find<StackPanel>("LogEmpty").Children[1]).Text = logs.Count == 0 ? "启动机器人后，连接与运行记录会出现在这里。" : "试试其他关键词或日志分类。";
+        Find<TextBlock>("LogCount").Text = "显示 " + lines.Count() + " / " + logs.Count + " 条 · 最近 1500 条";
         if (Find<TextBox>("Logs").Text != text) { Find<TextBox>("Logs").Text = text; if (!paused) Find<TextBox>("Logs").ScrollToEnd(); }
     }
     static void Capture(string path, int page) {
@@ -168,6 +172,7 @@ class App
                 panel.Children.Add(new Border { Child = block, Background = (Brush)new BrushConverter().ConvertFromString(ok ? "#F0F8F4" : "#FFF0F1"), Padding = new Thickness(16), CornerRadius = new CornerRadius(12), Margin = new Thickness(0, 0, 8, 10) });
             }
             Find<TextBlock>("HealthSummary").Text = (bool)message["ok"] ? "启动依赖检查通过，小鲸已经准备好。" : "发现需要处理的项目，请到「启动诊断」查看详情。";
+            Find<TextBlock>("DiagnosticSummary").Text = (bool)message["ok"] ? "启动检查通过" : "有项目需要处理";
         } else if (type == "state") {
             bool bridge = (bool)message["bridge"], napcat = (bool)message["napcat"], busy = (bool)message["busy"];
             Find<TextBlock>("State").Text = busy ? "小鲸正在安排工作…" : bridge && napcat ? "小鲸已出发，等待连接就绪" : bridge || napcat ? "部分进程运行中，请查看日志" : "小鲸休息中，随时可以出发";
@@ -175,15 +180,30 @@ class App
             if (!bridge) Find<TextBlock>("Stats").Text = "桥接已停止 · NapCat " + (napcat ? "运行中" : "已停止");
             Find<TextBlock>("NapcatState").Text = napcat ? (message.ContainsKey("externalNapcat") && (bool)message["externalNapcat"] ? "复用外部 NapCat" : "NapCat 运行中") : "NapCat 等待启动";
             if (!bridge) { Find<TextBlock>("ModelState").Text = "未连接"; Find<TextBlock>("QqState").Text = napcat ? "等待桥接" : "未连接"; }
+            if (!bridge) {
+                Find<TextBlock>("ConnectionBadge").Text = busy ? "处理中" : "未启动"; Find<TextBlock>("Uptime").Text = "尚未启动";
+                Find<TextBlock>("ConnectionBadge").Foreground = (Brush)new BrushConverter().ConvertFromString("#66748C");
+                Find<System.Windows.Shapes.Ellipse>("ConnectionDot").Fill = (Brush)new BrushConverter().ConvertFromString("#98A5BC");
+                Find<Border>("ConnectionPill").Background = (Brush)new BrushConverter().ConvertFromString("#EDF1F7");
+            }
         } else if (type == "status") {
             bool online = (bool)message["qqOnline"] && (bool)message["wsConnected"] && (bool)message["acpConnected"];
             Find<TextBlock>("State").Text = online ? "小鲸在线，正在认真陪伴" : "进程运行中，等待 QQ / 模型连接";
             Find<TextBlock>("Stats").Text = "QQ " + ((bool)message["qqOnline"] ? "在线" : "离线") + "  ·  模型 " + ((bool)message["acpConnected"] ? "已连接" : "未连接") + "  ·  收到 " + message["messagesIn"] + " / 发出 " + message["messagesOut"] + "  ·  排队 " + message["pendingMessages"];
             Find<TextBlock>("QqState").Text = (bool)message["qqOnline"] ? "已在线" : "连接中";
             Find<TextBlock>("ModelState").Text = (bool)message["acpConnected"] ? "已就绪" : "连接中";
-            Find<TextBlock>("MessageCount").Text = message["messagesIn"] + " / " + message["messagesOut"];
-            Find<TextBlock>("QueueState").Text = "收到 / 回复 · 排队 " + message["pendingMessages"];
+            Find<TextBlock>("MessagesIn").Text = message["messagesIn"].ToString();
+            Find<TextBlock>("MessagesOut").Text = message["messagesOut"].ToString();
+            Find<TextBlock>("Sessions").Text = message["sessions"].ToString();
+            Find<TextBlock>("Pending").Text = message["pendingMessages"].ToString();
+            Find<TextBlock>("QueueState").Text = Convert.ToInt32(message["pendingMessages"]) == 0 ? "队列空闲" : "正在处理与等待";
             if (online) Find<Border>("ErrorBanner").Visibility = Visibility.Collapsed;
+            Find<TextBlock>("ConnectionBadge").Text = online ? "运行中" : "连接中";
+            Find<TextBlock>("ConnectionBadge").Foreground = (Brush)new BrushConverter().ConvertFromString(online ? "#3A866F" : "#97733F");
+            Find<System.Windows.Shapes.Ellipse>("ConnectionDot").Fill = Find<TextBlock>("ConnectionBadge").Foreground;
+            Find<Border>("ConnectionPill").Background = (Brush)new BrushConverter().ConvertFromString(online ? "#EAF5F0" : "#FCF5E9");
+            var elapsed = TimeSpan.FromMilliseconds(Math.Max(0, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() - Convert.ToInt64(message["startedAt"])));
+            Find<TextBlock>("Uptime").Text = "运行 " + (int)elapsed.TotalHours + elapsed.ToString(@"\:mm\:ss");
         }
     }
     [STAThread] static void Main(string[] args) {
@@ -206,7 +226,8 @@ class App
         var iconStream = typeof(App).Assembly.GetManifestResourceStream("whale.ico");
         trayImage = new System.Drawing.Icon(iconStream); iconStream.Position = 0; window.Icon = System.Windows.Media.Imaging.BitmapFrame.Create(iconStream);
         var mascot = (ImageSource)XamlReader.Parse(File.ReadAllText(Path.Combine(root, "desktop/assets/whale.xaml"), Encoding.UTF8));
-        Find<Image>("BrandIcon").Source = mascot; Find<Image>("HeroIcon").Source = mascot;
+        Find<Image>("BrandIcon").Source = mascot;
+        Find<Image>("HeroIcon").Source = (ImageSource)XamlReader.Parse(File.ReadAllText(Path.Combine(root, "desktop/assets/mascot.xaml"), Encoding.UTF8));
         string[] names = { "工作总览", "工作日志", "机器人设置", "连接与运行", "人设与记忆", "启动诊断" };
         string[] icons = { "M2,2 H18 V18 H2 Z M2,8 H18 M8,8 V18", "M3,3 H17 M3,9 H17 M3,15 H12", "M3,5 H17 M3,15 H17 M7,2 V8 M13,12 V18", "M7,5 H3 V15 H7 M13,5 H17 V15 H13 M6,10 H14", "M10,17 C-6,8 3,-2 10,5 C17,-2 26,8 10,17", "M10,2 A8,8 0 1 0 10,18 A8,8 0 1 0 10,2 M10,6 V11 M10,14 V15" };
         for (int i=0; i<names.Length; i++) {
@@ -214,6 +235,15 @@ class App
             header.Children.Add(new System.Windows.Shapes.Path { Data = Geometry.Parse(icons[i]), Stroke = (Brush)new BrushConverter().ConvertFromString("#667AA7"), StrokeThickness = 1.6, Width = 18, Height = 18, Stretch = Stretch.Uniform, Margin = new Thickness(0,0,13,0) });
             header.Children.Add(new TextBlock { Text = names[i] }); ((TabItem)Find<TabControl>("Tabs").Items[i]).Header = header;
         }
+        string[] subtitles = { "连接、消息与运行状态，一目了然。", "查看连接与运行记录，定位问题。", "管理对话、回复节奏、审批与额度。", "管理 QQ、模型和运行参数。", "编辑人设，管理工作区记忆。", "检查启动依赖、连接路径与访问权限。" };
+        Find<TabControl>("Tabs").SelectionChanged += (s,e) => {
+            if (e.Source != Find<TabControl>("Tabs")) return;
+            int page = Find<TabControl>("Tabs").SelectedIndex;
+            if (page >= 0 && page < names.Length) { Find<TextBlock>("PageTitle").Text = names[page]; Find<TextBlock>("PageSubtitle").Text = subtitles[page]; }
+        };
+        Find<Button>("Minimize").Click += (s,e) => window.WindowState = WindowState.Minimized;
+        Find<Button>("Maximize").Click += (s,e) => window.WindowState = window.WindowState == WindowState.Maximized ? WindowState.Normal : WindowState.Maximized;
+        Find<Button>("CloseWindow").Click += (s,e) => window.Close();
         if (args.Length > 0 && args[0] == "--preview") {
             if (args.Length > 4) { window.Width = int.Parse(args[3]); window.Height = int.Parse(args[4]); }
             window.Show(); window.UpdateLayout();
@@ -253,7 +283,7 @@ class App
             if (restore.WaitOne(0)) Restore();
             string line; int count = 0; while (count++ < 300 && events.TryDequeue(out line)) { try { Event(line); } catch { Feedback("收到无效的控制消息。"); } }
             RefreshLogs();
-            if (++ticks % 25 == 0) { bool registered = tray.Ensure(); Find<TextBlock>("TrayHint").Text = registered ? "托盘已就绪 · 点击图标恢复" : "托盘暂不可用 · 保留任务栏"; }
+            if (++ticks % 25 == 0) tray.Ensure();
             if (host.HasExited) { if (exiting) { timer.Stop(); window.Close(); } else if (!hostFailed) { hostFailed = true; Find<TextBlock>("State").Text = "控制进程已退出"; Feedback("请退出并重新打开控制台。"); } }
             if (smoke && !exiting) {
                 if (DateTime.UtcNow > smokeDeadline) { Environment.ExitCode = 1; File.WriteAllText(Path.Combine(root, "smoke-result.txt"), "FAIL: lifecycle timeout"); exiting = true; Send("quit"); return; }
