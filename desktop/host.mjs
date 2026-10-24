@@ -90,10 +90,13 @@ async function command({ action, data }) {
     else result = await config('social', data);
     emit({ type: 'social', ...result }); return;
   }
-  if (action === 'load' || ['settings', 'env', 'runtime', 'persona'].includes(action)) {
+  if (action === 'load' || ['settings', 'env', 'runtime', 'connection', 'persona'].includes(action)) {
     const result = await config(action, data);
-    emit(action === 'load' ? { type: 'config', ...result } : { type: 'saved', section: action, result });
-    await refreshSecrets(); return;
+    const restartRequested = action === 'connection' && data.restart === true;
+    emit(action === 'load' ? { type: 'config', ...result } : { type: 'saved', section: action, result, restartRequested });
+    await refreshSecrets();
+    if (restartRequested) await command({ action: 'restart' });
+    return;
   }
   if (action === 'diagnose') { await check(); return; }
   if (busy) return;

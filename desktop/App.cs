@@ -84,12 +84,12 @@ partial class App
     }
     static void Feedback(string text) { Find<TextBlock>("Feedback").Text = text; Find<TextBlock>("Feedback").ToolTip = text; }
     static void Send(string action, object data = null) {
-        if (new[] { "settings", "env", "runtime", "persona" }.Contains(action)) Find<TabControl>("Tabs").IsEnabled = false;
+        if (new[] { "settings", "env", "runtime", "connection", "persona" }.Contains(action)) Find<TabControl>("Tabs").IsEnabled = false;
         try { if (host == null || host.HasExited) throw new Exception(); hostInput.WriteLine(json.Serialize(new { action = action, data = data })); hostInput.Flush(); }
         catch { Find<TabControl>("Tabs").IsEnabled = true; SetSocialBusy(false); Feedback("控制进程不可用，请退出后重新打开控制台。"); }
     }
     static void Restore() { window.ShowInTaskbar = true; window.Show(); window.WindowState = WindowState.Normal; window.Activate(); window.Topmost = true; window.Topmost = false; }
-    static void MarkDirty(string section) { if (!loading) { dirtySections.Add(section); dirty = true; Find<TextBlock>("SaveState").Text = "有尚未保存的修改"; } }
+    static void MarkDirty(string section) { if (!loading) { dirtySections.Add(section); dirty = true; Find<TextBlock>("SaveState").Text = "有尚未保存的修改"; UpdateConnectionEditing(); } }
     static void EditChanged(object sender, TextChangedEventArgs e) { MarkDirty(sender == Find<TextBox>("Env") ? "env" : sender == Find<TextBox>("Persona") ? "persona" : "settings"); }
     static void MakeFields(Dictionary<string, object> data, string prefix, StackPanel panel) { BuildSettings(data, panel); }
     static void RuntimeFields(object value) { BuildRuntimeFields(value); }
@@ -145,12 +145,17 @@ partial class App
         else if (type == "saved") {
             Find<TabControl>("Tabs").IsEnabled = true;
             string section = (string)message["section"];
-            if (section == "env" || section == "runtime") {
+            if (section == "env" || section == "runtime" || section == "connection") {
                 var result = (Dictionary<string,object>)message["result"]; loading = true; Find<TextBox>("Env").Text = (string)result["env"]; RuntimeFields(result["runtimeFields"]); loading = false;
                 dirtySections.Remove("env"); dirtySections.Remove("runtime");
+                if(section=="connection") {settings=(Dictionary<string,object>)result["settings"];dirtySections.Remove("models");}
+                connectionRestartPending=message.ContainsKey("restartRequested")&&(bool)message["restartRequested"];
+                Find<TextBlock>("RuntimeHint").Text=message.ContainsKey("restartRequested")&&(bool)message["restartRequested"]?"配置已保存，正在重新启动机器人…":"配置已保存；连接参数重启后生效。";
             }
+            if(section=="settings")dirtySections.Remove("models");
             dirtySections.Remove(section); dirty = dirtySections.Count > 0;
-            if (section == "settings") Find<TextBlock>("SettingsSaveHint").Text = "设置已保存并生效"; Find<TextBlock>("SaveState").Text = dirty ? "还有尚未保存的修改" : "所有修改已保存"; Feedback("保存成功。动态设置即时生效；连接参数需重启，人设在新会话生效。");
+            UpdateConnectionEditing();
+            if (section == "settings" || section == "connection") Find<TextBlock>("SettingsSaveHint").Text = dirtySections.Contains("settings") ? "还有尚未保存的设置" : "设置已保存并生效"; Find<TextBlock>("SaveState").Text = dirty ? "还有尚未保存的修改" : "所有修改已保存"; Feedback(message.ContainsKey("restartRequested")&&(bool)message["restartRequested"]?"配置已保存，正在重新启动机器人。":"保存成功。动态设置即时生效；连接参数需重启，人设在新会话生效。");
         }
         else if (type == "social") { RenderActivity(message); }
         else if (type == "config") {
@@ -177,7 +182,9 @@ partial class App
         } else if (type == "state") {
             bool bridge = (bool)message["bridge"], napcat = (bool)message["napcat"], busy = (bool)message["busy"];
             Find<TextBlock>("State").Text = busy ? "小鲸正在安排工作…" : bridge && napcat ? "小鲸已出发，等待连接就绪" : bridge || napcat ? "部分进程运行中，请查看日志" : "小鲸休息中，随时可以出发";
-            Find<Button>("Start").IsEnabled = !busy && !(bridge && napcat); Find<Button>("Stop").IsEnabled = !busy && (bridge || napcat); Find<Button>("Restart").IsEnabled = !busy;
+            runtimeBusy=busy;
+            if(connectionRestartPending&&!busy){Find<TextBlock>("RuntimeHint").Text=bridge?"机器人已重新启动，等待连接就绪。":"配置已保存，启动未完成，请查看启动诊断。";connectionRestartPending=false;}
+            Find<Button>("Start").IsEnabled = !busy && !(bridge && napcat); Find<Button>("Stop").IsEnabled = !busy && (bridge || napcat); Find<Button>("Restart").IsEnabled = !busy; Find<Button>("RestartBot").IsEnabled = !busy && (bridge || napcat); Find<Button>("RestartBot").Content=busy?"正在处理…":"重新启动";UpdateConnectionEditing();
             if (!bridge) Find<TextBlock>("Stats").Text = "桥接已停止 · NapCat " + (napcat ? "运行中" : "已停止");
             Find<TextBlock>("NapcatState").Text = napcat ? (message.ContainsKey("externalNapcat") && (bool)message["externalNapcat"] ? "复用外部 NapCat" : "NapCat 运行中") : "NapCat 等待启动";
             if (!bridge) { Find<TextBlock>("ModelState").Text = "未连接"; Find<TextBlock>("QqState").Text = napcat ? "等待桥接" : "未连接"; }
@@ -226,7 +233,7 @@ partial class App
         var application = new Application();
         application.Resources.MergedDictionaries.Add((ResourceDictionary)XamlReader.Parse(File.ReadAllText(Path.Combine(root,"desktop/theme.xaml"),Encoding.UTF8)));
         window = (Window)XamlReader.Parse(File.ReadAllText(Path.Combine(root, "desktop/window.xaml"), Encoding.UTF8));
-        InitSettingsView(); InitActivityView();
+        InitSettingsView(); InitRuntimeView(); InitActivityView();
         window.Width = Math.Min(window.Width, SystemParameters.WorkArea.Width - 24);
         window.Height = Math.Min(window.Height, SystemParameters.WorkArea.Height - 24);
         var iconStream = typeof(App).Assembly.GetManifestResourceStream("whale.ico");
@@ -275,13 +282,13 @@ partial class App
         host.Start(); hostInput = new StreamWriter(host.StandardInput.BaseStream, new UTF8Encoding(false)); host.BeginOutputReadLine(); host.BeginErrorReadLine();
         tray = new NativeTray(window, trayImage.Handle, args.Contains("--tray-check") ? "Whale UI tray check" : "小鲸工作台 · 点击打开");
         var menu = new ContextMenu();
-        foreach (var entry in new[] { new[] { "打开小鲸工作台", "show" }, new[] { "启动机器人", "start" }, new[] { "重连模型", "restartBridge" }, new[] { "停止机器人", "stop" }, new[] { "退出并停止机器人", "quit" } }) {
+        foreach (var entry in new[] { new[] { "打开小鲸工作台", "show" }, new[] { "启动机器人", "start" }, new[] { "重新启动机器人", "restart" }, new[] { "重连模型", "restartBridge" }, new[] { "停止机器人", "stop" }, new[] { "退出并停止机器人", "quit" } }) {
             var item = new MenuItem { Header = entry[0], Padding = new Thickness(14,8,14,8) }; string command = entry[1]; item.Click += (s,e) => { if (command == "show") Restore(); else if (command == "quit") Exit(); else Send(command); }; menu.Items.Add(item);
             System.Windows.Automation.AutomationProperties.SetAutomationId(item, "Tray-" + command);
         }
         tray.Click += Restore; tray.ContextMenu += () => { menu.Placement = System.Windows.Controls.Primitives.PlacementMode.MousePoint; menu.IsOpen = true; };
         window.Closing += (s, e) => { if (!exiting) { e.Cancel = true; if (tray.Ensure()) window.Hide(); else { window.WindowState = WindowState.Minimized; Feedback("托盘暂不可用，已保留任务栏窗口，可再次打开 EXE 恢复。"); } } };
-        Find<Button>("Start").Click += (s, e) => Send("start"); Find<Button>("Stop").Click += (s, e) => Send("stop"); Find<Button>("Restart").Click += (s, e) => Send("restartBridge");
+        Find<Button>("Start").Click += (s, e) => Send("start"); Find<Button>("Stop").Click += (s, e) => Send("stop"); Find<Button>("Restart").Click += (s, e) => Send("restartBridge"); Find<Button>("RestartBot").Click += (s, e) => Send("restart");
         Find<Button>("Pause").Click += (s, e) => { paused = !paused; Find<Button>("Pause").Content = paused ? "继续滚动" : "暂停滚动"; };
         Find<Button>("Clear").Click += (s, e) => { logs.Clear(); Find<TextBox>("Logs").Clear(); };
         Find<Button>("SaveSettings").IsEnabled = false;
@@ -290,8 +297,9 @@ partial class App
         string[] socialLabels = { "QQ 动作执行方式", "允许全部现有好友和群", "允许的群号", "允许的好友 QQ", "屏蔽群号", "屏蔽用户 QQ", "群聊参与方式", "参与关键词", "旁聊参与概率（百分比）", "消息聚合窗口（毫秒）", "话题活跃时间（分钟）", "每会话每分钟动作上限", "每日 QQ 动作上限", "群友长期记忆", "本地表情库", "图片、语音与视频", "好友与群申请处理", "文件收发", "定时提醒", "定时主动聊天机会", "主动机会间隔（分钟）", "安静时段开始（上海时间）", "安静时段结束（上海时间）", "消息保留天数", "每会话消息条数上限", "独立视觉模型（留空使用 DSH）", "语音转写模型（可选）", "语音合成模型（可选）", "合成声音", "视频抽帧数" };
         for (int i=0; i<socialKeys.Length; i++) labels[socialKeys[i]] = socialLabels[i];
         Find<Button>("SaveSettings").Click += (s, e) => { try { if (ValidateSettingsForm()) Send("settings", Collect(settings, "")); } catch (Exception error) { Feedback(error.Message); } };
-        Find<Button>("SaveEnv").Click += (s, e) => { if (dirtySections.Contains("runtime") && MessageBox.Show(window,"保存高级文本将覆盖连接表单中尚未保存的编辑，继续吗？","保存连接配置",MessageBoxButton.YesNo) != MessageBoxResult.Yes) return; Send("env", Find<TextBox>("Env").Text); };
-        Find<Button>("SaveRuntime").Click += (s,e) => { if (dirtySections.Contains("env") && MessageBox.Show(window,"保存表单将覆盖高级文本中尚未保存的编辑，继续吗？","保存连接配置",MessageBoxButton.YesNo) != MessageBoxResult.Yes) return; var data = runtimeInputs.ToDictionary(pair => pair.Key, pair => pair.Value is PasswordBox ? ((PasswordBox)pair.Value).Password : ((TextBox)pair.Value).Text); Send("runtime", data); };
+        Find<Button>("SaveEnv").Click += (s, e) => { if (dirtySections.Contains("runtime")) {Feedback("请先保存连接表单中的修改，再保存高级文本。");return;} Send("env", Find<TextBox>("Env").Text); };
+        Find<Button>("SaveRuntime").Click += (s,e) => SaveConnection(false);
+        Find<Button>("SaveRuntimeRestart").Click += (s,e) => SaveConnection(true);
         Find<Button>("SavePersona").Click += (s, e) => Send("persona", new { text = Find<TextBox>("Persona").Text, path = personaPath });
         Find<Button>("Memory").Click += (s, e) => { try { string path = Path.Combine(Path.GetDirectoryName(personaPath), "memory"); Directory.CreateDirectory(path); Process.Start(new ProcessStartInfo(path) { UseShellExecute = true }); } catch { Feedback("无法打开记忆目录，请先加载配置。"); } };
         Find<TextBox>("Env").TextChanged += EditChanged; Find<TextBox>("Persona").TextChanged += EditChanged;
@@ -309,10 +317,11 @@ partial class App
             if (smoke && !exiting) {
                 if (DateTime.UtcNow > smokeDeadline) { Environment.ExitCode = 1; File.WriteAllText(Path.Combine(root, "smoke-result.txt"), "FAIL: lifecycle timeout"); exiting = true; Send("quit"); return; }
                 if (smokeStep == 0 && settings != null) {
-                    try { VerifySettingsInteraction(); } catch(Exception error) { Environment.ExitCode=1;File.WriteAllText(Path.Combine(root,"smoke-result.txt"),"FAIL: "+error.Message);exiting=true;Send("quit");return; }
+                    try { VerifySettingsInteraction(); VerifyRuntimeInteraction(); } catch(Exception error) { Environment.ExitCode=1;File.WriteAllText(Path.Combine(root,"smoke-result.txt"),"FAIL: "+error.Message);exiting=true;Send("quit");return; }
                     if (fields.Count < 53 || runtimeInputs.Count < 20 || Find<TextBox>("Persona").Text != "测试小鲸人设" || !tray.Registered) { Environment.ExitCode = 1; File.WriteAllText(Path.Combine(root, "smoke-result.txt"), "FAIL: config=" + fields.Count + ", runtime=" + runtimeInputs.Count + ", tray=" + tray.Registered + ", personaLength=" + Find<TextBox>("Persona").Text.Length); exiting = true; Send("quit"); return; }
                     foreach (int page in new[] {0,1,2,3,4,5,6}) Capture(Path.Combine(root,"page-" + page + ".png"), page);
                     Send("settings", Collect(settings, ""));
+                    SaveConnection(false);
                     Find<TabControl>("Tabs").SelectedIndex = 6;
                     Find<ComboBox>("SocialSection").SelectedIndex = 8;
                     smokeStep = 10;
@@ -336,7 +345,7 @@ partial class App
                     Process.Start(new ProcessStartInfo(Path.Combine(root, "QQ-BOT.exe")) { UseShellExecute = false, CreateNoWindow = true });
                     smokeStep = 1;
                 } else if (smokeStep == 1 && window.IsVisible) {
-                    File.WriteAllText(Path.Combine(root, "smoke-result.txt"), "PASS: seven settings categories, search, numeric stepper and validation, enum/list roundtrip, custom dropdown, activity selection and empty state, Shell tray restore, graceful exit");
+                    File.WriteAllText(Path.Combine(root, "smoke-result.txt"), "PASS: top settings navigation, plain QQ input, model sync and validation, safe form/text editing, compact layout, connection save, custom dropdown, activity selection, Shell tray restore, graceful exit");
                     smokeStep = 2; Exit();
                 }
             }

@@ -158,7 +158,7 @@
    </ControlTemplate.Triggers></ControlTemplate></Setter.Value></Setter>
   </Style>
   <Style x:Key="SettingsNavItem" TargetType="ListBoxItem">
-   <Setter Property="Padding" Value="12,11"/><Setter Property="Margin" Value="0,0,0,4"/><Setter Property="Foreground" Value="#61708C"/>
+   <Setter Property="Padding" Value="10,9"/><Setter Property="Margin" Value="0,0,4,0"/><Setter Property="Foreground" Value="#61708C"/>
    <Setter Property="HorizontalContentAlignment" Value="Stretch"/><Setter Property="Cursor" Value="Hand"/><Setter Property="FocusVisualStyle" Value="{x:Null}"/>
    <Setter Property="Template"><Setter.Value><ControlTemplate TargetType="ListBoxItem"><Border x:Name="Item" CornerRadius="8" Background="Transparent" Padding="{TemplateBinding Padding}" BorderThickness="1" BorderBrush="Transparent"><ContentPresenter/></Border><ControlTemplate.Triggers>
     <Trigger Property="IsMouseOver" Value="True"><Setter TargetName="Item" Property="Background" Value="#F4F6FC"/></Trigger>

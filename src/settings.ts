@@ -44,7 +44,7 @@ const SettingsSchema = z
       .default({}),
     approval: z
       .object({
-        adminQq: z.number().int().min(0).default(config.bot.adminQq),
+        adminQq: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).default(config.bot.adminQq),
         allowExec: z.boolean().default(config.bot.allowExec),
         timeoutMs: z.number().int().min(5000).max(600000).default(90000),
       })
@@ -125,8 +125,12 @@ async function persist(next: BotSettings): Promise<void> {
   await rename(temp, path);
 }
 
+export function validateSettings(input: unknown): BotSettings {
+  return SettingsSchema.parse(input);
+}
+
 export async function saveSettings(input: unknown): Promise<BotSettings> {
-  const parsed = SettingsSchema.parse(input);
+  const parsed = validateSettings(input);
   const task = writes.then(async () => {
     await persist(parsed);
     current = parsed;

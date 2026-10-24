@@ -1,8 +1,8 @@
-import { readFile, writeFile, rename, mkdir } from 'node:fs/promises';
+import { readFile, writeFile, rename, mkdir, rm } from 'node:fs/promises';
 import { resolve, dirname } from 'node:path';
 import { loadEnvFile } from 'node:process';
 import { parseEnv } from 'node:util';
-import { runtimeFields } from './runtime-fields.mjs';
+import { runtimeFields, mergeRuntimeEnv, validateRuntimeEnv } from './runtime-fields.mjs';
 try { loadEnvFile('.env'); } catch (e) { if (e.code !== 'ENOENT') throw e; }
 const settings = await import('../dist/settings.js');
 const read = async (p) => readFile(p, 'utf8').catch(e => { if (e.code === 'ENOENT') return ''; throw e; });
@@ -27,34 +27,28 @@ process.once('message', async ({ action, data }) => {
       const media = new MediaService(process.env.BOT_MEDIA_DIR || resolve(folder, 'media'), () => settings.getSettings().social);
       result = await socialAdmin(data, store, media);
     }
+    else if (action === 'connection') {
+      const allowed = new Set(['mediaEnabled', 'visionModel', 'transcriptionModel', 'speechModel', 'speechVoice', 'videoFrames']);
+      if (!data?.media || typeof data.media !== 'object' || Array.isArray(data.media) || Object.keys(data.media).some(key => !allowed.has(key))) throw new Error('连接配置格式无效：媒体模型选项无效');
+      const previousEnv = await readFile('.env', 'utf8').catch(e => { if (e.code === 'ENOENT') return null; throw e; });
+      const env = mergeRuntimeEnv(previousEnv || '', data.runtime);
+      validateRuntimeEnv(env);
+      const previousSettings = await settings.loadSettings();
+      const media = Object.fromEntries(Object.entries(data.media).map(([key, value]) => [key, typeof value === 'string' ? value.trim() : value]));
+      const nextSettings = settings.validateSettings({ ...previousSettings, social: { ...previousSettings.social, ...media } });
+      if (nextSettings.social.mediaEnabled && ['visionModel', 'transcriptionModel', 'speechModel'].some(key => nextSettings.social[key]) && !parseEnv(env).BOT_MEDIA_BASE_URL?.trim()) throw new Error('连接配置格式无效：使用独立媒体模型前请填写媒体服务地址');
+      await atomic(resolve('.env'), env);
+      try { await settings.saveSettings(nextSettings); }
+      catch (error) {
+        if (previousEnv === null) await rm(resolve('.env'), { force: true });
+        else await atomic(resolve('.env'), previousEnv);
+        throw error;
+      }
+      result = { env, runtimeFields: describeEnv(env), settings: nextSettings };
+    }
     else if (action === 'env' || action === 'runtime') {
-      if (action === 'runtime') {
-        const allowed = new Set(runtimeFields.map(field => field[1]));
-        let text = await read('.env');
-        for (const [key, value] of Object.entries(data)) {
-          if (!allowed.has(key) || typeof value !== 'string' || /[\r\n\0"]/u.test(value)) throw new Error('连接配置格式无效：输入不可包含换行或双引号');
-          // Single quotes preserve Windows paths containing literal \n or \r.
-          const quote = value.includes("'") ? '"' : "'";
-          const line = `${key}=${quote}${value}${quote}`;
-          if (parseEnv(line)[key] !== value) throw new Error('连接配置格式无效：无法原样保存该字段的引号或转义字符');
-          const pattern = new RegExp(`^(?:export\\s+)?${key}\\s*=.*$`, 'gm');
-          if (!value && ['BOT_USAGE_STORE', 'BOT_GROUP_CONTEXT_STORE', 'BOT_DSH_HOME'].includes(key)) { text = text.replace(pattern, ''); continue; }
-          if (pattern.test(text)) text = text.replace(pattern, () => line);
-          else text += `\n${line}`;
-        }
-        data = text;
-      }
-      // Node's own parser validates syntax before replacing the active file.
-      if (typeof data !== 'string' || data.includes('\0')) throw new Error('连接配置格式无效');
-      const parsed = parseEnv(data);
-      for (const key of ['ONEBOT_HTTP_URL', 'ONEBOT_WS_URL']) if (parsed[key]) {
-        const url = new URL(parsed[key]);
-        if (!(key === 'ONEBOT_HTTP_URL' ? ['http:', 'https:'] : ['ws:', 'wss:']).includes(url.protocol)) throw new Error(key + ' 协议无效');
-      }
-      if (parsed.BOT_DSH_PROFILE && !/^[\w-]+$/.test(parsed.BOT_DSH_PROFILE)) throw new Error('连接配置格式无效：Profile 只允许字母、数字、下划线和短横线');
-      for (const [key, min, max] of [['TURN_TIMEOUT_MS',1000,600000],['QUEUE_PER_CONVERSATION',1,100],['QUEUE_TOTAL',1,1000],['MAX_CONCURRENT_TURNS',1,32]]) {
-        if (parsed[key] && (!/^\d+$/.test(parsed[key]) || Number(parsed[key]) < min || Number(parsed[key]) > max)) throw new Error(`连接配置格式无效：${key} 范围 ${min}–${max}`);
-      }
+      if (action === 'runtime') data = mergeRuntimeEnv(await read('.env'), data);
+      validateRuntimeEnv(data);
       await atomic(resolve('.env'), data); result = { env: data, runtimeFields: describeEnv(data) };
     } else if (action === 'persona') {
       if (typeof data?.text !== 'string' || resolve(data.path) !== personaPath) throw new Error('工作区已变更，请重新打开控制台后编辑人设');

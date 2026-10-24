@@ -8,7 +8,7 @@ $references += @('PresentationFramework.dll', 'PresentationCore.dll', 'WindowsBa
 $output = if ($OutputPath) { [IO.Path]::GetFullPath($OutputPath) } else { Join-Path $projectRoot 'QQ-BOT.exe' }
 & (Join-Path $PSScriptRoot 'build-icon.ps1')
 $iconPath = Join-Path $PSScriptRoot 'assets/whale.ico'
-& (Join-Path $framework 'csc.exe') /nologo /codepage:65001 /target:winexe /platform:x64 /optimize+ "/out:$output" "/win32icon:$iconPath" "/resource:$iconPath,whale.ico" @references (Join-Path $PSScriptRoot 'App.cs') (Join-Path $PSScriptRoot 'SettingsView.cs') (Join-Path $PSScriptRoot 'ActivityView.cs') (Join-Path $PSScriptRoot 'NativeTray.cs')
+& (Join-Path $framework 'csc.exe') /nologo /codepage:65001 /target:winexe /platform:x64 /optimize+ "/out:$output" "/win32icon:$iconPath" "/resource:$iconPath,whale.ico" @references (Join-Path $PSScriptRoot 'App.cs') (Join-Path $PSScriptRoot 'SettingsView.cs') (Join-Path $PSScriptRoot 'RuntimeView.cs') (Join-Path $PSScriptRoot 'ActivityView.cs') (Join-Path $PSScriptRoot 'NativeTray.cs')
 if ($LASTEXITCODE -ne 0) { throw '桌面端编译失败' }
 # A low-integrity workspace must not lower the desktop app or its Node children.
 & icacls.exe $output /setintegritylevel Medium | Out-Null

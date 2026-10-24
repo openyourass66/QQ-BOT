@@ -71,7 +71,7 @@ partial class App
         new FieldSpec("chat.delay.maxMs", "额度与节奏", "回复节奏", "最长回复延迟", "在范围内选择自然的发送间隔。", "毫秒", 0, 20000, 100),
         new FieldSpec("chat.delay.chunkSize", "额度与节奏", "回复节奏", "长消息分段", "超过这个长度时分条发送。", "字", 100, 4000, 100),
         new FieldSpec("identity.name", "身份与审批", "小鲸的身份", "机器人名称", "群友在句首叫这个名字，也能唤起小鲸。"),
-        new FieldSpec("approval.adminQq", "身份与审批", "工作区审批", "管理员 QQ", "接收工作区修改和命令执行的审批；0 表示未设置。", "", 0, long.MaxValue),
+        new FieldSpec("approval.adminQq", "身份与审批", "工作区审批", "管理员 QQ", "直接输入接收审批的 QQ 号；0 表示未设置。", "", 0, 9007199254740991),
         new FieldSpec("approval.allowExec", "身份与审批", "工作区审批", "自动执行命令", "独立于 QQ 动作的自主开关，控制 DSH 命令执行。"),
         new FieldSpec("approval.timeoutMs", "身份与审批", "工作区审批", "审批等待时间", "超时后自动取消本次审批。", "毫秒", 5000, 600000, 5000),
         new FieldSpec("social.retentionDays", "存储与高级", "本地记录", "消息保留时间", "过期消息会在后续保存时淘汰。", "天", 1, 365),
@@ -87,7 +87,6 @@ partial class App
         nav.SelectionChanged += (s,e) => { var item = nav.SelectedItem as SettingsCategory; if (item != null) { selectedCategory=item.Name; FilterSettings(); Find<ScrollViewer>("SettingsScroll").ScrollToTop(); } };
         Find<TextBox>("SettingsSearch").TextChanged += (s,e) => FilterSettings();
         Find<TextBox>("SettingsSearch").KeyDown += (s,e) => { if(e.Key==System.Windows.Input.Key.Escape){Find<TextBox>("SettingsSearch").Clear();e.Handled=true;} };
-        window.SizeChanged+=(s,e)=>Find<Border>("SettingsNavHelp").Visibility=window.ActualHeight<780?Visibility.Collapsed:Visibility.Visible;
     }
     static Dictionary<string,object> FlattenSettings(Dictionary<string,object> data, string prefix = "") {
         var result = new Dictionary<string,object>();
@@ -126,12 +125,16 @@ partial class App
         row.Children.Add(copy);Control input;FrameworkElement holder;
         var error=new TextBlock { Foreground=Ink("Danger"), FontSize=10, Margin=new Thickness(0,4,0,0), TextWrapping=TextWrapping.Wrap, Visibility=Visibility.Collapsed };
         bool list=value is IEnumerable && !(value is string); bool numeric=!(value is bool)&&!(value is string)&&!list;
-        if(value is bool) { var check=new CheckBox { IsChecked=(bool)value, HorizontalAlignment=HorizontalAlignment.Right };check.Checked+=(s,e)=>SettingChanged();check.Unchecked+=(s,e)=>SettingChanged();input=check;holder=check; }
-        else if(choices.ContainsKey(spec.Path)) { var select=new ComboBox { ItemsSource=choices[spec.Path].Select(item=>new Choice { Value=item.Split('|')[0],Label=item.Split('|')[1] }).ToList(),DisplayMemberPath="Label",SelectedValuePath="Value",SelectedValue=value };select.SelectionChanged+=(s,e)=>SettingChanged();input=select;holder=select; }
+        if(value is bool) { var check=new CheckBox { IsChecked=(bool)value, HorizontalAlignment=HorizontalAlignment.Right };check.Checked+=(s,e)=>SettingChanged(spec.Path);check.Unchecked+=(s,e)=>SettingChanged(spec.Path);input=check;holder=check; }
+        else if(choices.ContainsKey(spec.Path)) { var select=new ComboBox { ItemsSource=choices[spec.Path].Select(item=>new Choice { Value=item.Split('|')[0],Label=item.Split('|')[1] }).ToList(),DisplayMemberPath="Label",SelectedValuePath="Value",SelectedValue=value };select.SelectionChanged+=(s,e)=>SettingChanged(spec.Path);input=select;holder=select; }
         else {
             var text=new TextBox { Text=list?string.Join(", ",((IEnumerable)value).Cast<object>()):Convert.ToString(value,CultureInfo.InvariantCulture), Tag=list?"多个值用逗号分隔":spec.Path.StartsWith("social.")&&spec.Path.Contains("Model")?"可选模型名称":"", VerticalAlignment=VerticalAlignment.Center };
-            text.TextChanged+=(s,e)=>SettingChanged();input=text;holder=text;
-            if(numeric) {
+            text.TextChanged+=(s,e)=>SettingChanged(spec.Path);input=text;holder=text;
+            if(spec.Path=="approval.adminQq") {
+                text.Tag="输入管理员 QQ 号";text.MaxLength=16;
+                text.LostKeyboardFocus+=(s,e)=>ValidateSetting(spec,text,error);
+            }
+            else if(numeric) {
                 var box=new Grid();box.ColumnDefinitions.Add(new ColumnDefinition {Width=new GridLength(28)});box.ColumnDefinitions.Add(new ColumnDefinition());box.ColumnDefinitions.Add(new ColumnDefinition {Width=GridLength.Auto});box.ColumnDefinitions.Add(new ColumnDefinition {Width=new GridLength(28)});
                 var minus=new Button { Content="−",Padding=new Thickness(0),MinHeight=34,Background=Brushes.Transparent,BorderThickness=new Thickness(0),ToolTip="减少" };
                 var plus=new Button { Content="+",Padding=new Thickness(0),MinHeight=34,Background=Brushes.Transparent,BorderThickness=new Thickness(0),ToolTip="增加" };
@@ -154,7 +157,7 @@ partial class App
         outer.Children.Add(new Border { Background=Color("#F0F3F9"),Height=1,Margin=new Thickness(0,11,0,0) });
         return new FieldView {Spec=spec,Row=outer,Editor=holder,Error=error};
     }
-    static void SettingChanged() { MarkDirty("settings"); if(!loading) { RefreshDependencies();Find<TextBlock>("SettingsSaveHint").Text="有尚未保存的更改"; } }
+    static void SettingChanged(string path) { MarkDirty(IsMediaSetting(path)?"models":"settings"); if(!loading) { RefreshDependencies();RefreshMediaEditors();Find<TextBlock>("SettingsSaveHint").Text="有尚未保存的更改";if(IsMediaSetting(path))Find<TextBlock>("RuntimeHint").Text="有尚未保存的媒体模型配置。"; } }
     static void RefreshDependencies() {
         Action<string,bool> enabled=(key,on)=>{if(fields.ContainsKey(key)){fields[key].IsEnabled=on;if(fieldViews.ContainsKey(key))fieldViews[key].Editor.IsEnabled=on;}};
         if(fields.ContainsKey("social.allowAll")) {bool allow=((CheckBox)fields["social.allowAll"]).IsChecked==true;enabled("social.allowedGroups",!allow);enabled("social.allowedUsers",!allow);}
@@ -171,7 +174,8 @@ partial class App
     }
     static bool ValidateSetting(FieldSpec spec,TextBox text,TextBlock error) {
         long value;bool valid=long.TryParse(text.Text,out value)&&value>=spec.Min&&value<=spec.Max;
-        error.Text=valid?"":"请输入 "+spec.Min+"–"+spec.Max+" 之间的整数。";error.Visibility=valid?Visibility.Collapsed:Visibility.Visible;
+        if(spec.Path=="approval.adminQq")valid=valid&&text.Text.Length>0&&text.Text.All(c=>c>='0'&&c<='9');
+        error.Text=valid?"":spec.Path=="approval.adminQq"?"请输入有效的纯数字 QQ 号，0 表示不设置管理员。":"请输入 "+spec.Min+"–"+spec.Max+" 之间的整数。";error.Visibility=valid?Visibility.Collapsed:Visibility.Visible;
         return valid;
     }
     static bool ValidateSettingsForm() {
@@ -192,6 +196,12 @@ partial class App
         number.Text="101";
         if(ValidateSettingsForm()||fieldViews["social.responseProbability"].Error.Visibility!=Visibility.Visible)throw new Exception("无效值没有显示行内提示");
         number.Text=originalNumber;ValidateSetting(fieldViews["social.responseProbability"].Spec,number,fieldViews["social.responseProbability"].Error);mode.SelectedValue=originalMode;
+        var admin=(TextBox)fields["approval.adminQq"];string originalAdmin=admin.Text;var adminView=fieldViews["approval.adminQq"];
+        if(adminView.Editor!=admin)throw new Exception("管理员 QQ 仍使用了数字步进控件");
+        admin.Text="3000000001";
+        if(!ValidateSetting(adminView.Spec,admin,adminView.Error)||Convert.ToInt64(((Dictionary<string,object>)Collect(settings,"")["approval"])["adminQq"])!=3000000001)throw new Exception("管理员 QQ 没有原样保存");
+        admin.Text="+3000000001";if(ValidateSetting(adminView.Spec,admin,adminView.Error))throw new Exception("管理员 QQ 接受了非纯数字输入");
+        admin.Text=originalAdmin;ValidateSetting(adminView.Spec,admin,adminView.Error);
         Find<TextBox>("SettingsSearch").Text="主动消息";
         if(!settingsCards.Any(c=>c.Surface.Visibility==Visibility.Visible))throw new Exception("设置搜索没有匹配结果");
         Find<TextBox>("SettingsSearch").Clear();
@@ -199,26 +209,5 @@ partial class App
         if(json.Serialize(Collect(settings,""))!=before)throw new Exception("切换分类或搜索丢失了设置值");
         for(int i=0;i<7;i++){Find<ListBox>("SettingsNav").SelectedIndex=i;Capture(System.IO.Path.Combine(root,"settings-"+i+".png"),2);}
         Find<ListBox>("SettingsNav").SelectedIndex=0;
-    }
-    static void BuildRuntimeFields(object value) {
-        var panel=Find<StackPanel>("RuntimeFields");panel.Children.Clear();runtimeInputs.Clear();
-        var all=((IEnumerable)value).Cast<Dictionary<string,object>>().ToList();
-        Func<string,int> order=group=>group.StartsWith("OneBot")?0:group.StartsWith("模型")?1:group.StartsWith("账号")?2:group.StartsWith("图片")?3:group.StartsWith("搜索")?4:group.StartsWith("消息")?5:group.StartsWith("社交")?6:group.StartsWith("数据")?7:8;
-        foreach(var group in all.GroupBy(f=>(string)f["group"]).OrderBy(g=>order(g.Key))) {
-            var content=new StackPanel {Margin=new Thickness(0,13,0,0)};
-            foreach(var field in group) {
-                string key=(string)field["key"],kind=(string)field["kind"];
-                var row=new StackPanel {Margin=new Thickness(0,0,0,14)};row.Children.Add(new TextBlock {Text=(string)field["label"],FontSize=12,Margin=new Thickness(0,0,0,7),TextWrapping=TextWrapping.Wrap});
-                Control input;
-                if(kind=="secret") {var password=new PasswordBox {Password=(string)field["value"]};password.PasswordChanged+=(s,e)=>MarkDirty("runtime");input=password;}
-                else {var text=new TextBox {Text=(string)field["value"]};text.TextChanged+=(s,e)=>MarkDirty("runtime");input=text;}
-                runtimeInputs[key]=input;System.Windows.Automation.AutomationProperties.SetName(input,(string)field["label"]);
-                var holder=new DockPanel();
-                if(kind=="file"||kind=="folder") {var browse=new Button {Content="选择…",Margin=new Thickness(8,0,0,0)};browse.Click+=(s,e)=>{if(kind=="folder"){using(var dialog=new Forms.FolderBrowserDialog()){if(dialog.ShowDialog()==Forms.DialogResult.OK)((TextBox)input).Text=dialog.SelectedPath;}}else{var dialog=new Microsoft.Win32.OpenFileDialog {Filter="所有文件|*.*"};if(dialog.ShowDialog(window)==true)((TextBox)input).Text=dialog.FileName;}};DockPanel.SetDock(browse,Dock.Right);holder.Children.Add(browse);}
-                holder.Children.Add(input);row.Children.Add(holder);content.Children.Add(row);
-            }
-            var expander=new Expander {Header=group.Key,FontSize=14,FontWeight=FontWeights.Medium,IsExpanded=order(group.Key)<2,Content=content};
-            panel.Children.Add(new Border {Background=Brushes.White,BorderBrush=Ink("Line"),BorderThickness=new Thickness(1),CornerRadius=new CornerRadius(12),Padding=new Thickness(18,15,18,5),Margin=new Thickness(0,0,8,14),Child=expander});
-        }
     }
 }

@@ -37,16 +37,43 @@ test('桌面配置：中文往返、完整设置校验、无效保存保留文�
     assert.ok(!(await worker('load')).result.env.includes('BOT_USAGE_STORE=""'));
     assert.equal((await worker('runtime', { BOT_QQ_DIR: 'C:\\new\\napcat' })).ok, true);
     assert.equal((await worker('load')).result.runtimeFields.find(f => f.key === 'BOT_QQ_DIR').value, 'C:\\new\\napcat');
+    const connection = { runtime: { BOT_DSH_PROFILE: 'chat-test', BOT_MEDIA_BASE_URL: 'https://api.example.com/v1/' }, media: { visionModel: ' vision-test ', transcriptionModel: 'transcribe-test', videoFrames: 4 } };
+    response = await worker('connection', connection);
+    assert.equal(response.ok, true);
+    assert.equal(response.result.settings.social.visionModel, 'vision-test');
+    assert.equal(response.result.settings.identity.name, '小鲸');
+    assert.match(response.result.env, /# 中文配置/);
+    const savedEnv = await readFile(join(root, '.env'), 'utf8');
+    const savedSettings = await readFile(join(root, 'bot.config.json'), 'utf8');
+    for (const invalid of [
+      { ...connection, runtime: { BOT_DSH_PROFILE: 'bad profile' } },
+      { ...connection, runtime: { BOT_MEDIA_BASE_URL: 'file:///wrong' } },
+      { ...connection, runtime: { BOT_MEDIA_BASE_URL: 'not a url' } },
+      { ...connection, runtime: { BOT_MEDIA_BASE_URL: '' } },
+      { ...connection, runtime: { ADMIN_QQ: '9007199254740992' } },
+      { ...connection, media: { videoFrames: 0 } },
+      { ...connection, media: { speechModel: 'x'.repeat(129) } },
+      { ...connection, media: { allowAll: true } },
+    ]) {
+      assert.equal((await worker('connection', invalid)).ok, false);
+      assert.equal(await readFile(join(root, '.env'), 'utf8'), savedEnv);
+      assert.equal(await readFile(join(root, 'bot.config.json'), 'utf8'), savedSettings);
+    }
+    await mkdir(join(root, 'bot.config.json.tmp'));
+    assert.equal((await worker('connection', { ...connection, runtime: { BOT_DSH_PROFILE: 'should-rollback' } })).ok, false);
+    assert.equal(await readFile(join(root, '.env'), 'utf8'), savedEnv);
+    assert.equal(await readFile(join(root, 'bot.config.json'), 'utf8'), savedSettings);
   } finally { await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); }
 });
 
-test('桌面控制：重复启动不重复建进程，停止发送 graceful IPC，退出清理两个受管进程', async () => {
+test('桌面控制：重复启动、模型重连、完整重启、仅在配置保存成功后重启和退出清理', async () => {
   const root = await mkdtemp(join(tmpdir(), 'qq-desktop-host-'));
   for (const dir of ['desktop', 'dist', 'scripts']) await mkdir(join(root, dir));
   await cp(resolve('desktop/host.mjs'), join(root, 'desktop/host.mjs'));
   await writeFile(join(root, 'desktop/diagnostics.mjs'), "export async function diagnose(){return {ok:true,rows:[]}}; export async function environment(){return {ONEBOT_TOKEN:'secret-test-token'}}; export async function onebotOnline(){return false};");
   await writeFile(join(root, 'dist/bridge.js'), "console.log('bridge-started'); console.log('token=secret-test-token'); process.on('message', m => { if (m === 'shutdown') { console.log('graceful-stop'); process.exit(); } }); setInterval(() => {}, 1000);");
   await writeFile(join(root, 'scripts/napcat-node.mjs'), "console.log('napcat-started'); setInterval(() => {}, 1000);");
+  await writeFile(join(root, 'desktop/config-worker.mjs'), "process.once('message', ({data}) => process.send(data.invalid ? {ok:false,error:'invalid-config'} : {ok:true,result:{}}, () => process.disconnect()));");
   const child = spawn(process.execPath, [join(root, 'desktop/host.mjs')], { stdio: ['pipe', 'pipe', 'pipe'] });
   const events = []; createInterface({ input: child.stdout }).on('line', line => events.push(JSON.parse(line)));
   const wait = async predicate => { const until = Date.now() + 12000; while (!predicate()) { if (Date.now() > until) throw new Error('等待状态超时'); await new Promise(r => setTimeout(r, 30)); } };
@@ -59,6 +86,15 @@ test('桌面控制：重复启动不重复建进程，停止发送 graceful IPC�
     send('start'); await wait(() => events.filter(e => e.type === 'log' && e.text.includes('-started')).length === 4);
     send('restartBridge'); await wait(() => events.filter(e => e.type === 'log' && e.text.includes('bridge-started')).length === 3);
     assert.equal(events.filter(e => e.type === 'log' && e.text.includes('napcat-started')).length, 2);
+    send('restart'); await wait(() => events.filter(e => e.type === 'log' && e.text.includes('bridge-started')).length === 4 && events.filter(e => e.type === 'log' && e.text.includes('napcat-started')).length === 3);
+    assert.equal(events.filter(e => e.type === 'log' && e.text.includes('napcat-started')).length, 3);
+    child.stdin.write(JSON.stringify({ action: 'connection', data: { invalid: true, restart: true } }) + '\n');
+    await wait(() => events.some(e => e.type === 'error' && e.text === 'invalid-config'));
+    assert.equal(events.filter(e => e.type === 'log' && e.text.includes('bridge-started')).length, 4);
+    child.stdin.write(JSON.stringify({ action: 'connection', data: { restart: true } }) + '\n');
+    await wait(() => events.filter(e => e.type === 'log' && e.text.includes('bridge-started')).length === 5 && events.filter(e => e.type === 'log' && e.text.includes('napcat-started')).length === 4);
+    assert.equal(events.filter(e => e.type === 'log' && e.text.includes('napcat-started')).length, 4);
+    assert.ok(events.some(e => e.type === 'saved' && e.section === 'connection' && e.restartRequested));
     send('quit'); await new Promise((done, reject) => { child.once('exit', done); child.once('error', reject); });
     assert.equal(events.at(-1).bridge, false); assert.equal(events.at(-1).napcat, false);
     assert.ok(!JSON.stringify(events).includes('secret-test-token'));
