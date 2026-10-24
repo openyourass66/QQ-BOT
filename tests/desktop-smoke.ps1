@@ -7,6 +7,7 @@ try {
     Copy-Item -LiteralPath (Join-Path $projectRoot $Executable) -Destination (Join-Path $testRoot 'QQ-BOT.exe')
     Copy-Item -LiteralPath (Join-Path $projectRoot 'desktop') -Destination $testRoot -Recurse
     Copy-Item -LiteralPath (Join-Path $projectRoot 'dist') -Destination $testRoot -Recurse
+    Copy-Item -LiteralPath (Join-Path $projectRoot 'package.json') -Destination $testRoot
     # Resolve the existing dependency tree without copying runtime data or credentials.
     [IO.File]::WriteAllText((Join-Path $testRoot '.env'), "BOT_WORKSPACE=$($testRoot.Replace('\', '/'))`n", [Text.UTF8Encoding]::new($false))
     [IO.File]::WriteAllText((Join-Path $testRoot 'AGENTS.md'), ([string][char]0x6D4B + [char]0x8BD5 + [char]0x5C0F + [char]0x9CB8 + [char]0x4EBA + [char]0x8BBE), [Text.UTF8Encoding]::new($false))

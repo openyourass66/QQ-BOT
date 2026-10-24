@@ -1,6 +1,13 @@
 import { parseEnv } from 'node:util';
+import { readChatModelConfig, defaultChatBaseUrl, defaultChatModel } from '../dist/chat-model.js';
+
+export const chatRuntimeKeys = new Set(['BOT_CHAT_MODE', 'BOT_CHAT_MODEL', 'BOT_CHAT_BASE_URL', 'QQ_BOT_DEEPSEEK_API_KEY']);
 
 export const runtimeFields = [
+  ['模型选择', 'BOT_CHAT_MODE', '使用方式', 'profile', 'chat-mode'],
+  ['模型选择', 'BOT_CHAT_MODEL', '对话模型', defaultChatModel, 'chat-model'],
+  ['模型选择', 'QQ_BOT_DEEPSEEK_API_KEY', '本项目 API Key', '', 'secret'],
+  ['模型选择', 'BOT_CHAT_BASE_URL', 'API 地址', defaultChatBaseUrl],
   ['图片与语音 · 可选', 'BOT_MEDIA_BASE_URL', '媒体服务地址（兼容 API 的 /v1/）', ''], ['图片与语音 · 可选', 'BOT_MEDIA_API_KEY', '媒体服务密钥', '', 'secret'], ['图片与语音 · 可选', 'BOT_FFMPEG_BIN', 'FFmpeg 文件（视频抽帧）', '', 'file'],
   ['搜索与空间 · 可选', 'BOT_SEARCH_URL', '搜索适配服务地址', ''], ['搜索与空间 · 可选', 'BOT_SEARCH_API_KEY', '搜索服务密钥', '', 'secret'], ['搜索与空间 · 可选', 'BOT_QZONE_ADAPTER_URL', '空间适配服务地址', ''], ['搜索与空间 · 可选', 'BOT_QZONE_ADAPTER_TOKEN', '空间适配服务令牌', '', 'secret'],
   ['社交数据', 'BOT_SOCIAL_STORE', '社交数据文件（留空自动选择）', ''], ['社交数据', 'BOT_MEDIA_DIR', '媒体库目录（留空自动选择）', '', 'folder'], ['社交数据', 'BOT_MEDIA_IMPORT_DIRS', '允许导入的媒体目录（多个用 | 分隔）', ''],
@@ -32,7 +39,8 @@ export function mergeRuntimeEnv(original, data) {
 export function validateRuntimeEnv(data) {
   if (typeof data !== 'string' || data.includes('\0')) throw new Error('连接配置格式无效');
   const parsed = parseEnv(data);
-  for (const key of runtimeFields.map(field => field[1]).filter(key => key.endsWith('_URL'))) if (parsed[key]) {
+  readChatModelConfig(parsed);
+  for (const key of runtimeFields.map(field => field[1]).filter(key => key.endsWith('_URL'))) if (parsed[key] && (key !== 'BOT_CHAT_BASE_URL' || parsed.BOT_CHAT_MODE === 'project')) {
     let url;
     try { url = new URL(parsed[key]); } catch { throw new Error('连接配置格式无效：' + key + ' 地址无效'); }
     if (!(key === 'ONEBOT_WS_URL' ? ['ws:', 'wss:'] : ['http:', 'https:']).includes(url.protocol)) throw new Error(key + ' 协议无效');

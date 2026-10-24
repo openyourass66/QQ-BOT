@@ -6,6 +6,8 @@ import { appendFileSync } from 'node:fs';
 let nextSession = 0;
 let nextGroupTurn = 0;
 const sessionServers = new Map();
+const sessionModels = new Map();
+if (process.env.FAKE_MODEL_EVENTS) appendFileSync(process.env.FAKE_MODEL_EVENTS, JSON.stringify({ args: process.argv.slice(2) }) + '\n');
 const respond = (id, result) => process.stdout.write(`${JSON.stringify({ jsonrpc: '2.0', id, result })}\n`);
 const notify = (method, params) => process.stdout.write(`${JSON.stringify({ jsonrpc: '2.0', method, params })}\n`);
 const lines = createInterface({ input: process.stdin });
@@ -21,7 +23,14 @@ lines.on('line', async (line) => {
   } else if (method === 'session/resume') {
     sessionServers.set(params.sessionId, params.mcpServers);
     respond(id, {});
+  } else if (method === 'session/set_config_option') {
+    sessionModels.set(params.sessionId, params.value);
+    if (process.env.FAKE_MODEL_EVENTS) appendFileSync(process.env.FAKE_MODEL_EVENTS, JSON.stringify(params) + '\n');
+    respond(id, { configOptions: [] });
   } else if (method === 'session/prompt') {
+    if (process.env.FAKE_MODEL_EVENTS && sessionModels.get(params.sessionId) !== JSON.stringify(['deepseek-official', 'test-project-model'])) {
+      process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id, error: { code: -32603, message: 'model not applied before prompt' } }) + '\n'); return;
+    }
     let text = params.prompt.map((block) => block.text ?? '').join('');
     if (process.env.FAKE_GROUP_PROMPTS) {
       appendFileSync(process.env.FAKE_GROUP_PROMPTS, JSON.stringify({ sessionId: params.sessionId, text }) + '\n');

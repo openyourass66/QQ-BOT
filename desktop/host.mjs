@@ -68,7 +68,7 @@ async function stop() { await stopOne('bridge'); await stopOne('napcat'); extern
 async function config(action, data) {
   return new Promise((done, reject) => {
     const worker = fork(resolve(root, 'desktop/config-worker.mjs'), [], { cwd: root, silent: true, execArgv: [], windowsHide: true });
-    const timeout = setTimeout(() => { worker.kill(); reject(new Error('配置操作超时')); }, 10000);
+    const timeout = setTimeout(() => { worker.kill(); reject(new Error('配置操作超时，请重试')); }, action === 'model' ? 25000 : 10000);
     let replied = false;
     worker.once('message', result => { replied = true; clearTimeout(timeout); result.ok ? done(result.result) : reject(new Error(result.error)); });
     worker.once('error', error => { clearTimeout(timeout); reject(error); });
@@ -78,6 +78,7 @@ async function config(action, data) {
 }
 async function check() { const result = await diagnose(root); emit({ type: 'diagnostics', ...result }); return result; }
 async function command({ action, data }) {
+  if (action === 'model') { const result = await config(action, data); emit({ type: 'model', ...result }); return; }
   if (action === 'knowledge') { const result = await config(action, data); emit({ type: 'knowledge', ...result }); return; }
   if (action === 'social' || action === 'memory') {
     if (action === 'memory') data = { ...data, section: 'memories' };
@@ -97,7 +98,7 @@ async function command({ action, data }) {
     const restartRequested = action === 'connection' && data.restart === true;
     emit(action === 'load' ? { type: 'config', ...result } : { type: 'saved', section: action, result, restartRequested });
     await refreshSecrets();
-    if (restartRequested) await command({ action: 'restart' });
+    if (restartRequested) await command({ action: result.restartAction === 'restartBridge' ? 'restartBridge' : 'restart' });
     return;
   }
   if (action === 'diagnose') { await check(); return; }

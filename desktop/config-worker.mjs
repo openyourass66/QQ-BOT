@@ -2,7 +2,8 @@ import { readFile, writeFile, rename, mkdir, rm } from 'node:fs/promises';
 import { resolve, dirname } from 'node:path';
 import { loadEnvFile } from 'node:process';
 import { parseEnv } from 'node:util';
-import { runtimeFields, mergeRuntimeEnv, validateRuntimeEnv } from './runtime-fields.mjs';
+import { runtimeFields, chatRuntimeKeys, mergeRuntimeEnv, validateRuntimeEnv } from './runtime-fields.mjs';
+import { readChatModelConfig, listChatModels, testChatModel } from '../dist/chat-model.js';
 import { knowledge } from './knowledge.mjs';
 try { loadEnvFile('.env'); } catch (e) { if (e.code !== 'ENOENT') throw e; }
 const settings = await import('../dist/settings.js');
@@ -31,6 +32,15 @@ process.once('message', async ({ action, data }) => {
       const media = new MediaService(process.env.BOT_MEDIA_DIR || resolve(folder, 'media'), () => settings.getSettings().social);
       result = await socialAdmin(data, store, media);
     }
+    else if (action === 'model') {
+      if (!['list', 'test'].includes(data?.operation)) throw new Error('连接配置格式无效：未知模型操作');
+      const env = mergeRuntimeEnv(await read('.env'), data.runtime);
+      validateRuntimeEnv(env);
+      const config = readChatModelConfig(parseEnv(env));
+      result = data.operation === 'list'
+        ? { operation: 'list', models: await listChatModels(config), message: '模型列表已获取，选择后可测试连接。' }
+        : { operation: 'test', ...await testChatModel(config) };
+    }
     else if (action === 'connection') {
       const allowed = new Set(['mediaEnabled', 'visionModel', 'transcriptionModel', 'speechModel', 'speechVoice', 'videoFrames']);
       if (!data?.media || typeof data.media !== 'object' || Array.isArray(data.media) || Object.keys(data.media).some(key => !allowed.has(key))) throw new Error('连接配置格式无效：媒体模型选项无效');
@@ -48,7 +58,9 @@ process.once('message', async ({ action, data }) => {
         else await atomic(resolve('.env'), previousEnv);
         throw error;
       }
-      result = { env, runtimeFields: describeEnv(env), settings: nextSettings };
+      const before = parseEnv(previousEnv || ''), after = parseEnv(env);
+      const onlyModelChanged = runtimeFields.filter(([, key]) => !chatRuntimeKeys.has(key)).every(([, key, , fallback]) => (before[key] ?? fallback) === (after[key] ?? fallback));
+      result = { env, runtimeFields: describeEnv(env), settings: nextSettings, restartAction: onlyModelChanged ? 'restartBridge' : 'restart' };
     }
     else if (action === 'env' || action === 'runtime') {
       if (action === 'runtime') data = mergeRuntimeEnv(await read('.env'), data);

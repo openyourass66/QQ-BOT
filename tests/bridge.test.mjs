@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { createServer } from 'node:http';
 import { spawn } from 'node:child_process';
-import { mkdtemp, writeFile, rm } from 'node:fs/promises';
+import { mkdtemp, writeFile, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -64,8 +64,8 @@ test('完整桥接链路：群上下文、连续回复顺序、超时恢复、DS
     const fake = fileURLToPath(new URL('./fixtures/fake-dsh.mjs', import.meta.url));
     const wrapper = join(dir, process.platform === 'win32' ? 'fake dsh.cmd' : 'fake-dsh');
     await writeFile(wrapper, process.platform === 'win32'
-      ? `@echo off\r\n"${process.execPath}" "${fake}"\r\n`
-      : `#!/bin/sh\nexec "${process.execPath}" "${fake}"\n`, { mode: 0o700 });
+      ? `@echo off\r\n"${process.execPath}" "${fake}" %*\r\n`
+      : `#!/bin/sh\nexec "${process.execPath}" "${fake}" "$@"\n`, { mode: 0o700 });
     const settings = join(dir, 'settings.json');
     await writeFile(settings, JSON.stringify({
       approval: { adminQq: 12345, timeoutMs: 5000 },
@@ -85,6 +85,8 @@ test('完整桥接链路：群上下文、连续回复顺序、超时恢复、DS
         ONEBOT_WS_URL: `ws://127.0.0.1:${wsServer.address().port}`,
         ONEBOT_TOKEN: '', BOT_SELF_ID: '10000', ADMIN_QQ: '0', ALLOW_EXEC: '0',
         BOT_DSH_BIN: wrapper, BOT_WORKSPACE: dir, BOT_DSH_PROFILE: 'acp',
+        BOT_CHAT_MODE: 'project', BOT_CHAT_MODEL: 'test-project-model', QQ_BOT_DEEPSEEK_API_KEY: 'project-test-key',
+        FAKE_MODEL_EVENTS: join(dir, 'model-events.jsonl'),
         BOT_SETTINGS_FILE: settings, SESSION_STORE: join(dir, 'sessions.json'),
         BOT_USAGE_STORE: join(dir, 'daily-usage.json'), BOT_ACTION_TOKEN: '', BOT_ACTION_URL: '',
         TURN_TIMEOUT_MS: '2000',
@@ -117,6 +119,12 @@ test('完整桥接链路：群上下文、连续回复顺序、超时恢复、DS
     assert.match(privateReplies[0].message, /长消息/);
     assert.match(privateReplies[1].message, /甲/);
     assert.match(privateReplies[2].message, /第二条/);
+    const modelEvents = (await readFile(join(dir, 'model-events.jsonl'), 'utf8')).trim().split('\n').map(JSON.parse);
+    assert.ok(modelEvents[0].args.includes('--patch'));
+    assert.equal(modelEvents[0].args.at(-1), join(dir, 'dsh', 'chat-model.patch.json'));
+    assert.ok(modelEvents.some(event => event.sessionId === 'saved-private' && event.value === JSON.stringify(['deepseek-official', 'test-project-model'])));
+    assert.ok(modelEvents.some(event => event.sessionId === 'test-session-1' && event.configId === 'model'));
+    assert.ok(!(await readFile(join(dir, 'dsh', 'chat-model.patch.json'), 'utf8')).includes('project-test-key'));
 
     send('MCP点赞');
     await waitReply((r) => r.message === 'MCP调用成功');

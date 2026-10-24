@@ -1,4 +1,5 @@
 import process from 'node:process';
+import { readChatModelConfig } from './chat-model.js';
 
 function env(name: string, fallback = ''): string {
   const value = process.env[name];
@@ -15,6 +16,7 @@ function boundedNum(name: string, fallback: number, min: number, max: number): n
 }
 
 export const config = {
+  chatModel: readChatModelConfig(process.env),
   onebot: {
     httpUrl: env('ONEBOT_HTTP_URL', 'http://127.0.0.1:3000').replace(/\/+$/, ''),
     wsUrl: env('ONEBOT_WS_URL', 'ws://127.0.0.1:3001'),

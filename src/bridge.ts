@@ -31,6 +31,7 @@ import type { ToolContext } from './social-tools.js';
 import { legacyTools, LegacyCallSchema } from './legacy-tools.js';
 import { QqActionSchema } from './qq-actions.js';
 import { socialAdmin } from './social-admin.js';
+import { chatModelSelection, prepareChatModelPatch } from './chat-model.js';
 
 const api = new OneBotHttp(config.onebot.httpUrl, config.onebot.token);
 const sessionStorePath = resolve(process.env.SESSION_STORE || 'data/sessions.json');
@@ -148,6 +149,17 @@ async function getSession(key: string): Promise<acp.ActiveSession> {
       log('info', `[acp] created ${session.sessionId} for ${key}`);
     }
 
+    const selection = chatModelSelection(config.chatModel);
+    if (selection) {
+      try {
+        await ctx.request(acp.methods.agent.session.setConfigOption, {
+          sessionId: session.sessionId, configId: 'model', value: JSON.stringify([selection.provider, selection.model]),
+        });
+      } catch {
+        session.dispose();
+        throw new Error('对话模型选择失败，请在控制台检查模型配置并测试连接；原有会话记录已保留');
+      }
+    }
     sessions.set(key, session);
     status.sessions = sessions.size;
     return session;
@@ -523,7 +535,7 @@ async function onNotice(event: Record<string, unknown>): Promise<void> {
   }
 }
 
-function spawnDsh(): ReturnType<typeof spawn> {
+function spawnDsh(patch?: string): ReturnType<typeof spawn> {
   if (!/^[\w-]+$/.test(config.dsh.profile)) throw new Error('BOT_DSH_PROFILE 只允许字母、数字、下划线和短横线');
   // 不继承当前桌面进程的 DSH_*（尤其 DSH_PROFILE=desktop、DSH_SESSION_ID）。
   const env: NodeJS.ProcessEnv = {};
@@ -531,10 +543,12 @@ function spawnDsh(): ReturnType<typeof spawn> {
     if (!key.startsWith('DSH_')) env[key] = value;
   }
   if (config.dsh.home) env.DSH_HOME = config.dsh.home;
+  const args = ['--profile', config.dsh.profile, ...(patch ? ['--patch', patch] : [])];
 
   if (process.platform === 'win32') {
     // dsh.cmd 路径含空格：cmd /s /c 用外层引号包住整条命令，并关闭 Node 的引号转义。
-    const command = `""${config.dsh.bin}" --profile ${config.dsh.profile}"`;
+    if ([config.dsh.bin, patch ?? ''].some(value => /["\r\n%]/u.test(value))) throw new Error('DSH 启动路径不可包含双引号、换行或百分号');
+    const command = `""${config.dsh.bin}" --profile ${config.dsh.profile}${patch ? ` --patch "${patch}"` : ''}"`;
     return spawn(process.env.ComSpec ?? 'cmd.exe', ['/d', '/s', '/c', command], {
       cwd: config.dsh.workspace,
       env,
@@ -544,15 +558,15 @@ function spawnDsh(): ReturnType<typeof spawn> {
     });
   }
 
-  return spawn(config.dsh.bin, ['--profile', config.dsh.profile], {
+  return spawn(config.dsh.bin, args, {
     cwd: config.dsh.workspace,
     env,
     stdio: ['pipe', 'pipe', 'pipe'],
   });
 }
 
-function startBridge(): void {
-  const child = spawnDsh();
+function startBridge(patch?: string): void {
+  const child = spawnDsh(patch);
   dshChild = child;
   child.on('error', (error) => {
     readyReject?.(error);
@@ -652,7 +666,9 @@ async function main(): Promise<void> {
     }
   });
 
-  startBridge();
+  const modelPatch = await prepareChatModelPatch(config.chatModel, sessionStorePath);
+  status.model = config.chatModel.mode === 'profile' ? 'DSH Profile' : config.chatModel.model;
+  startBridge(modelPatch);
   await withTimeout(ready, 30_000);
 
   let connectionGeneration = 0;

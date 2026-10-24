@@ -2,12 +2,15 @@ import { readFile, access, open, stat } from 'node:fs/promises';
 import { parseEnv } from 'node:util';
 import { resolve, join } from 'node:path';
 import { homedir } from 'node:os';
+import { readChatModelConfig } from '../dist/chat-model.js';
 export async function environment(root) {
   return { ...process.env, ...parseEnv(await readFile(join(root, '.env'), 'utf8').catch(e => { if (e.code === 'ENOENT') return ''; throw e; })) };
 }
 export async function diagnose(root) {
   const env = await environment(root), rows = [];
   const add = (name, ok, detail, required = true) => rows.push({ name, ok, detail, required });
+  try { const model = readChatModelConfig(env); add('对话模型配置', true, model.mode === 'profile' ? '沿用 DSH Profile' : `${model.model} · ${model.mode === 'project' ? '本项目 API Key' : 'DeepSeek 账号'}`); }
+  catch (error) { add('对话模型配置', false, error.message); }
   const exists = async path => access(path).then(() => true, () => false);
   if (process.platform === 'win32' && env.QQBOT_LOW_INTEGRITY !== undefined) add('桌面进程完整性级别', env.QQBOT_LOW_INTEGRITY !== '1', env.QQBOT_LOW_INTEGRITY === '1' ? '程序继承了低完整性标签，会阻止托盘和 DSH 配置写入。请退出后运行 npm run desktop:build，重新生成普通用户级别的 EXE。' : '普通用户级别，可访问用户配置与系统托盘');
   add('Node.js 运行环境', Number(process.versions.node.split('.')[0]) >= 22, process.version);

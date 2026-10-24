@@ -4,6 +4,7 @@ export const status = {
   startedAt: Date.now(),
   wsConnected: false,
   acpConnected: false,
+  model: '',
   qqOnline: false,
   selfId: 0,
   nickname: '',

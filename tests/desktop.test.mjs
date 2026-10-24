@@ -5,6 +5,8 @@ import { mkdtemp, mkdir, writeFile, readFile, cp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { createInterface } from 'node:readline';
+import { createServer } from 'node:http';
+import { once } from 'node:events';
 
 test('桌面配置：中文往返、完整设置校验、无效保存保留文件、工作区切换保护', async () => {
   const root = await mkdtemp(join(tmpdir(), 'qq-desktop-config-'));
@@ -73,7 +75,7 @@ test('桌面控制：重复启动、模型重连、完整重启、仅在配置�
   await writeFile(join(root, 'desktop/diagnostics.mjs'), "export async function diagnose(){return {ok:true,rows:[]}}; export async function environment(){return {ONEBOT_TOKEN:'secret-test-token'}}; export async function onebotOnline(){return false};");
   await writeFile(join(root, 'dist/bridge.js'), "console.log('bridge-started'); console.log('token=secret-test-token'); process.on('message', m => { if (m === 'shutdown') { console.log('graceful-stop'); process.exit(); } }); setInterval(() => {}, 1000);");
   await writeFile(join(root, 'scripts/napcat-node.mjs'), "console.log('napcat-started'); setInterval(() => {}, 1000);");
-  await writeFile(join(root, 'desktop/config-worker.mjs'), "process.once('message', ({data}) => process.send(data.invalid ? {ok:false,error:'invalid-config'} : {ok:true,result:{}}, () => process.disconnect()));");
+  await writeFile(join(root, 'desktop/config-worker.mjs'), "process.once('message', ({data}) => process.send(data.invalid ? {ok:false,error:'invalid-config'} : {ok:true,result:{restartAction:data.modelOnly?'restartBridge':'restart'}}, () => process.disconnect()));");
   const child = spawn(process.execPath, [join(root, 'desktop/host.mjs')], { stdio: ['pipe', 'pipe', 'pipe'] });
   const events = []; createInterface({ input: child.stdout }).on('line', line => events.push(JSON.parse(line)));
   const wait = async predicate => { const until = Date.now() + 12000; while (!predicate()) { if (Date.now() > until) throw new Error('等待状态超时'); await new Promise(r => setTimeout(r, 30)); } };
@@ -95,11 +97,46 @@ test('桌面控制：重复启动、模型重连、完整重启、仅在配置�
     await wait(() => events.filter(e => e.type === 'log' && e.text.includes('bridge-started')).length === 5 && events.filter(e => e.type === 'log' && e.text.includes('napcat-started')).length === 4);
     assert.equal(events.filter(e => e.type === 'log' && e.text.includes('napcat-started')).length, 4);
     assert.ok(events.some(e => e.type === 'saved' && e.section === 'connection' && e.restartRequested));
+    child.stdin.write(JSON.stringify({ action: 'connection', data: { restart: true, modelOnly: true } }) + '\n');
+    await wait(() => events.filter(e => e.type === 'log' && e.text.includes('bridge-started')).length === 6);
+    assert.equal(events.filter(e => e.type === 'log' && e.text.includes('napcat-started')).length, 4);
     send('quit'); await new Promise((done, reject) => { child.once('exit', done); child.once('error', reject); });
     assert.equal(events.at(-1).bridge, false); assert.equal(events.at(-1).napcat, false);
     assert.ok(!JSON.stringify(events).includes('secret-test-token'));
     assert.ok(!(await readFile(join(root, 'data/desktop/console.log'), 'utf8')).includes('secret-test-token'));
   } finally { child.stdin.end(); await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); }
+});
+
+test('桌面对话模型：测试未保存输入、独立 Key 往返、保存失败保留配置、仅改模型保留 QQ', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'qq-desktop-model-'));
+  const worker = (action, data) => new Promise((done, reject) => {
+    const child = fork(resolve('desktop/config-worker.mjs'), [], { cwd: root, silent: true, execArgv: [], env: { ...process.env, BOT_SETTINGS_FILE: join(root, 'settings.json'), BOT_WORKSPACE: root } });
+    let reply; child.once('message', value => { reply = value; }); child.once('exit', () => done(reply)); child.once('error', reject); child.send({ action, data });
+  });
+  const http = createServer(async (req, res) => {
+    for await (const chunk of req) { /* consume the minimal test prompt */ }
+    res.setHeader('content-type', 'application/json');
+    res.end(JSON.stringify(req.method === 'GET' ? { data: [{ id: 'test-flash' }] } : { content: [{ type: 'text', text: 'OK' }] }));
+  });
+  http.listen(0, '127.0.0.1'); await once(http, 'listening');
+  try {
+    await writeFile(join(root, '.env'), '# local configuration\nBOT_DSH_PROFILE=acp\n');
+    const original = await readFile(join(root, '.env'), 'utf8');
+    const runtime = { BOT_CHAT_MODE: 'project', BOT_CHAT_MODEL: 'test-flash', QQ_BOT_DEEPSEEK_API_KEY: 'project-fixture-key', BOT_CHAT_BASE_URL: `http://127.0.0.1:${http.address().port}/anthropic` };
+    const listed = await worker('model', { operation: 'list', runtime }); assert.equal(listed.ok, true); assert.deepEqual(listed.result.models, ['test-flash']);
+    const tested = await worker('model', { operation: 'test', runtime }); assert.equal(tested.ok, true); assert.equal(tested.result.model, 'test-flash');
+    assert.equal(await readFile(join(root, '.env'), 'utf8'), original);
+    const saved = await worker('connection', { runtime, media: {} }); assert.equal(saved.ok, true); assert.equal(saved.result.restartAction, 'restartBridge');
+    const before = await readFile(join(root, '.env'), 'utf8');
+    assert.match(before, /QQ_BOT_DEEPSEEK_API_KEY='project-fixture-key'/);
+    const loaded = await worker('load');
+    assert.equal(loaded.result.runtimeFields.find(f => f.key === 'QQ_BOT_DEEPSEEK_API_KEY').kind, 'secret');
+    const invalid = await worker('connection', { runtime: { ...runtime, QQ_BOT_DEEPSEEK_API_KEY: '' }, media: {} }); assert.equal(invalid.ok, false);
+    assert.equal(await readFile(join(root, '.env'), 'utf8'), before);
+    const changed = await worker('connection', { runtime: { ...runtime, ONEBOT_HTTP_URL: 'http://127.0.0.1:9999' }, media: {} }); assert.equal(changed.result.restartAction, 'restart');
+    const account = await worker('connection', { runtime: { BOT_CHAT_MODE: 'account' }, media: {} }); assert.equal(account.ok, true);
+    const profile = await worker('connection', { runtime: { BOT_CHAT_MODE: 'profile' }, media: {} }); assert.equal(profile.ok, true);
+  } finally { http.closeAllConnections(); await new Promise(done => http.close(done)); await rm(root, { recursive: true, force: true }); }
 });
 
 test('启动诊断识别缺失运行依赖，不把进程启动误判成连接成功', async () => {

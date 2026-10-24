@@ -88,7 +88,7 @@ partial class App
     static void Send(string action, object data = null) {
         if (new[] { "settings", "env", "runtime", "connection", "persona" }.Contains(action)) Find<TabControl>("Tabs").IsEnabled = false;
         try { if (host == null || host.HasExited) throw new Exception(); hostInput.WriteLine(json.Serialize(new { action = action, data = data })); hostInput.Flush(); }
-        catch { Find<TabControl>("Tabs").IsEnabled = true; SetSocialBusy(false); SetKnowledgeBusy(false); Feedback("控制进程不可用，请退出后重新打开控制台。"); }
+        catch { Find<TabControl>("Tabs").IsEnabled = true; SetSocialBusy(false); SetKnowledgeBusy(false);SetChatModelBusy(false); Feedback("控制进程不可用，请退出后重新打开控制台。"); }
     }
     static void Restore() { window.ShowInTaskbar = true; window.Show(); window.WindowState = WindowState.Normal; window.Activate(); window.Topmost = true; window.Topmost = false; }
     static void MarkDirty(string section) { if (!loading) { dirtySections.Add(section); dirty = true; Find<TextBlock>("SaveState").Text = "有尚未保存的修改"; UpdateConnectionEditing(); } }
@@ -140,6 +140,8 @@ partial class App
     static void Event(string line) {
         var message = json.Deserialize<Dictionary<string, object>>(line);
         string type = (string)message["type"];
+        if(type=="error"&&message.ContainsKey("action")&&(string)message["action"]=="model")ChatModelError((string)message["text"]);
+        if(type=="model"){RenderChatModel(message);return;}
         if (type == "error" && profileDialog != null) { profileDialog.IsEnabled = true; MessageBox.Show(profileDialog, (string)message["text"], "会话设置未保存"); }
         if (type == "log") {
             logs.Enqueue((string)message["text"]); while (logs.Count > 1500) logs.Dequeue();
@@ -204,7 +206,7 @@ partial class App
             Find<TextBlock>("State").Text = online ? "小鲸在线，正在认真陪伴" : "进程运行中，等待 QQ / 模型连接";
             Find<TextBlock>("Stats").Text = "QQ " + ((bool)message["qqOnline"] ? "在线" : "离线") + "  ·  模型 " + ((bool)message["acpConnected"] ? "已连接" : "未连接") + "  ·  收到 " + message["messagesIn"] + " / 发出 " + message["messagesOut"] + "  ·  排队 " + message["pendingMessages"];
             Find<TextBlock>("QqState").Text = (bool)message["qqOnline"] ? "已在线" : "连接中";
-            Find<TextBlock>("ModelState").Text = (bool)message["acpConnected"] ? "已就绪" : "连接中";
+            Find<TextBlock>("ModelState").Text = (bool)message["acpConnected"] ? (message.ContainsKey("model")?(string)message["model"]+" · 已就绪":"已就绪") : "连接中";
             Find<TextBlock>("MessagesIn").Text = message["messagesIn"].ToString();
             Find<TextBlock>("MessagesOut").Text = message["messagesOut"].ToString();
             Find<TextBlock>("Sessions").Text = message["sessions"].ToString();
