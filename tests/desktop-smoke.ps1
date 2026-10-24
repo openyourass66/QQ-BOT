@@ -66,8 +66,13 @@ $smokeTimer.Add_Tick({
             }
             5 {
                     if ($window.IsVisible -or $backend.HasExited -or $closing) { throw 'Backend must survive a dispatcher tick while hidden' }
-                    $openItem.PerformClick()
+                    $trayClick = [Windows.Forms.MouseEventArgs]::new([Windows.Forms.MouseButtons]::Left, 1, 0, 0, 0)
+                    $notifyClick = [Windows.Forms.NotifyIcon].GetMethod('OnMouseClick', [Reflection.BindingFlags]'Instance,NonPublic')
+                    $notifyClick.Invoke($tray, @($trayClick))
                     if (!$window.IsVisible -or $window.WindowState -ne 'Normal') { throw 'Restore from tray failed' }
+                    $window.Close()
+                    $openItem.PerformClick()
+                    if (!$window.IsVisible) { throw 'Tray menu must restore the console' }
                     $script:personaDirty = $false
                     $script:smokeStage = 6
                     $smokeTimer.Stop()

@@ -416,6 +416,10 @@ try {
     $exitItem = $menu.Items.Add('退出并停止机器人')
     $exitItem.Add_Click({ Request-Exit })
     $tray.ContextMenuStrip = $menu
+    $tray.Add_MouseClick({
+        param($sender, $eventArgs)
+        if ($eventArgs.Button -eq [Windows.Forms.MouseButtons]::Left) { Restore-Console }
+    })
     $tray.Add_DoubleClick({ Restore-Console })
     $tray.Visible = !$TestMode
     $timer.Start()
