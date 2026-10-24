@@ -4,6 +4,7 @@ node_modules/
 # 构建产物
 dist/
 QQ-BOT.exe
+QQ-BOT-next.exe
 desktop-preview*.png
 *.desktop.tmp
 

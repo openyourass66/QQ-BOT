@@ -1,0 +1,14 @@
+<DrawingImage xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation">
+  <DrawingImage.Drawing><DrawingGroup><DrawingGroup.ClipGeometry><RectangleGeometry Rect="0,0,256,256" RadiusX="60" RadiusY="60"/></DrawingGroup.ClipGeometry>
+    <GeometryDrawing Geometry="M 60,0 H 196 Q 256,0 256,60 V 196 Q 256,256 196,256 H 60 Q 0,256 0,196 V 60 Q 0,0 60,0 Z"><GeometryDrawing.Brush><LinearGradientBrush StartPoint="0,0" EndPoint="1,1"><GradientStop Color="#7195FF"/><GradientStop Color="#4258EA" Offset="1"/></LinearGradientBrush></GeometryDrawing.Brush></GeometryDrawing>
+    <GeometryDrawing Brush="#6681F6" Geometry="M 0,187 Q 65,153 123,195 Q 192,219 256,179 V 256 H 0 Z"/>
+    <GeometryDrawing Brush="#FFFFFF" Geometry="M 39,126 C 31,78 96,55 143,84 Q 174,104 179,133 Q 202,139 217,111 Q 226,145 203,161 Q 185,173 165,161 C 131,205 54,188 39,126 Z"/>
+    <GeometryDrawing Brush="#D9E7FF" Geometry="M 50,139 Q 96,177 163,144 C 137,192 72,186 50,139 Z"/>
+    <GeometryDrawing Brush="#2947AE" Geometry="M 68,116 A 7,7 0 1 0 82,116 A 7,7 0 1 0 68,116"/>
+    <GeometryDrawing Brush="White" Geometry="M 71,113 A 2,2 0 1 0 75,113 A 2,2 0 1 0 71,113"/>
+    <GeometryDrawing Brush="#FFAFCF" Geometry="M 59,135 A 12,5 0 1 0 83,135 A 12,5 0 1 0 59,135"/>
+    <GeometryDrawing Brush="#EAF1FF" Geometry="M 108,79 Q 98,49 81,55 Q 87,37 102,49 Q 112,57 114,70 Q 119,42 133,47 Q 145,53 133,60 Q 119,58 115,79 Z"/>
+    <GeometryDrawing Brush="#FDE9AE" Geometry="M 197,52 L 201,62 L 212,66 L 201,70 L 197,81 L 193,70 L 183,66 L 193,62 Z"/>
+    <GeometryDrawing Brush="#FFFFFF" Geometry="M 51,58 A 4,4 0 1 0 59,58 A 4,4 0 1 0 51,58"/>
+  </DrawingGroup></DrawingImage.Drawing>
+</DrawingImage>

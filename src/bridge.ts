@@ -24,11 +24,11 @@ import { QqActionPolicy, type QqAction } from './qq-actions.js';
 import { startActionServer, type ActionServer } from './action-server.js';
 
 const api = new OneBotHttp(config.onebot.httpUrl, config.onebot.token);
-const sessionStorePath = resolve(process.env.SESSION_STORE ?? 'data/sessions.json');
+const sessionStorePath = resolve(process.env.SESSION_STORE || 'data/sessions.json');
 const store = new SessionStore(sessionStorePath);
-const groupContext = new GroupContextStore(process.env.BOT_GROUP_CONTEXT_STORE ?? resolve(dirname(sessionStorePath), 'group-context.json'), Date.now,
+const groupContext = new GroupContextStore(process.env.BOT_GROUP_CONTEXT_STORE || resolve(dirname(sessionStorePath), 'group-context.json'), Date.now,
   (error) => log('error', `[context] 保存失败：${String(error)}`));
-const usage = new DailyUsageStore(process.env.BOT_USAGE_STORE ?? resolve(dirname(sessionStorePath), 'daily-usage.json'));
+const usage = new DailyUsageStore(process.env.BOT_USAGE_STORE || resolve(dirname(sessionStorePath), 'daily-usage.json'));
 
 const sessions = new Map<string, acp.ActiveSession>();
 const creating = new Map<string, Promise<acp.ActiveSession>>();
@@ -416,6 +416,7 @@ async function onMessage(event: MessageEvent): Promise<void> {
 }
 
 function spawnDsh(): ReturnType<typeof spawn> {
+  if (!/^[\w-]+$/.test(config.dsh.profile)) throw new Error('BOT_DSH_PROFILE 只允许字母、数字、下划线和短横线');
   // 不继承当前桌面进程的 DSH_*（尤其 DSH_PROFILE=desktop、DSH_SESSION_ID）。
   const env: NodeJS.ProcessEnv = {};
   for (const [key, value] of Object.entries(process.env)) {

@@ -1,0 +1,8 @@
+export const runtimeFields = [
+  ['OneBot 连接', 'ONEBOT_HTTP_URL', 'HTTP 地址', 'http://127.0.0.1:3000'], ['OneBot 连接', 'ONEBOT_WS_URL', 'WebSocket 地址', 'ws://127.0.0.1:3001'], ['OneBot 连接', 'ONEBOT_TOKEN', '连接令牌', '', 'secret'],
+  ['账号与 NapCat', 'BOT_SELF_ID', '机器人 QQ', '0'], ['账号与 NapCat', 'BOT_QQ_DIR', 'QQ 安装目录', '', 'folder'], ['账号与 NapCat', 'BOT_NAPCAT_DIR', 'NapCat Shell 目录', 'napcat/shell', 'folder'],
+  ['模型与工作区', 'BOT_DSH_BIN', 'DSH 启动文件', '', 'file'], ['模型与工作区', 'BOT_DSH_PROFILE', 'DSH Profile', 'acp'], ['模型与工作区', 'BOT_DSH_HOME', 'DSH 数据目录（留空使用默认值）', '', 'folder'], ['模型与工作区', 'BOT_WORKSPACE', '机器人工作区', 'bot-workspace', 'folder'],
+  ['消息与并发', 'TURN_TIMEOUT_MS', '模型超时（毫秒）', '180000'], ['消息与并发', 'QUEUE_PER_CONVERSATION', '每会话队列容量', '5'], ['消息与并发', 'QUEUE_TOTAL', '总队列容量', '50'], ['消息与并发', 'MAX_CONCURRENT_TURNS', '模型并发数', '4'],
+  ['数据存储', 'BOT_SETTINGS_FILE', '动态配置文件', 'bot.config.json'], ['数据存储', 'SESSION_STORE', '会话记录', 'data/sessions.json'], ['数据存储', 'BOT_USAGE_STORE', '额度记录（留空使用默认值）', ''], ['数据存储', 'BOT_GROUP_CONTEXT_STORE', '群上下文（留空使用默认值）', ''],
+  ['初始默认值 · 动态设置优先', 'ADMIN_QQ', '管理员 QQ 默认值', '0'], ['初始默认值 · 动态设置优先', 'GROUP_PREFIX', '群聊前缀默认值', ''], ['初始默认值 · 动态设置优先', 'GROUP_COOLDOWN_MS', '群聊冷却默认值', '3000'], ['初始默认值 · 动态设置优先', 'GROUP_CONTEXT_LINES', '群聊摘要行数默认值', '6'], ['初始默认值 · 动态设置优先', 'REPLY_CHUNK_SIZE', '分片字符数默认值', '600'], ['初始默认值 · 动态设置优先', 'MIN_DELAY_MS', '最短回复延迟默认值', '700'], ['初始默认值 · 动态设置优先', 'MAX_DELAY_MS', '最长回复延迟默认值', '2400'], ['初始默认值 · 动态设置优先', 'ALLOW_EXEC', '自动执行命令默认值（0 / 1）', '0'],
+];

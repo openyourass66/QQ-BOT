@@ -82,7 +82,7 @@ export type BotSettings = z.infer<typeof SettingsSchema>;
 
 export const DEFAULT_SETTINGS: BotSettings = SettingsSchema.parse({});
 
-const path = resolve(process.env.BOT_SETTINGS_FILE ?? 'bot.config.json');
+const path = resolve(process.env.BOT_SETTINGS_FILE || 'bot.config.json');
 let current: BotSettings = DEFAULT_SETTINGS;
 let writes: Promise<unknown> = Promise.resolve();
 const listeners = new Set<(next: BotSettings) => void>();

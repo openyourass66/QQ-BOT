@@ -60,16 +60,21 @@ DeepSeek 登录态；也可以在 `~\.dsh\.env` 里写 `DEEPSEEK_API_KEY`。
 
 ### Windows 桌面控制台
 
-运行 `npm run desktop` 编译并打开“小鲸的工作台”。也可运行 `npm run desktop:build` 后双击项目根目录的 `QQ-BOT.exe`；EXE 需与 `desktop`、`dist`、`node_modules` 目录保留在一起。需要 Windows 10/11 自带的 .NET Framework 4.8 和 Node.js 22 以上，不需要安装 Electron、浏览器服务或 .NET SDK。生成桌面快捷方式：`powershell -NoProfile -ExecutionPolicy Bypass -File desktop/build.ps1 -Shortcut`。
+运行 `npm run desktop` 打开“小鲸工作台”（没有 EXE 时自动构建）。更新源码后先运行 `npm run desktop:build`，也可直接双击项目根目录的 `QQ-BOT.exe`；EXE 需与 `desktop`、`dist`、`node_modules` 目录保留在一起。需要 Windows 10/11 自带的 .NET Framework 4.8 和 Node.js 22 以上，不需要安装 Electron、浏览器服务或 .NET SDK。生成桌面快捷方式：`powershell -NoProfile -ExecutionPolicy Bypass -File desktop/build.ps1 -Shortcut`。
 
 - 开始工作 / 休息一下 / 重新启动，同时管理独立 Node 模式 NapCat 与机器人桥接。请先按下文部署 NapCat 官方运行库及 QQ，首次登录按 NapCat 日志完成扫码；未登录时不会显示 QQ 在线。
+- 工作总览分别显示 QQ、模型、消息和队列状态；“重连模型”仅重启桥接，保留 NapCat 的登录进程。检测到已运行的 OneBot 会复用其连接，并注明外部进程，退出时不结束外部 NapCat。
 - 关闭窗口隐藏到托盘，单击图标恢复；重复打开 EXE 唤回已有窗口。右键托盘选择“退出并停止机器人”才会停止两个受管进程并退出，不接管外部终端启动的实例。
 - 机器人设置提供现有全部动态字段，沿用机器人自身的范围与类型校验，保存后热更新。浏览器字段目前只保存配置，尚未接入外部 MCP。
-- 连接与运行页直接编辑完整 `.env`，支持 `.env.example` 中所有参数以及可选存储路径；保存后重启机器人生效。`bot.config.json` 的显式值仍优先于 `.env` 的同名默认值。连接页包含凭据，请妥善保管。
+- 连接与运行页按账号、模型、消息并发和存储分组显示完整参数，支持文件 / 目录选择、隐藏令牌输入和范围校验。高级区域可编辑完整 `.env`，保存时同步表单与文本、保留自定义参数和注释；保存后重启机器人生效。`bot.config.json` 的显式值仍优先于 `.env` 的同名默认值。
 - 人设页编辑 `BOT_WORKSPACE/AGENTS.md`，新建会话生效；可打开工作区记忆目录管理文件。修改 `BOT_WORKSPACE` 后请重新打开控制台再编辑人设。
 - 停止桥接先发送 IPC 退出请求，等待保存会话与额度；超时后清理该受管进程树。托盘退出同样执行此流程。NapCat 使用进程树终止。
 
-桌面端采用原生 WPF 与标准输入输出 JSON 通信，不监听额外网络端口。日志仅保留最近 1500 行；暂停滚动不影响机器人运行。不要同时从终端和桌面端启动同一机器人，避免账号与数据目录冲突。
+桌面端采用原生 WPF 与标准输入输出 JSON 通信，不监听额外网络端口。窗口日志保留最近 1500 行，支持搜索、来源 / 错误筛选和导出；暂停滚动不影响机器人运行。脱敏日志保存在 `data/desktop/console.log`，超过 2 MB 后保留上一份，重新打开显示最近 100 行。启动诊断检查 Node、QQ / NapCat 依赖、配置路径、DSH Profile 权限与进程完整性级别。不要同时从终端和桌面端启动同一桥接，避免数据目录冲突。
+
+Windows 低完整性目录会使生成的 EXE 继承低完整性级别，导致系统托盘不可用、DSH 无法写入用户目录（`EPERM ... cordis.yml`）。构建脚本只对生成的 EXE 设置普通用户的 Medium 完整性标签，不改目录 ACL、不申请管理员权限。遇到这两类问题时，退出后重新运行 `npm run desktop:build`；程序也会在启动诊断中提示。托盘使用原生 Shell 注册并定时检查，Explorer 重启后自动重新注册；注册失败时保留任务栏窗口。
+
+鲸鱼图标由 `desktop/assets/whale.xaml` 的矢量绘图生成，包含 16–256 像素共八档 ICO，统一嵌入 EXE、窗口与托盘。修改后运行桌面构建即可更新。
 
 需要 Node.js 22 或以上版本。`npm start` 运行已有构建产物，修改源码后先执行 `npm run build`。
 
