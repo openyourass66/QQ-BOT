@@ -89,7 +89,10 @@
       </ListBox>
      </Border>
       <ScrollViewer x:Name="SettingsScroll" Grid.Row="2" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Padding="0,0,8,0">
-       <StackPanel><TextBlock x:Name="SettingsTitle" Text="对话与参与" FontSize="20" FontWeight="SemiBold"/><TextBlock x:Name="SettingsSubtitle" Text="决定什么时候回应，以及如何自然地参与聊天。" TextWrapping="Wrap" FontSize="11" Foreground="{StaticResource Muted}" Margin="0,6,0,18"/><StackPanel x:Name="Fields"/>
+       <StackPanel><TextBlock x:Name="SettingsTitle" Text="对话与参与" FontSize="20" FontWeight="SemiBold"/><TextBlock x:Name="SettingsSubtitle" Text="决定什么时候回应，以及如何自然地参与聊天。" TextWrapping="Wrap" FontSize="11" Foreground="{StaticResource Muted}" Margin="0,6,0,12"/>
+        <TextBlock x:Name="SettingsContext" TextWrapping="Wrap" FontSize="10" Foreground="{StaticResource Muted}" Margin="0,0,0,8"/>
+        <DockPanel Margin="0,0,0,16"><Button x:Name="SettingsRefresh" Content="刷新额度" DockPanel.Dock="Right" Style="{StaticResource Quiet}" Margin="10,0,0,0"/><TextBlock x:Name="SettingsQuota" Text="点击刷新额度查看今日已用、上限与剩余量。" TextWrapping="Wrap" FontSize="10" LineHeight="17" Foreground="{StaticResource Muted}" VerticalAlignment="Center"/></DockPanel>
+        <StackPanel x:Name="Fields"/>
         <StackPanel x:Name="SettingsEmpty" Visibility="Collapsed" Margin="25,50"><TextBlock Text="没有找到相关设置" FontSize="16" HorizontalAlignment="Center"/><TextBlock Text="试试“主动”“图片”或“额度”。" Foreground="{StaticResource Muted}" FontSize="12" HorizontalAlignment="Center" Margin="0,9,0,0"/></StackPanel>
        </StackPanel>
       </ScrollViewer>
@@ -107,7 +110,7 @@
       <StackPanel x:Name="RuntimeFields"/>
       <Expander x:Name="AdvancedEnv" Header="高级：完整 .env" Margin="0,6,0,0" Visibility="Collapsed"><StackPanel><TextBlock Text="可编辑自定义参数，包含连接凭据。保存高级文本前，请先保存表单中的修改。" Foreground="{StaticResource Muted}" FontSize="11" TextWrapping="Wrap" Margin="0,0,0,12"/><TextBox x:Name="Env" Height="290" FontFamily="Cascadia Mono, Consolas, Microsoft YaHei UI" AcceptsReturn="True" AcceptsTab="True" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto"/><Button x:Name="SaveEnv" Content="保存高级文本" HorizontalAlignment="Right" Margin="0,12,0,0"/></StackPanel></Expander>
      </StackPanel></ScrollViewer>
-     <Border Grid.Row="2" BorderBrush="{StaticResource Line}" BorderThickness="0,1,0,0" Padding="0,15,0,0" Margin="0,16,0,0"><DockPanel><StackPanel DockPanel.Dock="Right" Orientation="Horizontal"><Button x:Name="SaveRuntime" Content="保存配置" Margin="0,0,10,0"/><Button x:Name="SaveRuntimeRestart" Content="保存并重新启动" Style="{StaticResource Primary}"/></StackPanel><TextBlock x:Name="RuntimeHint" Text="连接参数重启生效；媒体模型保存即生效。" Foreground="{StaticResource Muted}" FontSize="10" TextWrapping="Wrap" Margin="0,0,16,0" VerticalAlignment="Center"/></DockPanel></Border>
+     <Border Grid.Row="2" BorderBrush="{StaticResource Line}" BorderThickness="0,1,0,0" Padding="0,15,0,0" Margin="0,16,0,0"><DockPanel><StackPanel DockPanel.Dock="Right" Orientation="Horizontal"><Button x:Name="SaveRuntime" Content="保存配置" Margin="0,0,10,0"/><Button x:Name="SaveRuntimeRestart" Content="保存并重新启动" Style="{StaticResource Primary}"/></StackPanel><TextBlock x:Name="RuntimeHint" Text="模型名称等动态选项可热更新；服务地址、密钥和 FFmpeg 修改后需重启。" Foreground="{StaticResource Muted}" FontSize="10" TextWrapping="Wrap" Margin="0,0,16,0" VerticalAlignment="Center"/></DockPanel></Border>
     </Grid></TabItem>
     <TabItem Header="人设与记忆"><Grid>
      <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>

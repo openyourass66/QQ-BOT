@@ -3,7 +3,8 @@ import { SocialStore } from './social-store.js';
 import { MediaService } from './media.js';
 import { socialTools } from './social-tools.js';
 import { legacyTools } from './legacy-tools.js';
-import { getSettings, saveSettings } from './settings.js';
+import { getSettings, getSettingsPath, saveSettings } from './settings.js';
+import type { DailyUsageStore } from './usage.js';
 import { stickerSearchText } from './sticker-review.js';
 
 const requestSchema = z.object({
@@ -16,7 +17,7 @@ const requestSchema = z.object({
 }).strict().refine(value => value.op === 'profile' || value.text.length <= 2000, { message: '记忆内容最多 2000 字', path: ['text'] });
 
 export async function socialAdmin(input: unknown, store: SocialStore, media: MediaService,
-  live?: { refresh(): Promise<void>; reset(chat: string): Promise<void>; stickers?: { sync(): Promise<unknown>;collect(id:string):Promise<void>;remove(id:string):Promise<void> } }): Promise<unknown> {
+  live?: { refresh(): Promise<void>; reset(chat: string): Promise<void>; usage?: DailyUsageStore; stickers?: { sync(): Promise<unknown>;collect(id:string):Promise<void>;remove(id:string):Promise<void> } }, offlineUsage?: DailyUsageStore): Promise<unknown> {
   const a = requestSchema.parse(input);
   if(a.op==='edit_interest') {
     if(a.section!=='interests'||!a.text.trim()||a.text.trim().length>80)throw new Error('兴趣主题需要 1–80 字');
@@ -56,7 +57,7 @@ export async function socialAdmin(input: unknown, store: SocialStore, media: Med
   }
   if (a.op === 'delete'&&a.section!=='stickers') await store.update(d => {
     if (a.section === 'memories') { const m = d.memories.find(m => m.id === a.id); if (!m) throw new Error('记忆不存在'); if (a.expectedText !== undefined && m.text !== a.expectedText) throw new Error('记忆已被其他操作修改，请刷新后核对；当前编辑仍保留'); d.memories = d.memories.filter(m => m.id !== a.id); }
-    else if (a.section === 'tasks') { const t = d.tasks.find(t => t.id === a.id); if (!t || t.state !== 'pending') throw new Error('只能取消尚未执行的提醒'); t.state = 'cancelled'; }
+    else if (a.section === 'tasks') { const t = d.tasks.find(t => t.id === a.id); if (!t || !['pending','blocked'].includes(t.state)) throw new Error('只能取消尚未执行的提醒'); t.state = 'cancelled'; }
     else if(a.section==='thoughts'){const t=d.autonomous.thoughts.find(t=>t.id===a.id);if(!t||!['pending','running'].includes(t.state))throw new Error('这条想法已经结束');t.state='dismissed';t.result='管理员取消，不再执行';}
     else if(a.section==='interests'){if(!d.autonomous.interests.some(i=>i.id===a.id))throw new Error('兴趣不存在');d.autonomous.interests=d.autonomous.interests.filter(i=>i.id!==a.id);}
     else throw new Error('该列表不支持删除');
@@ -80,7 +81,13 @@ export async function socialAdmin(input: unknown, store: SocialStore, media: Med
     case 'contacts': for (const c of data.contacts) {
       const [kind,id] = c.chat.split(':');
       const blocked = (kind === 'group' ? s.social.blockedGroups : s.social.blockedUsers).includes(id);
-      add(c.chat, c.chat, c.name, c.chat, blocked ? '已屏蔽' : '可联系', c.at);
+      const profile = data.profiles.find(p=>p.chat===c.chat), override = profile && profile.responseMode!=='inherit';
+      const mode = override ? profile.responseMode : s.social.responseMode;
+      const modes:Record<string,string>={legacy:s.chat.group.requireMention?'仅被叫到时回应':'普通消息也可参与',mention:'仅直接对话',keywords:'直接对话和关键词',probability:'关键词和概率参与',all:'参与全部消息'};
+      const allowed=s.social.allowAll||(kind==='group'?s.social.allowedGroups:s.social.allowedUsers).includes(id);
+      const participation = kind==='group' ? `${override?'会话专属':'沿用全局'} · ${modes[mode]}` : `全局私聊自动回复${s.chat.privateAutoReply?'已开启':'已关闭'}`;
+      add(c.chat, c.chat, c.name, participation, blocked ? '已屏蔽' : allowed?'可联系':'未在允许名单', c.at,
+        `当前状态：${blocked?'已屏蔽':allowed?'可联系':'未在允许名单'}\n参与配置：${participation}${kind==='group'&&mode==='probability'?'\n参与概率：'+(override?profile.probability:s.social.responseProbability)+'%':''}\n会话人设：${profile?.persona?'使用会话独立副本':'沿用工作区人设'}\n主动聊天机会：${profile?.proactive===false?'会话已关闭':'沿用全局开关、安静时段与额度'}\n\n可在会话设置调整独立参与方式与人设。`);
     } break;
     case 'messages': for (const m of [...data.messages].reverse()) add(String(m.id), m.chat, m.name, m.text, m.recalled ? '已撤回' : m.self ? '自己发送' : '收到', m.at, `${m.name}（${m.user}）\n消息 #${m.id}\n${m.text}\n\n媒体：${m.segments.filter(s => s.type !== 'text').map(s => s.type).join('、')}`); break;
     case 'memories': for (const m of [...data.memories].reverse()) add(m.id,m.chat,m.name,m.text,'长期记忆',m.at,`QQ ${m.user}\n${m.text}`,m.text); break;
@@ -91,7 +98,7 @@ export async function socialAdmin(input: unknown, store: SocialStore, media: Med
       const detail = `${t.qqPresent?'已在 QQ 账号收藏中':'仅保存在本地，尚未写入 QQ 收藏'}\n${t.qq?.description?'QQ 备注：'+t.qq.description+'\n':''}${t.note}\n标签：${t.tags.join('、')}\n` + (understanding ? `\n画面：${understanding.description}\n图片文字：${understanding.image_text || '无或看不清'}\n含义：${understanding.meaning}\n情绪：${understanding.emotions.join('、')}\n适用：${understanding.usage.join('；')}\n不适用：${understanding.avoid.join('；') || '未列出'}\n理解置信度：${confidence}\n` : '\n尚未完成看图理解，使用前需要补充分析。\n') + (t.file?'本地缓存：'+t.file:'图片尚未缓存到本机');
       add(t.id,'',t.note,[t.tags.join('、'),understanding?.meaning,...(understanding?.emotions ?? []),...(understanding?.usage ?? [])].filter(Boolean).join(' · '),`${t.qqPresent?'QQ收藏':'仅本地·待同步QQ'} · ${!understanding ? '待理解' : understanding.confidence === 'low' ? '含义待确认' : '已理解'} · 已用 ${t.uses} 次`,t.at,detail);
     } break;
-    case 'tasks': for (const t of [...data.tasks].reverse()) add(t.id,t.chat,t.text,t.error || t.text,{ pending:'等待执行',running:'执行中',sent:'已发送',failed:'失败',unknown:'结果待核对',cancelled:'已取消' }[t.state],t.due,`${t.text}\n${t.error || ''}\n${t.interval ? `每 ${t.interval/60000} 分钟` : '一次性'}`); break;
+    case 'tasks': for (const t of [...data.tasks].reverse()) add(t.id,t.chat,t.text,t.error || t.text,{ pending:'等待执行',blocked:'等待条件恢复',running:'执行中',sent:'已发送',failed:'失败',unknown:'结果待核对',cancelled:'已取消' }[t.state],t.due,`${t.text}\n${t.error || ''}\n${t.interval ? `每 ${t.interval/60000} 分钟` : '一次性'}`); break;
     case 'events': for (const e of [...data.events].reverse()) add(e.id,e.chat,e.type,String(e.data.comment ?? e.data.sub_type ?? ''),e.handled ? '已处理' : '已记录',e.at,JSON.stringify(e.data,null,2)); break;
     case 'actions': for (const t of [...data.actions].reverse()) {
       const alias: Record<string,string> = { send_message:'qq_send_message', like:'qq_like', qzone_post:'qq_qzone_post' };
@@ -107,5 +114,15 @@ export async function socialAdmin(input: unknown, store: SocialStore, media: Med
     }
   }
   const note=a.section==='stickers'?`${live?.stickers?'已读取 QQ 收藏':'离线缓存，启动机器人后可刷新 QQ 收藏'} · QQ 收藏 ${data.stickers.filter(t=>t.qqPresent).length} 张；本地待同步 ${data.stickers.filter(t=>!t.qq).length} 张。` : rows.length?`显示前 ${Math.min(200,rows.length)} 条；时间为上海时间。`:'暂无记录。启动机器人后接收消息，或刷新联系人。';
-  return { op: a.op, section: a.section, rows: rows.slice(0,200), total: rows.length, profiles: data.profiles, socialSettings: s.social, note, usage: { turns: data.turns.length, tokensKnown: data.turns.filter(t => t.inputTokens !== null).length } };
+  const usage = live?.usage ?? offlineUsage;
+  const quotas = usage?.summary([
+    {key:'social-actions',label:'QQ 动作',limit:s.social.actionsPerDay},
+    {key:'proactive',label:'主动消息',limit:s.budgets.proactiveMessagesPerDay},
+    {key:'reminders',label:'定时提醒',limit:s.budgets.remindersPerDay},
+    {key:'likes',label:'名片点赞',limit:s.budgets.likesPerDay},
+    {key:'qzone',label:'空间发布',limit:s.features.qzone.dailyLimit},
+    {key:'autonomous-decisions',label:'后台判断',limit:s.social.autonomousDecisionsPerDay},
+    ...data.contacts.filter(c=>c.chat.startsWith('group:')).map(c=>({key:c.chat,label:c.name+' 主动消息与提醒',limit:s.chat.group.proactive.perGroupPerDay})),
+  ]);
+  return { op: a.op, section: a.section, rows: rows.slice(0,200), total: rows.length, profiles: data.profiles, socialSettings: s.social, settingsPath:getSettingsPath(), quotas:quotas?{...quotas,live:!!live}:null, note, usage: { turns: data.turns.length, tokensKnown: data.turns.filter(t => t.inputTokens !== null).length } };
 }

@@ -1,10 +1,11 @@
-param([string]$Executable = 'QQ-BOT.exe')
+param([string]$Executable = 'QQ-BOT.exe', [switch]$SkipTrayCheck)
 $ErrorActionPreference = 'Stop'
 $projectRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $testRoot = Join-Path ([IO.Path]::GetTempPath()) ('qq-desktop-ui-' + [guid]::NewGuid().ToString('N'))
 [void][IO.Directory]::CreateDirectory($testRoot)
 try {
-    Copy-Item -LiteralPath (Join-Path $projectRoot $Executable) -Destination (Join-Path $testRoot 'QQ-BOT.exe')
+    $executablePath = if ([IO.Path]::IsPathRooted($Executable)) { $Executable } else { Join-Path $projectRoot $Executable }
+    Copy-Item -LiteralPath $executablePath -Destination (Join-Path $testRoot 'QQ-BOT.exe')
     Copy-Item -LiteralPath (Join-Path $projectRoot 'desktop') -Destination $testRoot -Recurse
     Copy-Item -LiteralPath (Join-Path $projectRoot 'dist') -Destination $testRoot -Recurse
     Copy-Item -LiteralPath (Join-Path $projectRoot 'package.json') -Destination $testRoot
@@ -30,6 +31,7 @@ try {
     $result = [IO.File]::ReadAllText((Join-Path $testRoot 'smoke-result.txt'))
     if ($process.ExitCode -ne 0 -or !$result.StartsWith('PASS:')) { throw $result }
     Write-Output $result
+    if ($SkipTrayCheck) { return }
     Add-Type -AssemblyName UIAutomationClient
     $automationRoot = [Windows.Automation.AutomationElement]::RootElement
     $interactive = Start-Process -FilePath (Join-Path $testRoot 'QQ-BOT.exe') -ArgumentList '--tray-check' -WindowStyle Hidden -PassThru
@@ -70,6 +72,7 @@ try {
     if (!$interactive.WaitForExit(10000)) { throw 'Fixture did not exit' }
     Write-Output 'PASS: Windows notification icon exists, actual tray invoke restores window, tray menu exits application'
 } finally {
+    if ($process -and !$process.HasExited) { Stop-Process -Id $process.Id }
     if ($interactive -and !$interactive.HasExited) { Stop-Process -Id $interactive.Id }
     # The generated isolated directory is retained for inspection; it contains no real credentials.
     Write-Output "UI smoke workspace: $testRoot"

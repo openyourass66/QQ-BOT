@@ -53,5 +53,5 @@ export const socialTools = [
 
 export const SocialCallSchema = z.object({ action: z.literal('social'), tool: z.string().max(64), args: z.record(z.unknown()).default({}) }).strict();
 export type SocialCall = z.infer<typeof SocialCallSchema>;
-export type ToolContext = { chat: string; self: number; user: number; signal: AbortSignal; sent: number; silent: boolean; topic?: string; endTopic?: boolean; proactive?: boolean; autonomous?:AutonomousTurn; pendingStickerCollections?: Set<string>; pendingStickerSends?: Set<string> };
+export type ToolContext = { chat: string; self: number; user: number; signal: AbortSignal; sent: number; silent: boolean; topic?: string; endTopic?: boolean; proactive?: boolean; reminder?: boolean; autonomous?:AutonomousTurn; pendingStickerCollections?: Set<string>; pendingStickerSends?: Set<string> };
 export const ChatSchema = chat;

@@ -152,6 +152,42 @@ test('提醒持久化、周期、额度、取消与中断后不重发', () => fi
   assert.equal(parseShanghaiTime('2026-12-01 08:00'),Date.parse('2026-12-01T00:00:00Z'));
   assert.throws(()=>parseShanghaiTime('2026-02-30 08:00'),/无效/);
 }));
+test('提醒创建前检查群开关；执行受阻等待恢复，恢复后仅发送一次且不占主动额度', () => fixture(async ({call,engine,store,ctx,settings,calls,usage,dir}) => {
+  await assert.rejects(call('qq_set_reminder',{text:'检查依赖',delay_minutes:1}),/群聊主动发言/);
+  settings.chat.group.proactive.enabled=true;settings.chat.group.proactive.perGroupPerDay=5;settings.budgets.proactiveMessagesPerDay=0;
+  const task=await call('qq_set_reminder',{text:'独立额度',delay_minutes:1});
+  settings.chat.group.proactive.enabled=false;
+  await store.update(d=>{d.tasks.find(t=>t.id===task.id).due=Date.now()-1;});
+  await engine.tick(10000,ctx().signal,async()=>{});
+  assert.equal(store.snapshot().tasks[0].state,'blocked');assert.equal(calls.filter(c=>c.action==='send_group_msg').length,0);
+  const reload=new SocialStore(join(dir,'social.json'));await reload.load();assert.equal(reload.snapshot().tasks[0].state,'blocked');
+  settings.chat.group.proactive.enabled=true;await store.update(d=>{d.tasks[0].retryAt=0;});
+  await engine.tick(10000,ctx().signal,async()=>{});await engine.tick(10000,ctx().signal,async()=>{});
+  assert.equal(calls.filter(c=>c.action==='send_group_msg').length,1);assert.equal(store.snapshot().tasks[0].state,'sent');
+  assert.equal(usage.used('reminders'),1);assert.equal(usage.used('proactive'),0);
+}));
+test('提醒额度耗尽可取消等待任务；远端发送失败保留未知状态且不重发', () => fixture(async ({call,engine,store,ctx,settings,calls,api}) => {
+  settings.chat.group.proactive.enabled=true;settings.chat.group.proactive.perGroupPerDay=5;
+  const waiting=await call('qq_set_reminder',{text:'等待额度',delay_minutes:1});
+  settings.budgets.remindersPerDay=0;await store.update(d=>{d.tasks.find(t=>t.id===waiting.id).due=Date.now()-1;});
+  await engine.tick(10000,ctx().signal,async()=>{});assert.equal(store.snapshot().tasks[0].state,'blocked');
+  await call('qq_cancel_reminder',{reminder_id:waiting.id});assert.equal(store.snapshot().tasks[0].state,'cancelled');
+  settings.budgets.remindersPerDay=5;
+  const unknown=await call('qq_set_reminder',{text:'未知结果',delay_minutes:1});
+  const original=api.call;let attempts=0;api.call=async(action,...args)=>{if(action==='send_group_msg'){attempts++;throw new Error('remote timeout');}return original(action,...args);};
+  await store.update(d=>{d.tasks.find(t=>t.id===unknown.id).due=Date.now()-1;});
+  await engine.tick(10000,ctx().signal,async()=>{});await engine.tick(10000,ctx().signal,async()=>{});
+  assert.equal(store.snapshot().tasks.find(t=>t.id===unknown.id).state,'unknown');assert.equal(attempts,1);
+}));
+test('审批等待期间关闭提醒也不会发送，恢复后可继续执行',()=>fixture(async({call,store,ctx,settings,calls,api,media,usage,engine})=>{
+  settings.chat.group.proactive.enabled=true;settings.social.autonomy='confirm';settings.approval.adminQq=10001;
+  const task=await call('qq_set_reminder',{text:'审批期间开关变化',delay_minutes:1});
+  const changing=new SocialEngine(store,media,api,usage,()=>settings,async()=>{settings.social.remindersEnabled=false;return true;},()=>{},()=>{});
+  await store.update(d=>{d.tasks.find(t=>t.id===task.id).due=Date.now()-1;});
+  await changing.tick(10000,ctx().signal,async()=>{});assert.equal(store.snapshot().tasks[0].state,'blocked');assert.equal(calls.filter(c=>c.action==='send_group_msg').length,0);
+  settings.social.remindersEnabled=true;settings.social.autonomy='autonomous';await store.update(d=>{d.tasks[0].retryAt=0;});
+  await engine.tick(10000,ctx().signal,async()=>{});assert.equal(store.snapshot().tasks[0].state,'sent');
+}));
 test('真实申请事件只能处理一次，失败不自动重试未知结果', () => fixture(async ({store,call,calls}) => {
   const id=await store.addEvent('group:30001','request:group',{flag:'real-flag',sub_type:'invite'});
   await assert.rejects(call('qq_handle_request',{event_id:'fake',approve:true}),/不存在/);

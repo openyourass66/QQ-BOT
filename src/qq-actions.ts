@@ -40,7 +40,7 @@ export class QqActionPolicy {
     if (action.action === 'qzone_post') {
       const qzone = this.settings().features.qzone;
       if (!qzone.enabled) throw new Error('QQ 空间发布已关闭');
-      if (qzone.requireConfirm) {
+      if (qzone.requireConfirm || this.settings().social.autonomy !== 'autonomous') {
         confirmed = await this.confirm(
           `要发布 QQ 空间说说：\n${action.text}\n图片：\n${action.images?.join('\n') || '(无)'}`, signal,
         );
@@ -55,7 +55,7 @@ export class QqActionPolicy {
       const quotas: Quota[] = [];
       if (action.action === 'qzone_post') {
         if (!settings.features.qzone.enabled) throw new Error('QQ 空间发布已关闭');
-        if (settings.features.qzone.requireConfirm && !confirmed) throw new Error('空间发布需要管理员确认，请重试');
+        if ((settings.features.qzone.requireConfirm || settings.social.autonomy !== 'autonomous') && !confirmed) throw new Error('空间发布需要管理员确认，请重试');
         quotas.push({ key: 'qzone', amount: 1, limit: settings.features.qzone.dailyLimit, label: '空间发布' });
       } else if (action.action === 'like') {
         quotas.push({ key: 'likes', amount: action.times, limit: settings.budgets.likesPerDay, label: '点赞' });

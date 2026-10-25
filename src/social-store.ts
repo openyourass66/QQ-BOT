@@ -13,7 +13,7 @@ const contact = z.object({ chat: z.string(), name: z.string(), at: z.number() })
 const memory = z.object({ id: z.string(), chat: z.string(), user: z.string(), name: z.string(), text: z.string(), at: z.number() });
 const qqSticker = z.object({ resId: z.string().min(1), emojiId: z.string(), md5: z.string().regex(/^[a-f0-9]{32}$/), url: z.string(), cachePath: z.string(), description: z.string() });
 const sticker = z.object({ id: z.string(), file: z.string(), note: z.string(), tags: z.array(z.string()), uses: z.number(), at: z.number(), analysis: StoredStickerAnalysisSchema.optional(), md5: z.string().regex(/^[a-f0-9]{32}$/).optional(), qq: qqSticker.optional(), qqPresent: z.boolean().default(false) });
-const task = z.object({ id: z.string(), chat: z.string(), creator: z.string(), text: z.string(), due: z.number(), interval: z.number().default(0), state: z.enum(['pending', 'running', 'sent', 'failed', 'unknown', 'cancelled']), error: z.string().default('') });
+const task = z.object({ id: z.string(), chat: z.string(), creator: z.string(), text: z.string(), due: z.number(), interval: z.number().default(0), state: z.enum(['pending', 'blocked', 'running', 'sent', 'failed', 'unknown', 'cancelled']), error: z.string().default(''), retryAt: z.number().default(0) });
 const event = z.object({ id: z.string(), chat: z.string(), type: z.string(), at: z.number(), data: z.record(z.unknown()), handled: z.boolean().default(false) });
 const action = z.object({ id: z.string(), chat: z.string(), tool: z.string(), at: z.number(), state: z.enum(['running', 'success', 'failed', 'unknown']), summary: z.string() });
 const turn = z.object({ id: z.string(), chat: z.string(), at: z.number(), duration: z.number(), input: z.string(), output: z.string(), tools: z.array(z.string()), error: z.string(), inputTokens: z.number().nullable(), outputTokens: z.number().nullable() });
@@ -50,7 +50,7 @@ export class SocialStore {
   profile(chat: string): SocialData['profiles'][number] | undefined { return structuredClone(this.data.profiles.find(p => p.chat === chat)); }
   memories(chat: string): SocialData['memories'] { return structuredClone(this.data.memories.filter(m => m.chat === chat)); }
   contacts(): SocialData['contacts'] { return structuredClone(this.data.contacts); }
-  dueTasks(now: number): ScheduledTask[] { return structuredClone(this.data.tasks.filter(t => t.state === 'pending' && t.due <= now).slice(0,10)); }
+  dueTasks(now: number): ScheduledTask[] { return structuredClone(this.data.tasks.filter(t => ['pending','blocked'].includes(t.state) && t.due <= now && t.retryAt <= now).slice(0,10)); }
   update<T>(fn: (draft: SocialData) => T): Promise<T> {
     const job = this.chain.then(async () => {
       const next = structuredClone(this.data);
@@ -126,11 +126,12 @@ export class SocialStore {
       d.events.push({ id, chat, type, at: Date.now(), data, handled: false }); d.events = d.events.slice(-1000); return id;
     });
   }
-  async addTask(input: Omit<ScheduledTask, 'id' | 'state' | 'error'>): Promise<ScheduledTask> {
+  async addTask(input: Omit<ScheduledTask, 'id' | 'state' | 'error' | 'retryAt'>): Promise<ScheduledTask> {
     return this.update(d => {
-      if (d.tasks.filter(t => t.state === 'pending').length >= 500) throw new Error('待执行提醒已达 500 条');
-      const item: ScheduledTask = { ...input, id: randomUUID(), state: 'pending', error: '' };
-      d.tasks.push(item); d.tasks = d.tasks.filter(t => t.state === 'pending' || t.state === 'running').concat(d.tasks.filter(t => t.state !== 'pending' && t.state !== 'running').slice(-500));
+      const active = (t: ScheduledTask) => ['pending','blocked','running'].includes(t.state);
+      if (d.tasks.filter(active).length >= 500) throw new Error('待执行提醒已达 500 条');
+      const item: ScheduledTask = { ...input, id: randomUUID(), state: 'pending', error: '', retryAt: 0 };
+      d.tasks.push(item); d.tasks = d.tasks.filter(active).concat(d.tasks.filter(t => !active(t)).slice(-500));
       return item;
     });
   }

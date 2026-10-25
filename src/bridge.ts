@@ -680,7 +680,7 @@ async function main(): Promise<void> {
       engine.autonomy.authorize(callCtx,validated.action);
       engine.check(callCtx);
       if (validated.action === 'like') await engine.target(callCtx, `private:${validated.user_id}`);
-      await engine.approve(callCtx, validated.action, validated.action === 'qzone_post');
+      if (validated.action !== 'qzone_post') await engine.approve(callCtx, validated.action);
       const audit = await socialStore.beginAction(callCtx.chat, validated.action);
       let result: unknown;
       try {
@@ -789,6 +789,7 @@ process.on('message', (message) => {
   if (message && typeof message === 'object' && (message as { type?: string }).type === 'social') {
     const request = message as { id: string; data: unknown };
     void socialAdmin(request.data, socialStore, media, {
+      usage,
       refresh: () => engine.contacts(shutdownSignal.signal, true),
       stickers: {sync:()=>engine.qqStickers.sync(shutdownSignal.signal),collect:id=>engine.qqStickers.collectLegacy(id,shutdownSignal.signal),remove:id=>engine.qqStickers.remove(id,shutdownSignal.signal)},
       reset: async chat => {

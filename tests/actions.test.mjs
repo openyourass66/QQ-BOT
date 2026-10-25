@@ -37,6 +37,15 @@ async function fixture(run) {
   finally { await usage.flush(); await rm(dir, { recursive: true, force: true }); }
 }
 
+test('空间执行方式与发布确认合并一次正文审批，关闭单独确认仍保留敏感动作审批',()=>fixture(async({settings,makePolicy,calls})=>{
+  settings.features.qzone.enabled=true;settings.features.qzone.dailyLimit=3;settings.social.autonomy='confirm';
+  let confirmations=0;const policy=makePolicy(async title=>{confirmations++;assert.match(title,/待确认正文/);return true;});
+  await policy.execute(post,signal());assert.equal(confirmations,1);
+  settings.features.qzone.requireConfirm=false;settings.social.autonomy='sensitive';
+  await policy.execute(post,signal());
+  assert.equal(confirmations,2);assert.equal(calls.length,2);
+}));
+
 test('空间默认关闭；确认拒绝或取消不发布、不扣额度', () => fixture(async ({ makePolicy, settings, calls, path }) => {
   let confirmations = 0;
   const policy = makePolicy(async () => { confirmations++; return false; });

@@ -21,7 +21,7 @@ partial class App
         public Brush StatusFill { get { return Color(IsGood?"#EAF5EF":IsWarning?"#FFF1E9":Status=="已注册"?"#EFF2FE":"#F0F3F8"); } }
         public Brush StatusInk { get { return Color(IsGood?"#2C7157":IsWarning?"#8B5A2C":Status=="已注册"?"#4B61AA":"#66748C"); } }
         bool IsGood { get { return new[]{"可联系","成功","完成","已发送","可检查"}.Contains(Status); } }
-        bool IsWarning { get { return new[]{"已屏蔽","失败","结果待核对","执行中","等待执行"}.Contains(Status); } }
+        bool IsWarning { get { return new[]{"已屏蔽","未在允许名单","失败","结果待核对","执行中","等待执行","等待条件恢复"}.Contains(Status); } }
     }
     static void InitActivityView() {
         Find<Button>("SocialRefresh").Click+=(s,e)=>SocialRequest();
@@ -56,18 +56,14 @@ partial class App
     }
     static void SetSocialBusy(bool busy) {
         socialBusy=busy;
+        Find<Button>("SettingsRefresh").IsEnabled=!busy&&!settingsStatusBusy;
         Find<Button>("SocialRefresh").IsEnabled=!busy;Find<Button>("SocialContacts").IsEnabled=!busy;Find<ComboBox>("SocialSection").IsEnabled=!busy;
         Find<TextBox>("SocialSearch").IsEnabled=!busy;Find<StackPanel>("SocialActionPanel").IsEnabled=!busy;Find<TextBox>("SocialDetail").IsEnabled=!busy;
         Find<Button>("SocialRefresh").Content=busy?"读取中…":Find<ComboBox>("SocialSection").SelectedIndex==3?"刷新 QQ 收藏":"刷新列表";
     }
     static void RenderActivity(Dictionary<string,object> message) {
         if(profileDialog!=null&&message.ContainsKey("op")&&(string)message["op"]=="profile")profileDialog.Close();
-        loading=true;socialProfiles.Clear();
-        if(message.ContainsKey("profiles"))foreach(Dictionary<string,object> profile in (IEnumerable)message["profiles"])socialProfiles[(string)profile["chat"]]=profile;
-        if(message.ContainsKey("socialSettings")&&settings!=null){
-            var remote=(Dictionary<string,object>)message["socialSettings"];var local=(Dictionary<string,object>)settings["social"];
-            foreach(string key in new[]{"blockedGroups","blockedUsers","allowedGroups","allowedUsers"}){local[key]=remote[key];if(fields.ContainsKey("social."+key))((TextBox)fields["social."+key]).Text=string.Join(", ",((IEnumerable)remote[key]).Cast<object>());}
-        }
+        loading=true;RenderSettingsStatus(message);
         var rows=new List<SocialRow>();
         foreach(Dictionary<string,object> row in (IEnumerable)message["rows"])rows.Add(new SocialRow {Id=(string)row["id"],Chat=(string)row["chat"],Name=(string)row["name"],Summary=(string)row["summary"],Status=(string)row["status"],Time=(string)row["time"],Detail=(string)row["detail"],Text=(string)row["text"]});
         Find<ListView>("SocialList").ItemsSource=rows;socialSelection=null;
@@ -78,16 +74,39 @@ partial class App
         Find<TextBlock>("SocialEmptyTitle").Text=Find<TextBox>("SocialSearch").Text.Length>0?"没有找到相关记录":"这里还没有记录";
         Find<TextBlock>("SocialEmptyHint").Text=Find<TextBox>("SocialSearch").Text.Length>0?"换个关键词，或清空搜索后再试。":visibleSocialSection==0?"启动机器人后，点击同步联系人。":"小鲸开始互动后，记录会出现在这里。";
         dirtySections.Remove("memory");dirty=dirtySections.Count>0;
-        loading=false;SetSocialBusy(false);
+        loading=false;ReconcileDirtySettings();SetSocialBusy(false);
         if(rows.Count>0)Find<ListView>("SocialList").SelectedIndex=0;else ShowActivityDetail(null);
         Feedback("QQ 活动已更新。");
+    }
+    static bool settingsStatusBusy;
+    static void RenderSettingsStatus(Dictionary<string,object> message) {
+        bool wasLoading=loading;loading=true;socialProfiles.Clear();
+        if(message.ContainsKey("profiles"))foreach(Dictionary<string,object> profile in (IEnumerable)message["profiles"])socialProfiles[(string)profile["chat"]]=profile;
+        bool sameSettings=!message.ContainsKey("settingsPath")||settingsPath.Length==0||string.Equals(Convert.ToString(message["settingsPath"]),settingsPath,StringComparison.OrdinalIgnoreCase);
+        if(message.ContainsKey("socialSettings")&&settings!=null&&sameSettings){
+            var remote=(Dictionary<string,object>)message["socialSettings"];var local=(Dictionary<string,object>)settings["social"];
+            foreach(string key in new[]{"blockedGroups","blockedUsers","allowedGroups","allowedUsers"}) {
+                string path="social."+key;var saved=((IEnumerable)local[key]).Cast<object>().Select(v=>v.ToString()).ToArray();
+                var received=((IEnumerable)remote[key]).Cast<object>().Select(v=>v.ToString()).ToArray();var draft=ListValues(((TextBox)fields[path]).Text);
+                var removed=new HashSet<string>(saved.Except(draft));
+                var merged=received.Where(id=>!removed.Contains(id)).Concat(draft.Except(saved)).Distinct();
+                local[key]=remote[key];savedSettingValues[path]=json.Serialize(remote[key]);((TextBox)fields[path]).Text=string.Join(", ",merged);
+            }
+        }
+        if(message.ContainsKey("quotas")&&message["quotas"] is Dictionary<string,object>) {
+            var quota=(Dictionary<string,object>)message["quotas"];var quotaRows=((IEnumerable)quota["rows"]).Cast<Dictionary<string,object>>();
+            Find<TextBlock>("SettingsQuota").Text=(sameSettings?"":"机器人仍使用另一份配置，请重新启动。\n")+"今日额度（"+quota["date"]+"，"+((bool)quota["live"]?"运行中快照":"离线记录")+"）："+string.Join(" · ",quotaRows.Take(6).Select(q=>q["label"]+" "+q["used"]+"/"+q["limit"]+"，剩余 "+q["remaining"]));
+            Find<TextBlock>("SettingsQuota").ToolTip=string.Join("\n",quotaRows.Select(q=>q["label"]+"：已用 "+q["used"]+"，上限 "+q["limit"]+"，剩余 "+q["remaining"]));
+        }
+        loading=wasLoading;settingsStatusBusy=false;Find<Button>("SettingsRefresh").Content="刷新额度";Find<Button>("SettingsRefresh").IsEnabled=!socialBusy;
+        if(!loading)ReconcileDirtySettings();
     }
     static void ShowActivityDetail(SocialRow row) {
         bool memory=new[]{2,10}.Contains(Find<ComboBox>("SocialSection").SelectedIndex);
         loading=true;
         int section=Find<ComboBox>("SocialSection").SelectedIndex;
         var editor=Find<TextBox>("SocialDetail");editor.IsReadOnly=!memory;
-        editor.Text=row==null?"":memory?row.Text:section==0?"会话范围\n"+(row.Chat.StartsWith("group:")?"已加入的 QQ 群聊":"现有 QQ 好友")+"\n\n当前状态\n"+row.Status+"\n\n独立配置\n可以为这个会话设置专属人设、参与方式和主动聊天机会。\n\n操作仍受名单、功能开关和额度约束。":row.Detail;
+        editor.Text=row==null?"":memory?row.Text:row.Detail;
         editor.Background=memory?Color("#FAFBFE"):Brushes.Transparent;editor.BorderThickness=memory?new Thickness(1):new Thickness(0);editor.Padding=memory?new Thickness(12):new Thickness(0);
         Find<TextBlock>("SocialDetailTitle").Text=row==null?"尚未选择记录":row.Name;
         Find<TextBlock>("SocialDetailMeta").Text=row==null?"选择左侧一条记录查看详情。":row.ChatLabel+(string.IsNullOrEmpty(row.Time)?"":"\n"+row.Time);

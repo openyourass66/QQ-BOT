@@ -16,7 +16,10 @@ partial class App
         public FieldSpec(string path, string category, string card, string title, string help, string unit = "", long min = 0, long max = 10000, long step = 1) { Path=path; Category=category; Card=card; Title=title; Help=help; Unit=unit; Min=min; Max=max; Step=step; }
     }
     public class SettingsCategory { public string Name { get; set; } public string Description { get; set; } public string Count { get; set; } }
-    class FieldView { public FieldSpec Spec; public FrameworkElement Row, Editor; public TextBlock Error; }
+    class FieldView { public FieldSpec Spec; public FrameworkElement Row, Editor; public TextBlock Error, Status; }
+    static HashSet<string> dirtySettingPaths = new HashSet<string>();
+    static Dictionary<string,string> savedSettingValues = new Dictionary<string,string>();
+    static string settingsPath = "";
     class SettingsCard { public string Category; public Border Surface; public List<FieldView> Rows = new List<FieldView>(); }
     static List<SettingsCard> settingsCards = new List<SettingsCard>();
     static Dictionary<string, FieldView> fieldViews = new Dictionary<string, FieldView>();
@@ -69,11 +72,12 @@ partial class App
         new FieldSpec("social.autoQzonePerDay", "主动与提醒", "自主空间分享", "每日自主空间上限", "同时受空间总额度约束；没有内容时可以一天不发。", "条/天", 0, 10),
         new FieldSpec("social.qzoneIntervalHours", "主动与提醒", "自主空间分享", "空间创作判断间隔", "每次判断后间隔至少这么久，避免反复生成相似内容。", "小时", 1, 168),
         new FieldSpec("chat.group.proactive.enabled", "主动与提醒", "群聊与安静时段", "允许群聊主动发言", "跨群发送和群提醒也受此开关约束。"),
-        new FieldSpec("social.quietStartHour", "主动与提醒", "群聊与安静时段", "安静时段开始", "按上海时间计算；只暂停主动聊天机会。", "时", 0, 23),
+        new FieldSpec("social.quietStartHour", "主动与提醒", "群聊与安静时段", "安静时段开始", "按上海时间暂停后台聊天、收藏与空间创作；约定提醒不受影响。", "时", 0, 23),
         new FieldSpec("social.quietEndHour", "主动与提醒", "群聊与安静时段", "安静时段结束", "开始与结束相同表示不设置安静时段。", "时", 0, 23),
         new FieldSpec("social.actionsPerDay", "额度与节奏", "每日额度", "QQ 动作总额", "0 表示禁止；按上海时间每天零点重置。", "次/天", 0, 10000, 10),
-        new FieldSpec("budgets.proactiveMessagesPerDay", "额度与节奏", "每日额度", "主动消息", "跨会话发送、主动聊天和提醒共享此额度。", "条/天", 0, 100),
-        new FieldSpec("chat.group.proactive.perGroupPerDay", "额度与节奏", "每日额度", "每群主动消息", "还会同时受到全局主动消息额度限制。", "条/天", 0, 20),
+        new FieldSpec("budgets.proactiveMessagesPerDay", "额度与节奏", "每日额度", "主动消息", "跨会话发送与主动聊天共享；定时提醒使用独立额度。", "条/天", 0, 100),
+        new FieldSpec("budgets.remindersPerDay", "额度与节奏", "每日额度", "定时提醒", "独立于主动聊天额度；群提醒仍受群主动开关及每群额度约束。", "条/天", 0, 100),
+        new FieldSpec("chat.group.proactive.perGroupPerDay", "额度与节奏", "每日额度", "每群主动消息与提醒", "群内主动消息和提醒共用此额度，各自再受对应全局额度约束。", "条/天", 0, 20),
         new FieldSpec("budgets.likesPerDay", "额度与节奏", "每日额度", "名片点赞", "按实际点赞次数扣除。", "次/天", 0, 200, 5),
         new FieldSpec("features.qzone.dailyLimit", "额度与节奏", "每日额度", "空间发布", "每日允许发布空间内容的次数。", "次/天", 0, 10),
         new FieldSpec("social.messagesPerMinute", "额度与节奏", "回复节奏", "会话操作频率", "限制同一会话一分钟内的动作次数。", "次/分", 1, 100),
@@ -106,6 +110,7 @@ partial class App
     static void BuildSettings(Dictionary<string,object> data, StackPanel panel) {
         panel.Children.Clear(); fields.Clear(); fieldViews.Clear(); settingsCards.Clear();
         var values=FlattenSettings(data);
+        savedSettingValues=values.ToDictionary(pair=>pair.Key,pair=>json.Serialize(pair.Value));dirtySettingPaths.Clear();
         var specs=fieldSpecs.Where(s=>values.ContainsKey(s.Path)).ToList();
         foreach(var pair in values.Where(p=>!specs.Any(s=>s.Path==p.Key))) specs.Add(new FieldSpec(pair.Key,"存储与高级","其他设置",Label(pair.Key.Split('.').Last()),"按项目配置规则保存。"));
         foreach(var category in categoryNames) foreach(var group in specs.Where(s=>s.Category==category).GroupBy(s=>s.Card)) {
@@ -132,6 +137,7 @@ partial class App
         var copy=new StackPanel { Margin=new Thickness(0,0,18,0), VerticalAlignment=VerticalAlignment.Center };
         copy.Children.Add(new TextBlock { Text=spec.Title, FontSize=12, FontWeight=FontWeights.Medium, TextWrapping=TextWrapping.Wrap });
         copy.Children.Add(new TextBlock { Text=spec.Help, Foreground=Ink("Muted"), FontSize=10, TextWrapping=TextWrapping.Wrap, LineHeight=17, Margin=new Thickness(0,5,0,0) });
+        var status=new TextBlock {FontSize=10,Foreground=Ink("Accent"),TextWrapping=TextWrapping.Wrap,LineHeight=17,Margin=new Thickness(0,5,0,0),Visibility=Visibility.Collapsed};copy.Children.Add(status);
         row.Children.Add(copy);Control input;FrameworkElement holder;
         var error=new TextBlock { Foreground=Ink("Danger"), FontSize=10, Margin=new Thickness(0,4,0,0), TextWrapping=TextWrapping.Wrap, Visibility=Visibility.Collapsed };
         bool list=value is IEnumerable && !(value is string); bool numeric=!(value is bool)&&!(value is string)&&!list;
@@ -165,9 +171,44 @@ partial class App
             else {Grid.SetColumn(holder,1);row.Children.Add(holder);outer.Children.Add(row);}
         }outer.Children.Add(error);
         outer.Children.Add(new Border { Background=Color("#F0F3F9"),Height=1,Margin=new Thickness(0,11,0,0) });
-        return new FieldView {Spec=spec,Row=outer,Editor=holder,Error=error};
+        return new FieldView {Spec=spec,Row=outer,Editor=holder,Error=error,Status=status};
     }
-    static void SettingChanged(string path) { MarkDirty(IsMediaSetting(path)?"models":"settings"); if(!loading) { RefreshDependencies();RefreshMediaEditors();Find<TextBlock>("SettingsSaveHint").Text="有尚未保存的更改";if(IsMediaSetting(path))Find<TextBlock>("RuntimeHint").Text="有尚未保存的媒体模型配置。"; } }
+    static string[] ListValues(string text) {return text.Split(new[]{',','，',';','；','\r','\n'},StringSplitOptions.RemoveEmptyEntries).Select(item=>item.Trim()).Where(item=>item.Length>0).ToArray();}
+    static object CurrentSettingValue(string path) {
+        var input=fields[path];if(input is CheckBox)return ((CheckBox)input).IsChecked==true;
+        if(input is ComboBox)return ((ComboBox)input).SelectedValue;
+        string text=((TextBox)input).Text;object original=FlattenSettings(settings)[path];
+        if(original is IEnumerable&&!(original is string))return ListValues(text);
+        long number;if(!(original is string)&&long.TryParse(text,out number))return number;
+        return text;
+    }
+    static void ReconcileDirtySettings() {
+        if(settings==null)return;
+        dirtySettingPaths.Clear();foreach(var path in savedSettingValues.Keys)if(fields.ContainsKey(path)&&json.Serialize(CurrentSettingValue(path))!=savedSettingValues[path])dirtySettingPaths.Add(path);
+        dirtySections.Remove("settings");dirtySections.Remove("models");
+        if(dirtySettingPaths.Any(path=>!IsMediaSetting(path)))dirtySections.Add("settings");
+        if(dirtySettingPaths.Any(IsMediaSetting))dirtySections.Add("models");
+        dirty=dirtySections.Count>0;Find<TextBlock>("SaveState").Text=dirty?"有尚未保存的修改":"所有修改已保存";
+        Find<TextBlock>("SettingsSaveHint").Text=dirtySettingPaths.Count>0?"有 "+dirtySettingPaths.Count+" 项尚未保存":"动态设置已保存";
+        UpdateConnectionEditing();RefreshDependencies();RefreshMediaEditors();
+    }
+    static void ApplySavedSettings(Dictionary<string,object> next,IEnumerable<string> savedPaths) {
+        var persisted=new HashSet<string>(savedPaths);var pending=new HashSet<string>(dirtySettingPaths.Where(path=>!persisted.Contains(path)));
+        var previous=FlattenSettings(settings);next=json.Deserialize<Dictionary<string,object>>(json.Serialize(next));
+        foreach(string path in pending) {var parts=path.Split('.');var parent=next;for(int i=0;i<parts.Length-1;i++)parent=(Dictionary<string,object>)parent[parts[i]];parent[parts[parts.Length-1]]=previous[path];}
+        bool wasLoading=loading;loading=true;settings=next;
+        foreach(var pair in FlattenSettings(next)) {
+            savedSettingValues[pair.Key]=json.Serialize(pair.Value);if(pending.Contains(pair.Key)||!fields.ContainsKey(pair.Key))continue;
+            var input=fields[pair.Key];if(input is CheckBox)((CheckBox)input).IsChecked=(bool)pair.Value;
+            else if(input is ComboBox)((ComboBox)input).SelectedValue=pair.Value;
+            else ((TextBox)input).Text=pair.Value is IEnumerable&&!(pair.Value is string)?string.Join(", ",((IEnumerable)pair.Value).Cast<object>()):Convert.ToString(pair.Value,CultureInfo.InvariantCulture);
+        }
+        loading=wasLoading;ReconcileDirtySettings();
+    }
+    static void SettingChanged(string path) { if(!loading&&fields.ContainsKey(path)) {ReconcileDirtySettings();if(IsMediaSetting(path))Find<TextBlock>("RuntimeHint").Text="媒体选项尚未保存；服务地址、密钥和 FFmpeg 修改后需重启。";} }
+    static bool SettingOn(string path) {return fields.ContainsKey(path)&&fields[path] is CheckBox&&((CheckBox)fields[path]).IsChecked==true;}
+    static long SettingNumber(string path) {long number;return fields.ContainsKey(path)&&fields[path] is TextBox&&long.TryParse(((TextBox)fields[path]).Text,out number)?number:-1;}
+    static void SettingStatus(string path,string text) {if(fieldViews.ContainsKey(path)){fieldViews[path].Status.Text=text;fieldViews[path].Status.Visibility=text.Length>0?Visibility.Visible:Visibility.Collapsed;}}
     static void RefreshDependencies() {
         Action<string,bool> enabled=(key,on)=>{if(fields.ContainsKey(key)){fields[key].IsEnabled=on;if(fieldViews.ContainsKey(key))fieldViews[key].Editor.IsEnabled=on;}};
         if(fields.ContainsKey("social.allowAll")) {bool allow=((CheckBox)fields["social.allowAll"]).IsChecked==true;enabled("social.allowedGroups",!allow);enabled("social.allowedUsers",!allow);}
@@ -175,6 +216,16 @@ partial class App
         if(fields.ContainsKey("social.proactiveEnabled")) {bool on=((CheckBox)fields["social.proactiveEnabled"]).IsChecked==true;foreach(string key in new[]{"social.proactiveIntervalMinutes","social.quietStartHour","social.quietEndHour"})enabled(key,on);}
         if(fields.ContainsKey("social.autoCollectStickers"))enabled("social.autoCollectPerDay",((CheckBox)fields["social.autoCollectStickers"]).IsChecked==true);
         if(fields.ContainsKey("social.autoQzoneEnabled")){bool on=((CheckBox)fields["social.autoQzoneEnabled"]).IsChecked==true;enabled("social.autoQzonePerDay",on);enabled("social.qzoneIntervalHours",on);}
+        foreach(string key in new[]{"features.browsing.enabled","features.browsing.maxNavigations","features.browsing.maxScreenshots"})enabled(key,false);
+        int hour=TimeZoneInfo.ConvertTimeBySystemTimeZoneId(DateTime.UtcNow,"China Standard Time").Hour;long start=SettingNumber("social.quietStartHour"),end=SettingNumber("social.quietEndHour");bool quiet=start>=0&&end>=0&&start!=end&&(start<end?hour>=start&&hour<end:hour>=start||hour<end);
+        string background=!SettingOn("social.proactiveEnabled")?"等待开启主动聊天机会":!SettingOn("social.autonomousEnabled")?"等待开启持续兴趣与想法":SettingNumber("social.autonomousDecisionsPerDay")==0?"每日后台判断上限为 0，后台不会唤醒模型":SettingNumber("social.actionsPerDay")==0?"QQ 动作总额为 0，后台动作暂停":quiet?"当前为上海时间安静时段，后台暂停":"基础条件已满足，等待候选话题、联系间隔与可用额度";
+        SettingStatus("social.proactiveEnabled",background);
+        SettingStatus("social.autoCollectStickers",!SettingOn("social.autoCollectStickers")?"后台收藏已关闭":!SettingOn("social.stickersEnabled")?"等待开启 QQ 收藏表情":SettingNumber("social.autoCollectPerDay")==0?"每日后台新增收藏为 0":background);
+        SettingStatus("social.autoQzoneEnabled",!SettingOn("social.autoQzoneEnabled")?"自主空间创作已关闭":!SettingOn("features.qzone.enabled")?"等待开启 QQ 空间发布":SettingNumber("social.autoQzonePerDay")==0||SettingNumber("features.qzone.dailyLimit")==0?"自主空间或空间总额度为 0":SettingOn("features.qzone.requireConfirm")&&SettingNumber("approval.adminQq")==0?"发布前需确认，请先设置管理员 QQ":background);
+        SettingStatus("social.remindersEnabled",SettingOn("social.remindersEnabled")?"使用独立提醒额度；群提醒还需要群聊主动发言。受阻时等待恢复，结果未知时不自动重发。":"提醒暂停执行，已有任务保留");
+        SettingStatus("social.autonomy","空间发布按实际正文合并确认；命令执行和文件修改使用独立的工作区审批。");
+        SettingStatus("features.browsing.enabled","尚未接入，当前不可编辑；外部浏览器工具由 DSH 配置管理。");
+        if(Find<TextBlock>("SettingsContext")!=null)Find<TextBlock>("SettingsContext").Text="全局配置："+(settingsPath.Length>0?settingsPath:"当前动态配置文件")+"\n会话专属参与设置优先于这里的全局值；.env 同名项仅补齐缺失默认值。";
     }
     static void FilterSettings() {
         if(Find<TextBox>("SettingsSearch")==null||settingsCards.Count==0)return;
@@ -192,8 +243,20 @@ partial class App
     }
     static bool ValidateSettingsForm() {
         foreach(var view in fieldViews.Values) {var input=fields[view.Spec.Path] as TextBox;if(input==null)continue;object value=FlattenSettings(settings)[view.Spec.Path];if(value is string||value is IEnumerable)continue;if(!ValidateSetting(view.Spec,input,view.Error)){Find<TextBox>("SettingsSearch").Clear();Find<ListBox>("SettingsNav").SelectedItem=((IEnumerable<SettingsCategory>)Find<ListBox>("SettingsNav").ItemsSource).First(c=>c.Name==view.Spec.Category);view.Row.BringIntoView();input.Focus();Feedback(view.Spec.Title+"需要调整，请检查提示。");return false;}}
+        foreach(string key in mediaKeys) {
+            string path="social."+key;var input=fields[path] as TextBox;if(input==null)continue;
+            if(!ValidateMediaField(key)){fieldViews[path].Error.Text=mediaErrors[key].Text;fieldViews[path].Error.Visibility=Visibility.Visible;SelectSetting(path);return false;}
+            fieldViews[path].Error.Visibility=Visibility.Collapsed;
+        }
+        long min,max;if(long.TryParse(((TextBox)fields["chat.delay.minMs"]).Text,out min)&&long.TryParse(((TextBox)fields["chat.delay.maxMs"]).Text,out max)&&min>max) {
+            fieldViews["chat.delay.maxMs"].Error.Text="最长回复延迟不能小于最短回复延迟。";fieldViews["chat.delay.maxMs"].Error.Visibility=Visibility.Visible;SelectSetting("chat.delay.maxMs");return false;
+        }
+        if(SettingOn("social.mediaEnabled")&&new[]{"visionModel","transcriptionModel","speechModel"}.Any(key=>((TextBox)fields["social."+key]).Text.Trim().Length>0)&&(!savedRuntimeValues.ContainsKey("BOT_MEDIA_BASE_URL")||savedRuntimeValues["BOT_MEDIA_BASE_URL"].Trim().Length==0)) {
+            var view=fieldViews["social.visionModel"];view.Error.Text="请先在连接与运行中填写并保存媒体服务地址；未保存的连接输入尚不能使用。";view.Error.Visibility=Visibility.Visible;SelectSetting("social.visionModel");return false;
+        }
         return true;
     }
+    static void SelectSetting(string path) {Find<TextBox>("SettingsSearch").Clear();Find<ListBox>("SettingsNav").SelectedItem=((IEnumerable<SettingsCategory>)Find<ListBox>("SettingsNav").ItemsSource).First(c=>c.Name==fieldViews[path].Spec.Category);fieldViews[path].Row.BringIntoView();fields[path].Focus();Feedback("设置需要调整，请检查行内提示。");}
     static void VerifySettingsInteraction() {
         if(Find<ListBox>("SettingsNav").Items.Count!=7)throw new Exception("设置分类不完整");
         string before=json.Serialize(Collect(settings,""));
@@ -226,6 +289,33 @@ partial class App
         for(int i=0;i<7;i++){Find<ListBox>("SettingsNav").SelectedIndex=i;Capture(System.IO.Path.Combine(root,"settings-"+i+".png"),2);}
         Find<ListBox>("SettingsNav").SelectedIndex=0;
         VerifyAuditInteraction();
+        VerifySettingsConsistencyInteraction();
+    }
+    static void VerifySettingsConsistencyInteraction() {
+        var original=json.Deserialize<Dictionary<string,object>>(json.Serialize(settings));var paths=savedSettingValues.Keys.ToArray();
+        string originalDraft=json.Serialize(Collect(settings,""));var profiles=new Dictionary<string,Dictionary<string,object>>(socialProfiles);
+        string originalService=savedRuntimeValues["BOT_MEDIA_BASE_URL"];
+        try {
+            ((TextBox)fields["social.allowedUsers"]).Text="987654321";
+            var remote=json.Deserialize<Dictionary<string,object>>(json.Serialize(settings["social"]));remote["blockedUsers"]=new[]{"123456789"};
+            RenderActivity(new Dictionary<string,object>{{"rows",new object[0]},{"profiles",new object[0]},{"socialSettings",remote},{"total",0},{"note","隔离检查"}});
+            if(((TextBox)fields["social.allowedUsers"]).Text!="987654321"||!dirtySettingPaths.Contains("social.allowedUsers"))throw new Exception("刷新活动覆盖了名单草稿");
+            if(!((TextBox)fields["social.blockedUsers"]).Text.Contains("123456789"))throw new Exception("远端名单变化没有合并");
+            dirtySections.Add("memory");RenderSettingsStatus(new Dictionary<string,object>{{"socialSettings",remote}});
+            if(!dirtySections.Contains("memory"))throw new Exception("刷新设置额度影响了未保存的记忆");dirtySections.Remove("memory");
+            ((TextBox)fields["identity.name"]).Text="未保存的人设名称";
+            var changed=json.Deserialize<Dictionary<string,object>>(json.Serialize(settings));((Dictionary<string,object>)changed["identity"])["name"]="其他操作的新名称";
+            ApplySavedSettings(changed,mediaKeys.Select(key=>"social."+key));
+            if(((TextBox)fields["identity.name"]).Text!="未保存的人设名称"||!dirtySettingPaths.Contains("identity.name"))throw new Exception("保存媒体配置丢失其他设置草稿");
+            if(Convert.ToString(((Dictionary<string,object>)settings["identity"])["name"])!=Convert.ToString(((Dictionary<string,object>)original["identity"])["name"]))throw new Exception("其他入口保存提前覆盖了草稿的冲突基准");
+            savedRuntimeValues["BOT_MEDIA_BASE_URL"]="";((CheckBox)fields["social.mediaEnabled"]).IsChecked=true;((TextBox)fields["social.visionModel"]).Text="missing-service";
+            if(ValidateSettingsForm())throw new Exception("机器人设置绕过了媒体服务依赖校验");
+            if(fields["features.browsing.enabled"].IsEnabled)throw new Exception("未接入浏览器仍允许编辑");
+        } finally {
+            savedRuntimeValues["BOT_MEDIA_BASE_URL"]=originalService;ApplySavedSettings(original,paths);socialProfiles=profiles;
+            foreach(var view in fieldViews.Values)view.Error.Visibility=Visibility.Collapsed;
+        }
+        if(json.Serialize(Collect(settings,""))!=originalDraft)throw new Exception("一致性检查改变了原设置");
     }
     static void VerifyAuditInteraction() {
         var originalLogs=logs.ToArray();bool originalPaused=paused;int originalPage=Find<TabControl>("Tabs").SelectedIndex;

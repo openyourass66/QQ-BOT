@@ -43,6 +43,7 @@ partial class App
         {"QUEUE_TOTAL","1–1000 条，包含全部会话正在处理和等待的消息。"}
     };
     static Dictionary<string,TextBlock> runtimeErrors = new Dictionary<string,TextBlock>();
+    static Dictionary<string,string> savedRuntimeValues = new Dictionary<string,string>();
     static Dictionary<FrameworkElement,int> runtimeCards = new Dictionary<FrameworkElement,int>();
     static Dictionary<string,Control> mediaInputs = new Dictionary<string,Control>();
     static Dictionary<string,TextBlock> mediaErrors = new Dictionary<string,TextBlock>();
@@ -90,6 +91,7 @@ partial class App
     static void BuildRuntimeFields(object value) {
         var panel=Find<StackPanel>("RuntimeFields");panel.Children.Clear();runtimeInputs.Clear();runtimeErrors.Clear();runtimeCards.Clear();mediaInputs.Clear();mediaErrors.Clear();
         var all=((IEnumerable)value).Cast<Dictionary<string,object>>().ToList();
+        savedRuntimeValues=all.ToDictionary(field=>(string)field["key"],field=>(string)field["value"]);
         foreach(var group in all.GroupBy(f=>(string)f["group"]).OrderBy(g=>RuntimeCategory(g.Key))) {
             var content=new StackPanel();
             foreach(var field in group) {
@@ -190,7 +192,8 @@ partial class App
         foreach(var input in mediaInputs)input.Value.IsEnabled=input.Key=="mediaEnabled"||enabled;
         bool service=runtimeInputs.ContainsKey("BOT_MEDIA_BASE_URL")&&RuntimeValue("BOT_MEDIA_BASE_URL").Trim().Length>0;
         Func<string,string> state=key=>((TextBox)fields["social."+key]).Text.Trim().Length==0?"未配置":service?"已填写":"待填写服务地址";
-        mediaSummary.Text=!enabled?"媒体能力已关闭；已填写的服务和模型选项会保留。":"视觉："+(((TextBox)fields["social.visionModel"]).Text.Trim().Length==0?"沿用对话模型（需支持图片）":state("visionModel"))+"   ·   转写："+state("transcriptionModel")+"   ·   合成："+state("speechModel");
+        mediaSummary.Text=!enabled?"媒体能力已关闭；已填写的服务和模型选项会保留。":"视觉："+(((TextBox)fields["social.visionModel"]).Text.Trim().Length==0?"沿用对话模型（需支持图片）":state("visionModel"))+"   ·   转写："+state("transcriptionModel")+"   ·   合成："+state("speechModel")+"\n服务地址、密钥或 FFmpeg 有修改时，请保存并重新启动后使用媒体能力。";
+        SettingStatus("social.mediaEnabled",mediaSummary.Text);
     }
     static bool ValidateMediaField(string key) {
         if(!mediaErrors.ContainsKey(key)||fields["social."+key] is CheckBox)return true;
@@ -228,10 +231,11 @@ partial class App
     static void SaveConnection(bool restart) {
         if(chatModelBusy)return;
         if(dirtySections.Contains("env")) {Find<ListBox>("RuntimeNav").SelectedIndex=4;Find<Expander>("AdvancedEnv").IsExpanded=true;Feedback("请先保存高级文本中的修改，再保存连接表单。");return;}
+        if(RuntimeValue("BOT_SETTINGS_FILE")!=savedRuntimeValues["BOT_SETTINGS_FILE"]&&dirtySettingPaths.Any(path=>!IsMediaSetting(path))) {Feedback("请先保存机器人设置中的其他修改，再切换动态配置文件；媒体模型修改会保存到目标文件。");return;}
         foreach(string key in mediaKeys) {var text=fields["social."+key] as TextBox;if(text!=null)text.Text=text.Text.Trim();}
         if(!ValidateConnectionForm())return;
         var media=new Dictionary<string,object>();foreach(string key in mediaKeys) {Control input=fields["social."+key];media[key]=input is CheckBox?(object)(((CheckBox)input).IsChecked==true):key=="videoFrames"?(object)long.Parse(((TextBox)input).Text,CultureInfo.InvariantCulture):((TextBox)input).Text;}
-        Send("connection",new {runtime=runtimeInputs.ToDictionary(pair=>pair.Key,pair=>RuntimeValue(pair.Key)),media=media,restart=restart});
+        Send("connection",new {runtime=runtimeInputs.ToDictionary(pair=>pair.Key,pair=>RuntimeValue(pair.Key)),media=media,mediaPaths=dirtySettingPaths.Where(IsMediaSetting).Select(path=>path.Substring(7)).ToArray(),baseline=settings,sourceSettingsPath=settingsPath,restart=restart});
     }
     static void VerifyRuntimeInteraction() {
         if(Find<ListBox>("RuntimeNav").Items.Count!=5)throw new Exception("连接配置分类不完整");

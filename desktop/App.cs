@@ -76,6 +76,15 @@ partial class App
         var probability = new TextBox { Text = old == null ? "10" : old["probability"].ToString(), Margin = new Thickness(0,6,0,10) }; panel.Children.Add(probability);
         panel.Children.Add(new TextBlock { Text = "关键词（逗号分隔）" });
         var keywords = new TextBox { Text = old == null ? "" : string.Join(",", ((System.Collections.IEnumerable)old["keywords"]).Cast<object>()), Margin = new Thickness(0,6,0,10) }; panel.Children.Add(keywords);
+        var effective=new TextBlock {FontSize=11,Foreground=Ink("Muted"),TextWrapping=TextWrapping.Wrap,Margin=new Thickness(0,0,0,12)};panel.Children.Add(effective);
+        Action refreshParticipation=()=>{
+            string value=Convert.ToString(mode.SelectedValue);bool group=selected.Chat.StartsWith("group:");mode.IsEnabled=group;
+            probability.IsEnabled=group&&value=="probability";keywords.IsEnabled=group&&(value=="keywords"||value=="probability");
+            if(!group){effective.Text="当前为私聊，自动回复由全局“自动回复私聊”控制；下方的人设和主动聊天机会可独立设置。";return;}
+            var global=(Dictionary<string,object>)settings["social"];string actual=value=="inherit"?Convert.ToString(global["responseMode"]):value;
+            effective.Text="配置来源："+(value=="inherit"?"全局设置":"当前会话专属设置")+" · 参与方式："+(actual=="legacy"?"沿用全局群聊开关":actual=="mention"?"仅直接对话":actual=="keywords"?"直接对话和关键词":actual=="probability"?"关键词和概率参与":"参与全部消息")+(actual=="probability"?" · 概率 "+(value=="inherit"?global["responseProbability"].ToString():probability.Text)+"%":"")+"。直接对话包括 @、称呼、前缀、引用和有效追问；活跃话题可继续跟进。";
+        };
+        mode.SelectionChanged+=(s,e)=>refreshParticipation();probability.TextChanged+=(s,e)=>refreshParticipation();refreshParticipation();
         var proactive = new CheckBox { Content = "允许此会话参与主动聊天机会（仍受全局开关与额度约束）", IsChecked = old == null || (bool)old["proactive"], Margin = new Thickness(0,0,0,12) }; panel.Children.Add(proactive);
         panel.Children.Add(new TextBlock { Text = "会话专属人设（留空沿用工作区人设）" });
         var persona = new TextBox { Text = old == null ? "" : (string)old["persona"], AcceptsReturn = true, TextWrapping = TextWrapping.Wrap, Height = 150, MaxLength=10000, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, Margin = new Thickness(0,6,0,14) }; AddPersonaPicker(panel,persona,persona.Text);panel.Children.Add(persona);
@@ -143,6 +152,8 @@ partial class App
         string type = (string)message["type"];
         if(type=="error"&&message.ContainsKey("action")&&(string)message["action"]=="model")ChatModelError((string)message["text"]);
         if(type=="model"){RenderChatModel(message);return;}
+        if(type=="settings-status"){RenderSettingsStatus(message);Feedback("设置状态与今日额度已刷新。");return;}
+        if(type=="error"&&message.ContainsKey("action")&&(string)message["action"]=="settings-status"){settingsStatusBusy=false;Find<Button>("SettingsRefresh").Content="刷新额度";}
         if (type == "error" && profileDialog != null) { profileDialog.IsEnabled = true; MessageBox.Show(profileDialog, (string)message["text"], "会话设置未保存"); }
         if (type == "log") {
             logs.Enqueue((string)message["text"]); while (logs.Count > 1500) logs.Dequeue();
@@ -153,14 +164,15 @@ partial class App
             if (section == "env" || section == "runtime" || section == "connection") {
                 var result = (Dictionary<string,object>)message["result"]; loading = true; Find<TextBox>("Env").Text = (string)result["env"]; RuntimeFields(result["runtimeFields"]); loading = false;
                 dirtySections.Remove("env"); dirtySections.Remove("runtime");
-                if(section=="connection") {settings=(Dictionary<string,object>)result["settings"];dirtySections.Remove("models");}
+                if(result.ContainsKey("settingsPath")) {if(settingsPath!=(string)result["settingsPath"])Find<TextBlock>("SettingsQuota").Text="已切换动态配置文件，请重新启动机器人并刷新额度。";settingsPath=(string)result["settingsPath"];}
+                if(result.ContainsKey("settings"))ApplySavedSettings((Dictionary<string,object>)result["settings"],section=="connection"?mediaKeys.Select(key=>"social."+key):new string[0]);
                 connectionRestartPending=message.ContainsKey("restartRequested")&&(bool)message["restartRequested"];
                 Find<TextBlock>("RuntimeHint").Text=message.ContainsKey("restartRequested")&&(bool)message["restartRequested"]?"配置已保存，正在重新启动机器人…":"配置已保存；连接参数重启后生效。";
             }
-            if(section=="settings")dirtySections.Remove("models");
+            if(section=="settings")ApplySavedSettings((Dictionary<string,object>)message["result"],savedSettingValues.Keys.ToArray());
             dirtySections.Remove(section); dirty = dirtySections.Count > 0;
             UpdateConnectionEditing();
-            if (section == "settings" || section == "connection") Find<TextBlock>("SettingsSaveHint").Text = dirtySections.Contains("settings") ? "还有尚未保存的设置" : "设置已保存并生效"; Find<TextBlock>("SaveState").Text = dirty ? "还有尚未保存的修改" : "所有修改已保存"; Feedback(message.ContainsKey("restartRequested")&&(bool)message["restartRequested"]?"配置已保存，正在重新启动机器人。":"保存成功。动态设置即时生效；连接参数需重启，人设在新会话生效。");
+            ReconcileDirtySettings();Feedback(message.ContainsKey("restartRequested")&&(bool)message["restartRequested"]?"配置已保存，正在重新启动机器人。":"保存成功。动态选项已保存；连接及媒体服务参数修改后需重启。");
         }
         else if (type == "social") { RenderActivity(message); }
         else if (type == "knowledge") { RenderKnowledge(message); }
@@ -171,6 +183,7 @@ partial class App
         else if (type == "config") {
             loading = true;
             settings = (Dictionary<string, object>)message["settings"];
+            if(message.ContainsKey("settingsPath"))settingsPath=(string)message["settingsPath"];
             var panel = Find<StackPanel>("Fields"); panel.Children.Clear(); fields.Clear(); MakeFields(settings, "", panel);
             RuntimeFields(message["runtimeFields"]);
             Find<TextBox>("Env").Text = (string)message["env"];
@@ -306,8 +319,9 @@ partial class App
         string[] socialKeys = { "autonomy", "allowAll", "allowedGroups", "allowedUsers", "blockedGroups", "blockedUsers", "responseMode", "keywords", "responseProbability", "batchWindowMs", "activeMinutes", "messagesPerMinute", "actionsPerDay", "memoryEnabled", "stickersEnabled", "mediaEnabled", "requestsEnabled", "filesEnabled", "remindersEnabled", "proactiveEnabled", "proactiveIntervalMinutes", "quietStartHour", "quietEndHour", "retentionDays", "messagesPerChat", "visionModel", "transcriptionModel", "speechModel", "speechVoice", "videoFrames" };
         string[] socialLabels = { "QQ 动作执行方式", "允许全部现有好友和群", "允许的群号", "允许的好友 QQ", "屏蔽群号", "屏蔽用户 QQ", "群聊参与方式", "参与关键词", "旁聊参与概率（百分比）", "消息聚合窗口（毫秒）", "话题活跃时间（分钟）", "每会话每分钟动作上限", "每日 QQ 动作上限", "群友长期记忆", "QQ 收藏表情", "图片、语音与视频", "好友与群申请处理", "文件收发", "定时提醒", "定时主动聊天机会", "主动机会间隔（分钟）", "安静时段开始（上海时间）", "安静时段结束（上海时间）", "消息保留天数", "每会话消息条数上限", "独立视觉模型（留空使用 DSH）", "语音转写模型（可选）", "语音合成模型（可选）", "合成声音", "视频抽帧数" };
         for (int i=0; i<socialKeys.Length; i++) labels[socialKeys[i]] = socialLabels[i];
-        Find<Button>("SaveSettings").Click += (s, e) => { try { if (ValidateSettingsForm()) Send("settings", Collect(settings, "")); } catch (Exception error) { Feedback(error.Message); } };
-        Find<Button>("SaveEnv").Click += (s, e) => { if (dirtySections.Contains("runtime")) {Feedback("请先保存连接表单中的修改，再保存高级文本。");return;} Send("env", Find<TextBox>("Env").Text); };
+        Find<Button>("SaveSettings").Click += (s, e) => { try { if (ValidateSettingsForm()) Send("settings", new {draft=Collect(settings,""),baseline=settings,paths=dirtySettingPaths.ToArray(),settingsPath=settingsPath}); } catch (Exception error) { Feedback(error.Message); } };
+        Find<Button>("SettingsRefresh").Click += (s,e) => {settingsStatusBusy=true;Find<Button>("SettingsRefresh").IsEnabled=false;Find<Button>("SettingsRefresh").Content="读取中…";Send("settings-status");};
+        Find<Button>("SaveEnv").Click += (s, e) => { if (dirtySections.Contains("runtime")) {Feedback("请先保存连接表单中的修改，再保存高级文本。");return;} Send("env",new {text=Find<TextBox>("Env").Text,settingsPath=settingsPath,hasSettingsDrafts=dirtySettingPaths.Count>0}); };
         Find<Button>("SaveRuntime").Click += (s,e) => SaveConnection(false);
         Find<Button>("SaveRuntimeRestart").Click += (s,e) => SaveConnection(true);
         Find<Button>("Memory").Click += (s, e) => { try { string path = Path.Combine(Path.GetDirectoryName(personaPath), "memory"); Directory.CreateDirectory(path); Process.Start(new ProcessStartInfo(path) { UseShellExecute = true }); } catch { Feedback("无法打开记忆目录，请先加载配置。"); } };
@@ -339,12 +353,12 @@ partial class App
                     if(!knowledgeItems.Values.Any(row=>row.Kind=="preset"&&row.Name=="Native saved preset")||knowledgeDrafts.Count!=0){Environment.ExitCode=1;File.WriteAllText(Path.Combine(root,"smoke-result.txt"),"FAIL: native persona save");exiting=true;Send("quit");return;}
                     Capture(Path.Combine(root,"page-6-loaded.png"), 6);
                     if(Find<TextBlock>("SocialDetailTitle").Text=="尚未选择记录"||Find<TextBox>("SocialDetail").Text.Length==0){Environment.ExitCode=1;File.WriteAllText(Path.Combine(root,"smoke-result.txt"),"FAIL: activity detail selection");exiting=true;Send("quit");return;}
-                    Find<ComboBox>("SocialSection").IsDropDownOpen=true;
+                    var dropdown=Find<ComboBox>("SocialSection");dropdown.Focus();dropdown.IsDropDownOpen=true;window.UpdateLayout();
                     smokeStep=11;
                 } else if(smokeStep==11) {
                     var combo=Find<ComboBox>("SocialSection");var popup=(System.Windows.Controls.Primitives.Popup)combo.Template.FindName("PART_Popup",combo);
                     var element=popup.Child as FrameworkElement;
-                    if(element==null||element.ActualWidth<combo.ActualWidth||!popup.IsOpen){Environment.ExitCode=1;File.WriteAllText(Path.Combine(root,"smoke-result.txt"),"FAIL: custom dropdown layout");exiting=true;Send("quit");return;}
+                    if(element==null||element.ActualWidth+1<combo.ActualWidth||!popup.IsOpen){Environment.ExitCode=1;File.WriteAllText(Path.Combine(root,"smoke-result.txt"),"FAIL: custom dropdown layout (popup="+popup.IsOpen+", width="+(element==null?0:element.ActualWidth)+", control="+combo.ActualWidth+")");exiting=true;Send("quit");return;}
                     var bitmap=new System.Windows.Media.Imaging.RenderTargetBitmap((int)Math.Ceiling(element.ActualWidth),(int)Math.Ceiling(element.ActualHeight),96,96,PixelFormats.Pbgra32);bitmap.Render(element);var encoder=new System.Windows.Media.Imaging.PngBitmapEncoder();encoder.Frames.Add(System.Windows.Media.Imaging.BitmapFrame.Create(bitmap));using(var output=File.Create(Path.Combine(root,"dropdown.png")))encoder.Save(output);
                     combo.IsDropDownOpen=false;Find<TextBox>("SocialSearch").Text="__no_match__";SocialRequest();smokeStep=12;
                 } else if(smokeStep==12&&!socialBusy&&Find<ListView>("SocialList").Items.Count==0) {
@@ -381,6 +395,10 @@ partial class App
                 } else if(smokeStep==25&&!socialBusy&&Find<ListView>("SocialList").Items.Count==1) {
                     if(!Find<TextBox>("SocialDetail").IsReadOnly||Find<StackPanel>("SocialActionPanel").Visibility!=Visibility.Collapsed||!Find<TextBox>("SocialDetail").Text.Contains("Nothing worth publishing"))throw new Exception("Autonomous decision summary is incorrect");Capture(Path.Combine(root,"autonomy-decisions.png"),6);smokeStep=26;
                 } else if(smokeStep==26) {
+                    dirtySections.Add("memory");Find<Button>("SettingsRefresh").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));smokeStep=27;
+                } else if(smokeStep==27&&!settingsStatusBusy) {
+                    if(!Find<TextBlock>("SettingsQuota").Text.Contains("今日额度")||!dirtySections.Contains("memory")||Find<ListView>("SocialList").Items.Count!=1)throw new Exception("Refreshing quotas changed activity or memory drafts");
+                    dirtySections.Remove("memory");ReconcileDirtySettings();Find<ListBox>("SettingsNav").SelectedIndex=4;Capture(Path.Combine(root,"settings-quotas.png"),2);
                     Find<TabControl>("Tabs").SelectedIndex = 0;
                     window.Close();
                     if (window.IsVisible) throw new Exception("Close did not hide window");

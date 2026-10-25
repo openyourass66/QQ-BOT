@@ -70,6 +70,7 @@ const SettingsSchema = z
     budgets: z
       .object({
         proactiveMessagesPerDay: z.number().int().min(0).max(100).default(5),
+        remindersPerDay: z.number().int().min(0).max(100).default(5),
         likesPerDay: z.number().int().min(0).max(200).default(20),
       })
       .default({}),
@@ -85,6 +86,7 @@ export type BotSettings = z.infer<typeof SettingsSchema>;
 export const DEFAULT_SETTINGS: BotSettings = SettingsSchema.parse({});
 
 const path = resolve(process.env.BOT_SETTINGS_FILE || 'bot.config.json');
+export const getSettingsPath = (): string => path;
 let current: BotSettings = DEFAULT_SETTINGS;
 let writes: Promise<unknown> = Promise.resolve();
 const listeners = new Set<(next: BotSettings) => void>();
@@ -118,11 +120,16 @@ export async function loadSettings(): Promise<BotSettings> {
   return clone(current);
 }
 
-async function persist(next: BotSettings): Promise<void> {
-  await mkdir(dirname(path), { recursive: true });
-  const temp = `${path}.tmp`;
+export async function readSettingsFile(file: string): Promise<BotSettings> {
+  try { return validateSettings(JSON.parse(await readFile(resolve(file), 'utf8'))); }
+  catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; return clone(DEFAULT_SETTINGS); }
+}
+
+async function persist(next: BotSettings, file = path): Promise<void> {
+  await mkdir(dirname(file), { recursive: true });
+  const temp = `${file}.tmp`;
   await writeFile(temp, `${JSON.stringify(next, null, 2)}\n`, 'utf8');
-  await rename(temp, path);
+  await rename(temp, file);
 }
 
 export function validateSettings(input: unknown): BotSettings {
@@ -130,11 +137,15 @@ export function validateSettings(input: unknown): BotSettings {
 }
 
 export async function saveSettings(input: unknown): Promise<BotSettings> {
+  return saveSettingsFile(path, input);
+}
+
+export async function saveSettingsFile(file: string, input: unknown): Promise<BotSettings> {
+  file = resolve(file);
   const parsed = validateSettings(input);
   const task = writes.then(async () => {
-    await persist(parsed);
-    current = parsed;
-    notify(parsed);
+    await persist(parsed, file);
+    if (file === path) { current = parsed; notify(parsed); }
     return clone(parsed);
   });
   writes = task.catch(() => undefined);

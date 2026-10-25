@@ -5,6 +5,7 @@ import { parseEnv } from 'node:util';
 import { runtimeFields, chatRuntimeKeys, mergeRuntimeEnv, validateRuntimeEnv } from './runtime-fields.mjs';
 import { readChatModelConfig, listChatModels, testChatModel } from '../dist/chat-model.js';
 import { knowledge } from './knowledge.mjs';
+import { mediaKeys, settingsFileFor, validateMediaService, mergeSettingsDraft } from './settings-config.mjs';
 try { loadEnvFile('.env'); } catch (e) { if (e.code !== 'ENOENT') throw e; }
 const settings = await import('../dist/settings.js');
 const read = async (p) => readFile(p, 'utf8').catch(e => { if (e.code === 'ENOENT') return ''; throw e; });
@@ -18,9 +19,16 @@ process.once('message', async ({ action, data }) => {
       const env = await read('.env') || await read('.env.example');
       const persona = await read(personaPath);
       const library = await knowledge(dirname(personaPath)).catch(error => ({ workspace: dirname(personaPath), global: persona, globalRevision: null, libraryRevision: null, presets: [], files: [], error: /^管理操作失败：/.test(error.message) ? error.message : '无法读取人设与记忆，请检查文件权限后刷新。' }));
-      result = { settings: await settings.loadSettings(), env, runtimeFields: describeEnv(env), persona, personaPath, knowledge: library };
+      result = { settings: await settings.loadSettings(), settingsPath: settings.getSettingsPath(), env, runtimeFields: describeEnv(env), persona, personaPath, knowledge: library };
     }
-    else if (action === 'settings') result = await settings.saveSettings(data);
+    else if (action === 'settings') {
+      if (data?.settingsPath && resolve(data.settingsPath) !== settings.getSettingsPath()) throw new Error('配置格式无效：动态配置文件已切换，当前输入已保留，请重新打开工作台核对');
+      const next = data?.draft ? mergeSettingsDraft(await settings.loadSettings(), data.baseline, data.draft, data.paths) : data;
+      const parsed = settings.validateSettings(next);
+      for (const key of mediaKeys) if (typeof parsed.social[key] === 'string') parsed.social[key] = parsed.social[key].trim();
+      validateMediaService(parsed, await read('.env'));
+      result = await settings.saveSettings(parsed);
+    }
     else if (action === 'knowledge') result = await knowledge(dirname(personaPath), data);
     else if (action === 'social') {
       await settings.loadSettings();
@@ -30,7 +38,9 @@ process.once('message', async ({ action, data }) => {
       const folder = dirname(resolve(process.env.SESSION_STORE || 'data/sessions.json'));
       const store = new SocialStore(process.env.BOT_SOCIAL_STORE || resolve(folder, 'social.json')); await store.load();
       const media = new MediaService(process.env.BOT_MEDIA_DIR || resolve(folder, 'media'), () => settings.getSettings().social);
-      result = await socialAdmin(data, store, media);
+      const { DailyUsageStore } = await import('../dist/usage.js');
+      const usage = new DailyUsageStore(process.env.BOT_USAGE_STORE || resolve(folder, 'daily-usage.json')); await usage.load();
+      result = await socialAdmin(data, store, media, undefined, usage);
     }
     else if (action === 'model') {
       if (!['list', 'test'].includes(data?.operation)) throw new Error('连接配置格式无效：未知模型操作');
@@ -42,17 +52,22 @@ process.once('message', async ({ action, data }) => {
         : { operation: 'test', ...await testChatModel(config) };
     }
     else if (action === 'connection') {
-      const allowed = new Set(['mediaEnabled', 'visionModel', 'transcriptionModel', 'speechModel', 'speechVoice', 'videoFrames']);
+      if (data?.sourceSettingsPath && resolve(data.sourceSettingsPath) !== settings.getSettingsPath()) throw new Error('配置格式无效：动态配置文件已被其他操作切换，请重新打开工作台核对');
+      const allowed = new Set(mediaKeys);
       if (!data?.media || typeof data.media !== 'object' || Array.isArray(data.media) || Object.keys(data.media).some(key => !allowed.has(key))) throw new Error('连接配置格式无效：媒体模型选项无效');
       const previousEnv = await readFile('.env', 'utf8').catch(e => { if (e.code === 'ENOENT') return null; throw e; });
       const env = mergeRuntimeEnv(previousEnv || '', data.runtime);
       validateRuntimeEnv(env);
-      const previousSettings = await settings.loadSettings();
-      const media = Object.fromEntries(Object.entries(data.media).map(([key, value]) => [key, typeof value === 'string' ? value.trim() : value]));
-      const nextSettings = settings.validateSettings({ ...previousSettings, social: { ...previousSettings.social, ...media } });
-      if (nextSettings.social.mediaEnabled && ['visionModel', 'transcriptionModel', 'speechModel'].some(key => nextSettings.social[key]) && !parseEnv(env).BOT_MEDIA_BASE_URL?.trim()) throw new Error('连接配置格式无效：使用独立媒体模型前请填写媒体服务地址');
+      const targetPath = settingsFileFor(env);
+      const switched = targetPath !== settings.getSettingsPath();
+      const previousSettings = await settings.readSettingsFile(targetPath);
+      if (data.mediaPaths && (!Array.isArray(data.mediaPaths) || data.mediaPaths.some(key => !allowed.has(key)))) throw new Error('配置格式无效：媒体修改字段无效');
+      const media = Object.fromEntries(Object.entries(data.media).filter(([key]) => !data.mediaPaths || data.mediaPaths.includes(key)).map(([key, value]) => [key, typeof value === 'string' ? value.trim() : value]));
+      const draftSettings = { ...previousSettings, social: { ...previousSettings.social, ...media } };
+      const nextSettings = settings.validateSettings(data.baseline && !switched ? mergeSettingsDraft(previousSettings, data.baseline, draftSettings, Object.keys(media).map(key=>'social.'+key)) : draftSettings);
+      validateMediaService(nextSettings, env);
       await atomic(resolve('.env'), env);
-      try { await settings.saveSettings(nextSettings); }
+      try { await settings.saveSettingsFile(targetPath, nextSettings); }
       catch (error) {
         if (previousEnv === null) await rm(resolve('.env'), { force: true });
         else await atomic(resolve('.env'), previousEnv);
@@ -60,12 +75,17 @@ process.once('message', async ({ action, data }) => {
       }
       const before = parseEnv(previousEnv || ''), after = parseEnv(env);
       const onlyModelChanged = runtimeFields.filter(([, key]) => !chatRuntimeKeys.has(key)).every(([, key, , fallback]) => (before[key] ?? fallback) === (after[key] ?? fallback));
-      result = { env, runtimeFields: describeEnv(env), settings: nextSettings, restartAction: onlyModelChanged ? 'restartBridge' : 'restart' };
+      result = { env, runtimeFields: describeEnv(env), settings: nextSettings, settingsPath: targetPath, settingsSwitched: switched, restartAction: onlyModelChanged ? 'restartBridge' : 'restart' };
     }
     else if (action === 'env' || action === 'runtime') {
+      const guard = typeof data === 'object' && data !== null && typeof data.text === 'string' ? data : null;
+      if (guard) data = guard.text;
       if (action === 'runtime') data = mergeRuntimeEnv(await read('.env'), data);
       validateRuntimeEnv(data);
-      await atomic(resolve('.env'), data); result = { env: data, runtimeFields: describeEnv(data) };
+      const targetPath = settingsFileFor(data);
+      if (guard?.hasSettingsDrafts && targetPath !== resolve(guard.settingsPath)) throw new Error('配置格式无效：请先保存机器人设置，再切换动态配置文件');
+      const nextSettings = await settings.readSettingsFile(targetPath);validateMediaService(nextSettings, data);
+      await atomic(resolve('.env'), data); result = { env: data, runtimeFields: describeEnv(data), settings:nextSettings, settingsPath:targetPath };
     } else if (action === 'persona') {
       if (typeof data?.text !== 'string' || resolve(data.path) !== personaPath) throw new Error('工作区已变更，请重新打开控制台后编辑人设');
       await atomic(personaPath, data.text); result = true;

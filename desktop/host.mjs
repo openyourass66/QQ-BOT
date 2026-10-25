@@ -80,8 +80,9 @@ async function check() { const result = await diagnose(root, { externalOnebot: c
 async function command({ action, data }) {
   if (action === 'model') { const result = await config(action, data); emit({ type: 'model', ...result }); return; }
   if (action === 'knowledge') { const result = await config(action, data); emit({ type: 'knowledge', ...result }); return; }
-  if (action === 'social' || action === 'memory') {
+  if (action === 'social' || action === 'memory' || action === 'settings-status') {
     if (action === 'memory') data = { ...data, section: 'memories' };
+    if (action === 'settings-status') data = { op: 'list', section: 'contacts' };
     const bridge = children.get('bridge');
     let result;
     if (bridge?.connected) result = await new Promise((done, reject) => {
@@ -91,7 +92,7 @@ async function command({ action, data }) {
       bridge.send({ type: 'social', id, data }, error => { if (error) { clearTimeout(timer); socialRequests.delete(id); reject(error); } });
     });
     else result = await config('social', data);
-    emit({ type: action === 'memory' ? 'memory' : 'social', ...result }); return;
+    emit({ type: action === 'settings-status' ? 'settings-status' : action === 'memory' ? 'memory' : 'social', ...result }); return;
   }
   if (action === 'load' || ['settings', 'env', 'runtime', 'connection', 'persona'].includes(action)) {
     const result = await config(action, data);

@@ -40,6 +40,10 @@ export class DailyUsageStore {
   }
   used(key:string):number { return this.data.date===shanghaiDate(this.now()) ? this.data.counters[key] ?? 0 : 0; }
 
+  summary(quotas: Array<Omit<Quota, 'amount'>>): { date: string; rows: Array<{ key: string; label: string; limit: number; used: number; remaining: number }> } {
+    return { date: shanghaiDate(this.now()), rows: quotas.map(q => ({ ...q, used: this.used(q.key), remaining: Math.max(0, q.limit - this.used(q.key)) })) };
+  }
+
   /** 在远端动作前持久化预扣。远端失败或结果未知时不退回额度。 */
   consume(getQuotas: () => Quota[], onReserved: () => void = () => undefined): Promise<void> {
     return this.queue.run('usage', async () => {

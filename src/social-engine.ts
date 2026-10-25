@@ -83,7 +83,7 @@ export class SocialEngine {
   private proactiveQuotas(ctx: ToolContext, target: string, proactive = false): Quota[] {
     if (!proactive && !ctx.proactive && target === ctx.chat) return [];
     const s = this.settings();
-    const quotas: Quota[] = [{ key: 'proactive', amount: 1, limit: s.budgets.proactiveMessagesPerDay, label: '主动消息' }];
+    const quotas: Quota[] = [ctx.reminder ? { key: 'reminders', amount: 1, limit: s.budgets.remindersPerDay, label: '定时提醒' } : { key: 'proactive', amount: 1, limit: s.budgets.proactiveMessagesPerDay, label: '主动消息' }];
     if (target.startsWith('group:')) {
       if (!s.chat.group.proactive.enabled) throw new Error('群聊主动发言已关闭');
       quotas.push({ key: `group:${target.split(':')[1]}`, amount: 1, limit: s.chat.group.proactive.perGroupPerDay, label: '该群主动消息' });
@@ -97,9 +97,10 @@ export class SocialEngine {
     void next.finally(() => { if (this.sending.get(chat) === next) this.sending.delete(chat); }).catch(() => undefined);
     return next;
   }
-  async send(ctx: ToolContext, segments: Segment[], target = ctx.chat, proactive = false): Promise<unknown> {
+  async send(ctx: ToolContext, segments: Segment[], target = ctx.chat, proactive = false, onDispatch: () => void = () => {}): Promise<unknown> {
     return this.serial(target, async () => {
       this.autonomy.authorize(ctx,'qq_reply');
+      if (ctx.reminder) { const blocked = this.reminderBlockReason(ctx); if (blocked) throw new Error(blocked); }
       if(ctx.autonomous&&ctx.autonomous.messages>=2)throw new Error('本次主动聊天已达到两条消息，请留给对方回应');
       await this.target(ctx, target);
       await this.quota(ctx, target, () => this.proactiveQuotas(ctx, target, proactive));
@@ -107,6 +108,7 @@ export class SocialEngine {
       const [kind, id] = target.split(':');
       const plain = segments.length === 1 && segments[0].type === 'text';
       let result: { message_id: number };
+      onDispatch();
       try { result = await this.api.call<{ message_id: number }>(kind === 'group' ? 'send_group_msg' : 'send_private_msg', { [kind === 'group' ? 'group_id' : 'user_id']: Number(id), message: plain ? segments[0].data.text : segments, ...(plain ? { auto_escape: true } : {}) }, ctx.signal); }
       catch (error) { ctx.silent = true;if(ctx.autonomous)ctx.autonomous.failure=String(error); throw error; }
       if (target === ctx.chat) ctx.sent++;
@@ -326,13 +328,15 @@ export class SocialEngine {
       case 'qq_finish': ctx.silent = true; ctx.topic = a.active_topic; ctx.endTopic = a.end_topic;if(ctx.autonomous)ctx.autonomous.reason=a.reason; this.log(`[decision] ${ctx.chat} ${a.reason}`); return { finished: true };
       case 'qq_set_reminder': {
         this.feature('remindersEnabled');
+        const blocked = this.reminderBlockReason(ctx, true);
+        if (blocked) throw new Error(`暂不能创建提醒：${blocked}`);
         if ((a.delay_minutes !== undefined) === (a.at_time !== undefined)) throw new Error('delay_minutes 与 at_time 必须且只能提供一项');
         const due = a.delay_minutes !== undefined ? Date.now() + a.delay_minutes * 60000 : parseShanghaiTime(a.at_time);
         if (!Number.isFinite(due) || due <= Date.now()) throw new Error('提醒时间必须在未来，格式为上海时间 YYYY-MM-DD HH:mm');
         return this.store.addTask({ chat: ctx.chat, creator: String(ctx.user), text: a.text, due, interval: a.interval_minutes * 60000 });
       }
       case 'qq_reminders': return state().tasks.filter(t => t.chat === ctx.chat && !['sent', 'cancelled'].includes(t.state));
-      case 'qq_cancel_reminder': return this.store.update(d => { const task = d.tasks.find(t => t.id === a.reminder_id && t.chat === ctx.chat); if (!task || task.state !== 'pending') throw new Error('该提醒不存在或已开始执行'); task.state = 'cancelled'; return task; });
+      case 'qq_cancel_reminder': return this.store.update(d => { const task = d.tasks.find(t => t.id === a.reminder_id && t.chat === ctx.chat); if (!task || !['pending','blocked'].includes(task.state)) throw new Error('该提醒不存在或已开始执行'); task.state = 'cancelled'; return task; });
       case 'qq_events': return state().events.filter(e => e.chat === ctx.chat && (!a.pending_only || !e.handled)).slice(-50);
       case 'qq_actions': return state().actions.filter(action => action.chat === ctx.chat).slice(-30);
       case 'qq_handle_request': {
@@ -548,15 +552,31 @@ export class SocialEngine {
       await this.autonomy.tick(signal,(t,a)=>wake(t.chat,`自主想法 #${t.id}（${t.kind}）：${t.summary}\n依据：${t.reason}\n${t.messageId!==undefined?'来源消息 #'+t.messageId:''}\n判断现在是否值得行动。没内容就 qq_finish；想以后再做用 qq_thought 推迟。只以实际工具结果算完成。`,a));
     } finally { this.tickRunning = false; }
   }
+  private reminderBlockReason(ctx: ToolContext, creating = false): string {
+    const s = this.settings();
+    if (!s.social.remindersEnabled) return '定时提醒已关闭';
+    if (!allowedChat(s.social, ctx.chat, ctx.user)) return '会话已屏蔽或不在允许名单中';
+    if (ctx.chat.startsWith('group:') && !s.chat.group.proactive.enabled) return '请先开启群聊主动发言';
+    const quotas = [{ key: 'social-actions', limit: s.social.actionsPerDay, label: 'QQ 动作' }, ...this.proactiveQuotas({ ...ctx, reminder: true }, ctx.chat, true)];
+    for (const q of quotas) if (q.limit === 0 || (!creating && this.usage.used(q.key) >= q.limit)) return `${q.label}额度不足，请检查额度与节奏`;
+    if (s.social.autonomy === 'confirm' && !s.approval.adminQq) return '所有动作需确认，请先配置管理员 QQ';
+    return '';
+  }
   private async fire(task: ScheduledTask, self: number, signal: AbortSignal): Promise<void> {
-    const ctx: ToolContext = { chat: task.chat, self, user: Number(task.creator), signal, sent: 0, silent: false };
-    await this.store.update(d => { const t = d.tasks.find(t => t.id === task.id); if (!t || t.state !== 'pending') throw new Error('提醒状态已变化'); t.state = 'running'; });
+    const ctx: ToolContext = { chat: task.chat, self, user: Number(task.creator), signal, sent: 0, silent: false, reminder: true };
+    const blocked = this.reminderBlockReason(ctx);
+    if (blocked) {
+      await this.store.update(d => { const t = d.tasks.find(t => t.id === task.id); if (t && ['pending','blocked'].includes(t.state)) { t.state = 'blocked'; t.error = `尚未发送：${blocked}；条件恢复后自动重试，也可取消`; t.retryAt = Date.now() + 60000; } });
+      return;
+    }
+    await this.store.update(d => { const t = d.tasks.find(t => t.id === task.id); if (!t || !['pending','blocked'].includes(t.state)) throw new Error('提醒状态已变化'); t.state = 'running'; t.error = ''; });
+    let dispatched = false;
     try {
       await this.approve(ctx, '定时提醒');
-      await this.send(ctx, [{ type: 'text', data: { text: `提醒：${task.text}` } }], task.chat, true);
-      await this.store.update(d => { const t = d.tasks.find(t => t.id === task.id)!; t.state = task.interval ? 'pending' : 'sent'; if (task.interval) t.due = Date.now() + task.interval; });
+      await this.send(ctx, [{ type: 'text', data: { text: `提醒：${task.text}` } }], task.chat, true, () => { dispatched = true; });
+      await this.store.update(d => { const t = d.tasks.find(t => t.id === task.id)!; t.state = task.interval ? 'pending' : 'sent'; t.error = ''; t.retryAt = 0; if (task.interval) t.due = Date.now() + task.interval; });
     } catch (e) {
-      await this.store.update(d => { const t = d.tasks.find(t => t.id === task.id)!; t.state = 'unknown'; t.error = String(e).slice(0,1000); });
+      await this.store.update(d => { const t = d.tasks.find(t => t.id === task.id)!; t.state = dispatched ? 'unknown' : String(e).includes('未获确认') ? 'failed' : 'blocked'; t.error = `${dispatched ? '已提交发送，结果待核对，不自动重发' : t.state === 'failed' ? '未获管理员确认，提醒已停止' : '尚未发送，稍后自动重试'}：${String(e)}`.slice(0,1000); t.retryAt = Date.now() + 60000; });
       this.log(`[reminder] ${task.id}: ${String(e)}`);
     }
   }
