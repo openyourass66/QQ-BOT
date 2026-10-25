@@ -87,10 +87,10 @@ export async function socialAdmin(input: unknown, store: SocialStore, media: Med
       const allowed=s.social.allowAll||(kind==='group'?s.social.allowedGroups:s.social.allowedUsers).includes(id);
       const participation = kind==='group' ? `${override?'会话专属':'沿用全局'} · ${modes[mode]}` : `全局私聊自动回复${s.chat.privateAutoReply?'已开启':'已关闭'}`;
       add(c.chat, c.chat, c.name, participation, blocked ? '已屏蔽' : allowed?'可联系':'未在允许名单', c.at,
-        `当前状态：${blocked?'已屏蔽':allowed?'可联系':'未在允许名单'}\n参与配置：${participation}${kind==='group'&&mode==='probability'?'\n参与概率：'+(override?profile.probability:s.social.responseProbability)+'%':''}\n会话人设：${profile?.persona?'使用会话独立副本':'沿用工作区人设'}\n主动聊天机会：${profile?.proactive===false?'会话已关闭':'沿用全局开关、安静时段与额度'}\n\n可在会话设置调整独立参与方式与人设。`);
+        `当前状态：${blocked?'已屏蔽':allowed?'可联系':'未在允许名单'}\n参与配置：${participation}${kind==='group'&&mode==='probability'?'\n参与概率：'+(override?profile.probability:s.social.responseProbability)+'%':''}\n会话人设：${profile?.persona?'使用会话独立副本':'沿用工作区人设'}\n会话后台活动：${profile?.proactive===false?'聊天与收藏已关闭':'沿用全局开关、安静时段与额度'}\n\n可在会话设置调整独立参与方式与人设。`);
     } break;
     case 'messages': for (const m of [...data.messages].reverse()) add(String(m.id), m.chat, m.name, m.text, m.recalled ? '已撤回' : m.self ? '自己发送' : '收到', m.at, `${m.name}（${m.user}）\n消息 #${m.id}\n${m.text}\n\n媒体：${m.segments.filter(s => s.type !== 'text').map(s => s.type).join('、')}`); break;
-    case 'memories': for (const m of [...data.memories].reverse()) add(m.id,m.chat,m.name,m.text,'长期记忆',m.at,`QQ ${m.user}\n${m.text}`,m.text); break;
+    case 'memories': for (const m of [...data.memories].reverse()) if(a.op!=='list'||!a.id||m.id===a.id) add(m.id,m.chat,m.name,m.text,'长期记忆',m.at,`QQ ${m.user}\n${m.text}`,m.text); break;
     case 'stickers': for (const t of data.stickers) {
       if(t.qq&&!t.qqPresent)continue;
       if (a.query && !(stickerSearchText(t) + ' ' + (t.analysis?.avoid.join(' ') ?? '').toLocaleLowerCase()).includes(a.query.toLocaleLowerCase())) continue;
@@ -114,6 +114,7 @@ export async function socialAdmin(input: unknown, store: SocialStore, media: Med
     }
   }
   const note=a.section==='stickers'?`${live?.stickers?'已读取 QQ 收藏':'离线缓存，启动机器人后可刷新 QQ 收藏'} · QQ 收藏 ${data.stickers.filter(t=>t.qqPresent).length} 张；本地待同步 ${data.stickers.filter(t=>!t.qq).length} 张。` : rows.length?`显示前 ${Math.min(200,rows.length)} 条；时间为上海时间。`:'暂无记录。启动机器人后接收消息，或刷新联系人。';
+  if(a.section==='memories'&&a.op==='edit_memory') {const selected=rows.findIndex(row=>row.id===a.id);if(selected>0)rows.unshift(rows.splice(selected,1)[0]);}
   const usage = live?.usage ?? offlineUsage;
   const quotas = usage?.summary([
     {key:'social-actions',label:'QQ 动作',limit:s.social.actionsPerDay},

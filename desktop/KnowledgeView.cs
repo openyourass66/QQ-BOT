@@ -23,7 +23,7 @@ partial class App
     static string[] knowledgeSelections = { "global", "", "" };
     static KnowledgeRow knowledgeSelection;
     static Dictionary<string,object> knowledgeSnapshot;
-    static string knowledgeWorkspace, knowledgePendingKey;
+    static string knowledgeWorkspace, knowledgePendingKey, knowledgeMemoryTarget, knowledgeRequestedMemory;
     static bool knowledgeLoading, knowledgeBusy;
     static int KnowledgePage { get { return Math.Max(0,Find<ListBox>("KnowledgeNav").SelectedIndex); } }
     static string KnowledgeSection(string key) { return key=="global"?"persona":"knowledge:"+key; }
@@ -64,8 +64,14 @@ partial class App
         if(op!="list"&&(row==null||row.Kind!="memory"))return;
         knowledgePendingKey=row==null?null:row.Key;SetKnowledgeBusy(true);KnowledgeError("");
         KnowledgeDraft draft;knowledgeDrafts.TryGetValue(row==null?"":row.Key,out draft);
-        if(op=="list")Send("memory",new {op=op,query=Find<TextBox>("KnowledgeSearch").Text,section="memories"});
+        if(op=="list") {knowledgeRequestedMemory=knowledgeMemoryTarget;Send("memory",new {op=op,query=Find<TextBox>("KnowledgeSearch").Text,section="memories",id=knowledgeMemoryTarget??""});knowledgeMemoryTarget=null;}
         else Send("memory",new {op=op,query=Find<TextBox>("KnowledgeSearch").Text,section="memories",id=row.Id,text=op=="edit_memory"?Find<TextBox>("Persona").Text:"",expectedText=draft==null?row.Text:draft.OriginalText});
+    }
+    static void OpenFriendMemory(string id) {
+        if(knowledgeBusy){Feedback("人设与记忆正在读取，请稍后再打开。");return;}
+        knowledgeLoading=true;Find<ListBox>("KnowledgeNav").SelectedIndex=1;Find<TextBox>("KnowledgeSearch").Clear();knowledgeLoading=false;
+        if(!string.IsNullOrEmpty(id))knowledgeSelections[1]="memory:"+id;
+        knowledgeMemoryTarget=id;Find<TabControl>("Tabs").SelectedIndex=4;RefreshKnowledgeList();RequestKnowledgeMemories();
     }
     static void RenderKnowledge(Dictionary<string,object> data) {
         knowledgeSnapshot=data;knowledgeWorkspace=(string)data["workspace"];
@@ -100,6 +106,7 @@ partial class App
             string id=(string)item["id"],chat=(string)item["chat"],key="memory:"+id;
             knowledgeItems[key]=new KnowledgeRow {Key=key,Kind="memory",Id=id,Name=(string)item["name"],Meta=(chat.StartsWith("group:")?"群 "+chat.Substring(6):"好友 "+chat.Substring(8))+" · "+(string)item["time"],Summary=(string)item["summary"],Text=(string)item["text"],Revision=(string)item["detail"],Loaded=true};
         }
+        if(op=="list"&&!string.IsNullOrEmpty(knowledgeRequestedMemory)){knowledgeSelections[1]="memory:"+knowledgeRequestedMemory;knowledgeRequestedMemory=null;}
         SetKnowledgeBusy(false);UpdateDirtySummary();RefreshKnowledgeList();Feedback(op=="list"?"群友记忆已更新。":"群友记忆已保存。");
     }
     static void RefreshKnowledgeList() {

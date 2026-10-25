@@ -28,7 +28,7 @@ partial class App
         Find<Button>("SocialContacts").Click+=(s,e)=>SocialRequest("refresh_contacts");
         Find<Button>("SocialBlock").Click+=(s,e)=>SocialRequest("block");
         Find<Button>("SocialUnblock").Click+=(s,e)=>SocialRequest("block",false);
-        Find<Button>("SocialSave").Click+=(s,e)=>SocialRequest(Find<ComboBox>("SocialSection").SelectedIndex==3?"collect_sticker":Find<ComboBox>("SocialSection").SelectedIndex==9?"defer_thought":Find<ComboBox>("SocialSection").SelectedIndex==10?"edit_interest":"edit_memory");
+        Find<Button>("SocialSave").Click+=(s,e)=>{if(Find<ComboBox>("SocialSection").SelectedIndex==2){if(socialSelection!=null)OpenFriendMemory(socialSelection.Id);}else SocialRequest(Find<ComboBox>("SocialSection").SelectedIndex==3?"collect_sticker":Find<ComboBox>("SocialSection").SelectedIndex==9?"defer_thought":"edit_interest");};
         Find<Button>("SocialDelete").Click+=(s,e)=>SocialRequest("delete");
         Find<Button>("SocialReset").Click+=(s,e)=>SocialRequest("reset_session");
         Find<Button>("SocialProfile").Click+=(s,e)=>EditProfile();
@@ -68,7 +68,7 @@ partial class App
         foreach(Dictionary<string,object> row in (IEnumerable)message["rows"])rows.Add(new SocialRow {Id=(string)row["id"],Chat=(string)row["chat"],Name=(string)row["name"],Summary=(string)row["summary"],Status=(string)row["status"],Time=(string)row["time"],Detail=(string)row["detail"],Text=(string)row["text"]});
         Find<ListView>("SocialList").ItemsSource=rows;socialSelection=null;
         Find<TextBlock>("SocialCount").Text=((ComboBoxItem)Find<ComboBox>("SocialSection").SelectedItem).Content+"  ·  "+Convert.ToString(message["total"])+" 条";
-        Find<TextBlock>("SocialNote").Text=visibleSocialSection==3?Convert.ToString(message["note"]):rows.Count>0?"按需刷新 · 时间为上海时间":"暂无记录";
+        Find<TextBlock>("SocialNote").Text=visibleSocialSection==2?"只读记录 · 内容在人设与记忆中编辑":visibleSocialSection==3?Convert.ToString(message["note"]):rows.Count>0?"按需刷新 · 时间为上海时间":"暂无记录";
         Find<TextBlock>("SocialNote").ToolTip=message["note"];
         Find<StackPanel>("SocialEmpty").Visibility=rows.Count==0?Visibility.Visible:Visibility.Collapsed;
         Find<TextBlock>("SocialEmptyTitle").Text=Find<TextBox>("SocialSearch").Text.Length>0?"没有找到相关记录":"这里还没有记录";
@@ -102,7 +102,7 @@ partial class App
         if(!loading)ReconcileDirtySettings();
     }
     static void ShowActivityDetail(SocialRow row) {
-        bool memory=new[]{2,10}.Contains(Find<ComboBox>("SocialSection").SelectedIndex);
+        bool memory=Find<ComboBox>("SocialSection").SelectedIndex==10;
         loading=true;
         int section=Find<ComboBox>("SocialSection").SelectedIndex;
         var editor=Find<TextBox>("SocialDetail");editor.IsReadOnly=!memory;
@@ -114,14 +114,14 @@ partial class App
         Find<Border>("SocialDetailBadge").Visibility=row==null?Visibility.Collapsed:Visibility.Visible;
         if(row!=null){Find<Border>("SocialDetailBadge").Background=row.StatusFill;Find<TextBlock>("SocialState").Foreground=row.StatusInk;}
         Find<TextBlock>("SocialDetailEmpty").Visibility=row==null?Visibility.Visible:Visibility.Collapsed;
-        bool chat=row!=null&&!string.IsNullOrEmpty(row.Chat)&&row.Chat.Contains(":")&&section<9;
+        bool chat=row!=null&&!string.IsNullOrEmpty(row.Chat)&&row.Chat.Contains(":")&&section<9&&section!=2;
         Find<Button>("SocialProfile").Visibility=chat?Visibility.Visible:Visibility.Collapsed;
         Find<Button>("SocialBlock").Visibility=chat&&row.Status!="已屏蔽"?Visibility.Visible:Visibility.Collapsed;
         Find<Button>("SocialUnblock").Visibility=chat&&row.Status=="已屏蔽"?Visibility.Visible:Visibility.Collapsed;
         Find<Button>("SocialReset").Visibility=chat?Visibility.Visible:Visibility.Collapsed;
-        Find<Button>("SocialSave").Visibility=row!=null&&(memory||(section==3&&row.Status.StartsWith("仅本地"))||(section==9&&row.Status=="等待判断"))?Visibility.Visible:Visibility.Collapsed;
-        Find<Button>("SocialSave").Content=section==3?"存入 QQ 收藏":section==9?"推迟一小时":section==10?"保存兴趣主题":"保存记忆更改";
-        Find<Button>("SocialDelete").Visibility=row!=null&&(new[]{2,3,4,10}.Contains(section)||(section==9&&new[]{"等待判断","执行中"}.Contains(row.Status)))?Visibility.Visible:Visibility.Collapsed;
+        Find<Button>("SocialSave").Visibility=row!=null&&(memory||section==2||(section==3&&row.Status.StartsWith("仅本地"))||(section==9&&row.Status=="等待判断"))?Visibility.Visible:Visibility.Collapsed;
+        Find<Button>("SocialSave").Content=section==2?"前往编辑长期记忆":section==3?"存入 QQ 收藏":section==9?"推迟一小时":"保存兴趣主题";
+        Find<Button>("SocialDelete").Visibility=row!=null&&(new[]{3,4,10}.Contains(section)||(section==9&&new[]{"等待判断","执行中"}.Contains(row.Status)))?Visibility.Visible:Visibility.Collapsed;
         Find<Button>("SocialDelete").Content=section==9?"取消想法":section==10?"删除兴趣":section==4?"取消提醒":section==3?(row!=null&&row.Status.StartsWith("QQ收藏")?"从 QQ 收藏移除":"删除本地记录"):"删除记忆";
         Find<StackPanel>("SocialActionPanel").Visibility=row!=null&&(chat||new[]{2,3,4,9,10}.Contains(section))?Visibility.Visible:Visibility.Collapsed;
         loading=false;

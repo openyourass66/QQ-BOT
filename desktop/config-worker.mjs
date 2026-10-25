@@ -2,7 +2,7 @@ import { readFile, writeFile, rename, mkdir, rm } from 'node:fs/promises';
 import { resolve, dirname } from 'node:path';
 import { loadEnvFile } from 'node:process';
 import { parseEnv } from 'node:util';
-import { runtimeFields, chatRuntimeKeys, mergeRuntimeEnv, validateRuntimeEnv } from './runtime-fields.mjs';
+import { runtimeFields, chatRuntimeKeys, initialDefaultKeys, mergeRuntimeEnv, validateRuntimeEnv } from './runtime-fields.mjs';
 import { readChatModelConfig, listChatModels, testChatModel } from '../dist/chat-model.js';
 import { knowledge } from './knowledge.mjs';
 import { mediaKeys, settingsFileFor, validateMediaService, mergeSettingsDraft } from './settings-config.mjs';
@@ -11,7 +11,7 @@ const settings = await import('../dist/settings.js');
 const read = async (p) => readFile(p, 'utf8').catch(e => { if (e.code === 'ENOENT') return ''; throw e; });
 const personaPath = resolve(process.env.BOT_WORKSPACE || 'bot-workspace', 'AGENTS.md');
 const atomic = async (p, text) => { await mkdir(dirname(p), { recursive: true }); await writeFile(p + '.desktop.tmp', text, 'utf8'); await rename(p + '.desktop.tmp', p); };
-const describeEnv = env => { const values = parseEnv(env); return runtimeFields.map(([group, key, label, fallback, kind]) => ({ group, key, label, kind: kind || 'text', value: values[key] ?? fallback })); };
+const describeEnv = env => { const values = parseEnv(env); return runtimeFields.map(([group, key, label, fallback, kind]) => ({ group, key, label, initialDefault: initialDefaultKeys.has(key), kind: kind || 'text', value: values[key] ?? fallback })); };
 process.once('message', async ({ action, data }) => {
   try {
     let result;

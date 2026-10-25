@@ -97,8 +97,8 @@
        </StackPanel>
       </ScrollViewer>
      <Border Grid.Row="3" BorderBrush="#E3E8F2" BorderThickness="0,1,0,0" Padding="0,15,0,0" Margin="0,16,0,0"><DockPanel>
-      <Button x:Name="SaveSettings" Content="保存全部更改" Style="{StaticResource Primary}" DockPanel.Dock="Right" MinWidth="124"/>
-      <StackPanel VerticalAlignment="Center"><TextBlock x:Name="SettingsSaveHint" Text="保存后即时生效" FontSize="12"/><TextBlock Text="各分类中的更改会一并保存。" Foreground="{StaticResource Muted}" FontSize="10" Margin="0,4,0,0"/></StackPanel>
+      <Button x:Name="SaveSettings" Content="保存机器人设置" Style="{StaticResource Primary}" DockPanel.Dock="Right" MinWidth="124"/>
+      <StackPanel VerticalAlignment="Center"><TextBlock x:Name="SettingsSaveHint" Text="保存此页行为设置" FontSize="12"/><TextBlock Text="媒体服务参数在连接与运行单独保存。" Foreground="{StaticResource Muted}" FontSize="10" Margin="0,4,0,0"/></StackPanel>
      </DockPanel></Border>
     </Grid></TabItem>
     <TabItem Header="连接配置"><Grid>
@@ -108,9 +108,9 @@
       <TextBlock x:Name="RuntimeTitle" Text="QQ 连接" FontSize="20" FontWeight="SemiBold"/>
       <TextBlock x:Name="RuntimeSubtitle" Foreground="{StaticResource Muted}" FontSize="11" TextWrapping="Wrap" Margin="0,6,0,18"/>
       <StackPanel x:Name="RuntimeFields"/>
-      <Expander x:Name="AdvancedEnv" Header="高级：完整 .env" Margin="0,6,0,0" Visibility="Collapsed"><StackPanel><TextBlock Text="可编辑自定义参数，包含连接凭据。保存高级文本前，请先保存表单中的修改。" Foreground="{StaticResource Muted}" FontSize="11" TextWrapping="Wrap" Margin="0,0,0,12"/><TextBox x:Name="Env" Height="290" FontFamily="Cascadia Mono, Consolas, Microsoft YaHei UI" AcceptsReturn="True" AcceptsTab="True" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto"/><Button x:Name="SaveEnv" Content="保存高级文本" HorizontalAlignment="Right" Margin="0,12,0,0"/></StackPanel></Expander>
+      <Expander x:Name="AdvancedEnv" Header="高级环境文件（自定义参数与排障）" Margin="0,6,0,0" Visibility="Collapsed"><StackPanel><TextBlock Text="包含连接凭据，适合自定义参数与排障。常用参数通过表单管理；管理员和回复行为的同名环境项仅提供缺失默认值，当前值请在机器人设置编辑。" Foreground="{StaticResource Muted}" FontSize="11" TextWrapping="Wrap" Margin="0,0,0,12"/><TextBox x:Name="Env" Height="290" FontFamily="Cascadia Mono, Consolas, Microsoft YaHei UI" AcceptsReturn="True" AcceptsTab="True" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto"/><Button x:Name="SaveEnv" Content="保存环境文件" HorizontalAlignment="Right" Margin="0,12,0,0"/></StackPanel></Expander>
      </StackPanel></ScrollViewer>
-     <Border Grid.Row="2" BorderBrush="{StaticResource Line}" BorderThickness="0,1,0,0" Padding="0,15,0,0" Margin="0,16,0,0"><DockPanel><StackPanel DockPanel.Dock="Right" Orientation="Horizontal"><Button x:Name="SaveRuntime" Content="保存配置" Margin="0,0,10,0"/><Button x:Name="SaveRuntimeRestart" Content="保存并重新启动" Style="{StaticResource Primary}"/></StackPanel><TextBlock x:Name="RuntimeHint" Text="模型名称等动态选项可热更新；服务地址、密钥和 FFmpeg 修改后需重启。" Foreground="{StaticResource Muted}" FontSize="10" TextWrapping="Wrap" Margin="0,0,16,0" VerticalAlignment="Center"/></DockPanel></Border>
+     <Border Grid.Row="2" BorderBrush="{StaticResource Line}" BorderThickness="0,1,0,0" Padding="0,15,0,0" Margin="0,16,0,0"><DockPanel><StackPanel DockPanel.Dock="Right" Orientation="Horizontal"><Button x:Name="SaveRuntime" Content="保存连接与媒体" Margin="0,0,10,0"/><Button x:Name="SaveRuntimeRestart" Content="保存并重新启动" Style="{StaticResource Primary}"/></StackPanel><StackPanel Margin="0,0,16,0" VerticalAlignment="Center"><TextBlock Text="保存本页所有分类；机器人设置中的草稿另行保存。" FontSize="10" TextWrapping="Wrap"/><TextBlock x:Name="RuntimeHint" Text="模型参数可热更新；连接地址、密钥和启动文件需重启。" Foreground="{StaticResource Muted}" FontSize="10" TextWrapping="Wrap" Margin="0,4,0,0"/></StackPanel></DockPanel></Border>
     </Grid></TabItem>
     <TabItem Header="人设与记忆"><Grid>
      <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>

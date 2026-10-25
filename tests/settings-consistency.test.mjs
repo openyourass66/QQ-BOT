@@ -87,3 +87,31 @@ test('管理页面显示真实额度余量、允许名单状态及群聊和私�
   assert.equal(group.status,'未在允许名单');assert.match(group.summary,/会话专属/);assert.match(friend.summary,/自动回复已关闭/);
   const reminders=result.result.quotas.rows.find(r=>r.key==='reminders');assert.equal(reminders.used,2);assert.equal(reminders.remaining,3);assert.equal(result.result.quotas.live,false);
 }));
+
+test('行为设置与媒体服务各自保存，互不带入另一页的无效草稿和功能开关',()=>fixture(async({worker,a})=>{
+  const draft=structuredClone(a);draft.identity.name='只保存行为';draft.social.visionModel='unsaved-vision';draft.social.videoFrames='invalid';
+  let result=await worker('settings',{draft,baseline:a,paths:['identity.name']});
+  assert.equal(result.ok,true);assert.equal(result.result.social.visionModel,'');assert.equal(result.result.social.videoFrames,4);
+  const baseline=result.result;
+  result=await worker('connection',{runtime:{BOT_MEDIA_BASE_URL:'https://example.test/v1/'},media:{speechVoice:'test-voice'},mediaPaths:['speechVoice'],baseline});
+  assert.equal(result.ok,true);assert.equal(result.result.settings.identity.name,'只保存行为');assert.equal(result.result.settings.social.mediaEnabled,true);assert.equal(result.result.settings.social.speechVoice,'test-voice');
+}));
+
+test('旧环境默认值从表单隐藏但仍保留在文件中，不覆盖当前动态设置',()=>fixture(async({root,worker})=>{
+  await writeFile(join(root,'.env'),'BOT_SETTINGS_FILE=a.json\nBOT_WORKSPACE=.\nBOT_CHAT_MODE=profile\nADMIN_QQ=123456\nGROUP_PREFIX=old-prefix\nALLOW_EXEC=1\n');
+  let result=await worker('load');assert.equal(result.ok,true);
+  for(const key of ['ADMIN_QQ','GROUP_PREFIX','ALLOW_EXEC'])assert.equal(result.result.runtimeFields.find(field=>field.key===key).initialDefault,true);
+  assert.equal(result.result.settings.approval.adminQq,0);assert.equal(result.result.settings.chat.group.prefix,'');assert.equal(result.result.settings.approval.allowExec,false);
+  result=await worker('connection',{runtime:{BOT_CHAT_MODE:'profile'},media:{},mediaPaths:[]});assert.equal(result.ok,true);
+  const env=await readFile(join(root,'.env'),'utf8');assert.match(env,/ADMIN_QQ=123456/);assert.match(env,/GROUP_PREFIX=old-prefix/);assert.match(env,/ALLOW_EXEC=1/);
+}));
+
+test('从活动定位旧记忆不受前 200 条限制，返回同一条可编辑记录',()=>fixture(async({root,worker})=>{
+  const store=new SocialStore(join(root,'data/social.json'));await store.load();
+  await store.update(d=>{d.memories=Array.from({length:205},(_,i)=>({id:'memory-'+i,chat:'private:10001',user:'10001',name:'测试好友',text:'事实 '+i,at:i+1}));});
+  const all=await worker('social',{op:'list',section:'memories'});assert.equal(all.result.rows.length,200);assert.equal(all.result.rows.some(row=>row.id==='memory-0'),false);
+  const selected=await worker('social',{op:'list',section:'memories',id:'memory-0'});assert.equal(selected.result.rows.length,1);assert.equal(selected.result.rows[0].text,'事实 0');
+  const edited=await worker('social',{op:'edit_memory',section:'memories',id:'memory-0',text:'已更正的事实',expectedText:'事实 0'});assert.equal(edited.ok,true);assert.equal(edited.result.rows.length,200);assert.equal(edited.result.rows[0].id,'memory-0');
+  const reloaded=await worker('social',{op:'list',section:'memories',id:'memory-0'});assert.equal(reloaded.result.rows[0].text,'已更正的事实');
+  const deleted=await worker('social',{op:'delete',section:'memories',id:'memory-0',expectedText:'已更正的事实'});assert.equal(deleted.ok,true);assert.equal(deleted.result.rows.length,200);assert.equal(deleted.result.total,204);
+}));
