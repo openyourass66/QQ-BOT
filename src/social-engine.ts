@@ -10,6 +10,8 @@ import { OneBotHttp, parseMessageEvent, parseCqMessage, segmentsToText, type Seg
 import type { DailyUsageStore, Quota } from './usage.js';
 import { StickerReviews, imageHash, stickerReviewPrompt, stickerSearchText, stickerInfo, type StickerAnalysis } from './sticker-review.js';
 import { QqStickers } from './qq-stickers.js';
+import { Autonomy } from './autonomy.js';
+import type { AutonomousTurn } from './autonomous-state.js';
 
 export class SocialEngine {
   private sending = new Map<string, Promise<unknown>>();
@@ -20,14 +22,14 @@ export class SocialEngine {
   private posts = new Set<string>();
   private groupFiles = new Map<string, Map<string, Record<string, unknown>>>();
   private tickRunning = false;
-  private proactiveAt = new Map<string, number>();
   private stickerReviews = new StickerReviews();
   readonly qqStickers: QqStickers;
+  readonly autonomy:Autonomy;
   constructor(readonly store: SocialStore, readonly media: MediaService, private readonly api: OneBotHttp,
     private readonly usage: DailyUsageStore, private readonly settings: () => BotSettings,
     private readonly confirm: (title: string, signal: AbortSignal) => Promise<boolean>,
     private readonly onSent: (chat: string, id: number, segments: Segment[], source?: string) => void,
-    private readonly log: (text: string) => void) { this.qqStickers=new QqStickers(store,media,api); }
+    private readonly log: (text: string) => void) { this.qqStickers=new QqStickers(store,media,api);this.autonomy=new Autonomy(store,settings,usage,undefined,media); }
 
   async contacts(signal: AbortSignal, force = false): Promise<void> {
     if (!force && Date.now() - this.contactsAt < 60000) return;
@@ -47,10 +49,12 @@ export class SocialEngine {
   }
   check(ctx: ToolContext, target = ctx.chat): void {
     ctx.signal.throwIfAborted();
+    if(ctx.autonomous?.kind==='qzone'&&target===ctx.chat&&ctx.chat===`private:${ctx.self}`)return;
     if (!allowedChat(this.settings().social, target, target === ctx.chat ? ctx.user : undefined)) throw new Error('该用户或会话已屏蔽或不在允许名单中');
   }
   async target(ctx: ToolContext, target: string): Promise<void> {
     this.check(ctx, target);
+    if(ctx.autonomous&&target!==ctx.chat)throw new Error('自主任务不能跨会话发送消息');
     if (target === ctx.chat) return;
     await this.contacts(ctx.signal);
     if (!(target.startsWith('group:') ? this.groupIds : this.friendIds).has(target.split(':')[1])) throw new Error('目标不是现有好友或已加入群，请先查询联系人');
@@ -62,6 +66,7 @@ export class SocialEngine {
   }
   actionQuotas(ctx: ToolContext, key = ctx.chat): Quota[] {
     this.check(ctx);
+    if(ctx.autonomous)this.autonomy.authorize(ctx,ctx.autonomous.kind==='qzone'?'qzone_post':ctx.autonomous.kind==='collect'?'qq_collect_sticker':'qq_reply');
     const now = Date.now();
     const times = (this.rates.get(key) ?? []).filter(t => now - t < 60000);
     if (times.length >= this.settings().social.messagesPerMinute) throw new Error('当前会话操作过于频繁，请稍后再试');
@@ -94,6 +99,8 @@ export class SocialEngine {
   }
   async send(ctx: ToolContext, segments: Segment[], target = ctx.chat, proactive = false): Promise<unknown> {
     return this.serial(target, async () => {
+      this.autonomy.authorize(ctx,'qq_reply');
+      if(ctx.autonomous&&ctx.autonomous.messages>=2)throw new Error('本次主动聊天已达到两条消息，请留给对方回应');
       await this.target(ctx, target);
       await this.quota(ctx, target, () => this.proactiveQuotas(ctx, target, proactive));
       this.check(ctx, target);
@@ -101,9 +108,10 @@ export class SocialEngine {
       const plain = segments.length === 1 && segments[0].type === 'text';
       let result: { message_id: number };
       try { result = await this.api.call<{ message_id: number }>(kind === 'group' ? 'send_group_msg' : 'send_private_msg', { [kind === 'group' ? 'group_id' : 'user_id']: Number(id), message: plain ? segments[0].data.text : segments, ...(plain ? { auto_escape: true } : {}) }, ctx.signal); }
-      catch (error) { ctx.silent = true; throw error; }
+      catch (error) { ctx.silent = true;if(ctx.autonomous)ctx.autonomous.failure=String(error); throw error; }
       if (target === ctx.chat) ctx.sent++;
-      await this.store.sent(target, ctx.self, result.message_id, segments, this.settings().identity.name);
+      try {await this.store.sent(target, ctx.self, result.message_id, segments, this.settings().identity.name);await this.autonomy.sent(ctx);}
+      catch(error){if(ctx.autonomous)ctx.autonomous.failure='消息已提交协议端但记录保存失败：'+String(error);throw error;}
       this.onSent(target, result.message_id, segments, ctx.chat);
       return { ...result, sent: true, target };
     });
@@ -129,10 +137,12 @@ export class SocialEngine {
   async execute(input: unknown, ctx: ToolContext): Promise<unknown> {
     this.check(ctx);
     const call = SocialCallSchema.parse(input);
+    this.autonomy.authorize(ctx,call.tool);
     const tool = socialTools.find(t => t.name === call.tool);
     if (!tool) throw new Error('未知 QQ 工具');
     const args = z.object(tool.schema as z.ZodRawShape).strict().parse(call.args) as Record<string, any>;
     const reads = new Set(['qq_capabilities', 'qq_recent_messages', 'qq_message', 'qq_read_forward', 'qq_active_members', 'qq_chats', 'qq_images', 'qq_stickers', 'qq_sticker_image', 'qq_memory_query', 'qq_reminders', 'qq_events', 'qq_transcribe', 'qq_video', 'qq_file', 'qq_event_file', 'qq_group_files', 'qq_search', 'qq_qzone_feed', 'qq_finish', 'qq_report']);
+    reads.add('qq_self_state');
     const collectPreview = call.tool === 'qq_collect_sticker' && !args.analysis_token;
     const sendSticker = call.tool === 'qq_send_sticker' ? this.store.snapshot().stickers.find(s => s.id === args.sticker_id) : undefined;
     if (sendSticker?.analysis?.confidence === 'low') throw new Error('这张表情含义尚不确定，请结合上下文重新看图分析，或选择其他已理解的表情');
@@ -153,6 +163,9 @@ export class SocialEngine {
     if(['qq_stickers','qq_sticker_note'].includes(tool)) { this.feature('stickersEnabled');await this.qqStickers.sync(ctx.signal); }
     const state = () => this.store.snapshot();
     switch (tool) {
+      case 'qq_self_state':return this.autonomy.view(ctx);
+      case 'qq_interest':return this.autonomy.interest(ctx,a as never);
+      case 'qq_thought':return this.autonomy.thought(ctx,a as never);
       case 'qq_capabilities': return { media: this.media.capabilities(), settings: this.settings().social, tools: socialTools.map(t => ({ name: t.name, description: t.description })), notes: ['消息、成员必须使用真实编号', '本地记录仅包含已收到或主动拉取的消息', '接口成功不等于接收者已阅读'] };
       case 'qq_reply': {
         if (!a.text) throw new Error('文字不能为空；只想潜水请调用 qq_finish');
@@ -229,11 +242,12 @@ export class SocialEngine {
       }
       case 'qq_stickers': {
         this.feature('stickersEnabled');
+        const used=this.autonomy.stickerRecency(ctx.chat);
         const terms = a.query.toLocaleLowerCase().trim().split(/\s+/).filter(Boolean);
         const score = (s: ReturnType<typeof state>['stickers'][number]) => s.analysis ? { high:3,medium:2,low:1 }[s.analysis.confidence] : 0;
         return state().stickers.filter(s => s.qqPresent && terms.every((term: string) => stickerSearchText(s).includes(term)))
-          .sort((x,y) => score(y) - score(x)).slice(0, a.limit)
-          .map(stickerInfo);
+          .sort((x,y) => score(y) - score(x)||(used.get(x.id)??0)-(used.get(y.id)??0)||x.uses-y.uses).slice(0, a.limit)
+          .map(s=>({...stickerInfo(s),lastUsedInChat:used.get(s.id)??0}));
       }
       case 'qq_collect_sticker': {
         this.feature('stickersEnabled'); const entry = this.message(ctx, a.message_id);
@@ -243,21 +257,24 @@ export class SocialEngine {
           await this.qqStickers.sync(ctx.signal);
           const image = await this.messageImage(segment, ctx), hash = imageHash(Buffer.from(image.data, 'base64'));
           const existing = state().stickers.find(s => s.qqPresent && s.analysis?.imageHash === hash && s.analysis.confidence !== 'low');
-          if (existing) { ctx.pendingStickerCollections?.delete(hash); return { ...stickerInfo(existing), collected: true, reused: true }; }
+          if (existing) { ctx.pendingStickerCollections?.delete(hash);await this.autonomy.collected(ctx,a.message_id); return { ...stickerInfo(existing), collected: true, reused: true }; }
           return this.prepareStickerReview(ctx, { messageId: a.message_id }, image, a.note, 'collect');
         }
         return this.serial('sticker-review:' + a.analysis_token, async () => {
           const review = await this.checkedStickerReview(ctx, a.analysis_token, { messageId: a.message_id });
           const analysis: StickerAnalysis = { ...a.analysis, imageHash: review.hash, at: Date.now() };
-          const favorite=await this.qqStickers.collect(review.file,ctx.signal,()=>this.quota(ctx,ctx.chat));
+          let writeAttempt=false;
+          const favorite=await this.qqStickers.collect(review.file,ctx.signal,async()=>{await this.quota(ctx,ctx.chat,()=>this.autonomy.collectionQuotas(ctx));writeAttempt=true;})
+            .catch(error=>{if(writeAttempt&&ctx.autonomous)ctx.autonomous.failure=String(error);throw error;});
           const result = await this.store.update(d => {
             const existing = d.stickers.find(s => s.id===favorite.id);
             const note = a.note ?? analysis.meaning, tags = [...new Set<string>([...analysis.tags, ...(a.tags ?? [])])].slice(0,20);
             if (!existing) throw new Error('QQ 收藏记录已变化，请刷新后核对');
             existing.note = note; existing.tags = tags; existing.analysis = analysis; return existing;
-          });
+          }).catch(error=>{if(ctx.autonomous)ctx.autonomous.failure='QQ 收藏已写入，理解记录保存失败：'+String(error);throw error;});
           this.stickerReviews.complete(a.analysis_token);
           ctx.pendingStickerCollections?.delete(review.hash);
+          await this.autonomy.collected(ctx,a.message_id);
           return { ...stickerInfo(result), collected: true };
         });
       }
@@ -289,8 +306,10 @@ export class SocialEngine {
         if (tool === 'qq_sticker_image' || !s.analysis) return this.prepareStickerReview(ctx, { stickerId: s.id }, image, s.note, tool === 'qq_send_sticker' ? 'send' : 'view');
         if (imageHash(Buffer.from(image.data, 'base64')) !== s.analysis.imageHash) throw new Error('表情图片与理解记录不一致，请先用 qq_sticker_image 重新分析');
         if (s.analysis.confidence === 'low') throw new Error('这张表情含义尚不确定，请结合上下文重新看图分析，或选择其他已理解的表情');
+        if(ctx.autonomous&&this.autonomy.lastSticker(ctx.chat,s.id)>Date.now()-this.settings().social.stickerRepeatHours*3600000)throw new Error('这张表情最近已在当前会话使用，请换一张或保持安静');
         const result = await this.send(ctx, [...await this.decorators(ctx, a), { type: 'image', data: { file: toFile(s.file) } }]);
         ctx.pendingStickerSends?.delete(s.id);
+        await this.autonomy.usedSticker(ctx.chat,s.id);
         await this.store.update(d => { const s = d.stickers.find(s => s.id === a.sticker_id); if (s) s.uses++; }); return result;
       }
       case 'qq_memory_append': {
@@ -304,7 +323,7 @@ export class SocialEngine {
       }
       case 'qq_memory_query': this.feature('memoryEnabled'); return state().memories.filter(m => m.chat === ctx.chat && (!a.user_id || m.user === String(a.user_id)) && `${m.name} ${m.text}`.includes(a.query) && !this.settings().social.blockedUsers.includes(m.user)).slice(-100);
       case 'qq_memory_remove': this.feature('memoryEnabled'); return this.store.update(d => { const before = d.memories.length; d.memories = d.memories.filter(m => !(m.chat === ctx.chat && m.id === a.memory_id)); return { removed: before - d.memories.length }; });
-      case 'qq_finish': ctx.silent = true; ctx.topic = a.active_topic; ctx.endTopic = a.end_topic; this.log(`[decision] ${ctx.chat} ${a.reason}`); return { finished: true };
+      case 'qq_finish': ctx.silent = true; ctx.topic = a.active_topic; ctx.endTopic = a.end_topic;if(ctx.autonomous)ctx.autonomous.reason=a.reason; this.log(`[decision] ${ctx.chat} ${a.reason}`); return { finished: true };
       case 'qq_set_reminder': {
         this.feature('remindersEnabled');
         if ((a.delay_minutes !== undefined) === (a.at_time !== undefined)) throw new Error('delay_minutes 与 at_time 必须且只能提供一项');
@@ -475,6 +494,7 @@ export class SocialEngine {
     return source;
   }
   async legacy(tool: string, args: Record<string, any>, ctx: ToolContext): Promise<unknown> {
+    this.autonomy.authorize(ctx,tool);
     this.check(ctx);
     if (tool === 'qq_set_profile' && Object.keys(args).length === 0) throw new Error('请至少填写一项要修改的资料');
     if (tool === 'qq_self_info') {
@@ -515,7 +535,7 @@ export class SocialEngine {
       await this.store.endAction(id, 'success', '已完成'); return result;
     } catch (error) { await this.store.endAction(id, 'unknown', String(error)); throw error; }
   }
-  async tick(self: number, signal: AbortSignal, wake: (chat: string, reason: string) => Promise<void>): Promise<void> {
+  async tick(self: number, signal: AbortSignal, wake: (chat: string, reason: string,autonomous?:AutonomousTurn) => Promise<void|boolean>): Promise<void> {
     if (this.tickRunning || !self || signal.aborted) return;
     this.tickRunning = true;
     try {
@@ -525,20 +545,7 @@ export class SocialEngine {
           await this.fire(task, self, signal);
         }
       }
-      const hour = Number(new Intl.DateTimeFormat('en-US', { timeZone: 'Asia/Shanghai', hour: 'numeric', hourCycle: 'h23' }).format(new Date()));
-      const { quietStartHour: start, quietEndHour: end } = settings.social;
-      const quiet = start !== end && (start < end ? hour >= start && hour < end : hour >= start || hour < end);
-      if (!settings.social.proactiveEnabled || quiet) return;
-      const contacts = this.store.contacts().filter(c => c.at && allowedChat(settings.social, c.chat));
-      for (const c of contacts) {
-        if (this.store.profile(c.chat)?.proactive === false) continue;
-        const interval = settings.social.proactiveIntervalMinutes * 60000;
-        if (Date.now() - Math.max(c.at, this.proactiveAt.get(c.chat) ?? Date.now()) < interval) { if (!this.proactiveAt.has(c.chat)) this.proactiveAt.set(c.chat, Date.now()); continue; }
-        this.proactiveAt.set(c.chat, Date.now());
-        if (c.chat.startsWith('group:') && !settings.chat.group.proactive.enabled) continue;
-        await wake(c.chat, '这是一个主动聊天机会，请结合近期记录判断是否值得开口；没话题就调用 qq_finish。发言需要主动额度。');
-        break;
-      }
+      await this.autonomy.tick(signal,(t,a)=>wake(t.chat,`自主想法 #${t.id}（${t.kind}）：${t.summary}\n依据：${t.reason}\n${t.messageId!==undefined?'来源消息 #'+t.messageId:''}\n判断现在是否值得行动。没内容就 qq_finish；想以后再做用 qq_thought 推迟。只以实际工具结果算完成。`,a));
     } finally { this.tickRunning = false; }
   }
   private async fire(task: ScheduledTask, self: number, signal: AbortSignal): Promise<void> {

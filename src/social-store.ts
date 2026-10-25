@@ -5,6 +5,7 @@ import { z } from 'zod';
 import type { MessageEvent, Segment } from './onebot.js';
 import { segmentsToText } from './onebot.js';
 import { StoredStickerAnalysisSchema } from './sticker-review.js';
+import { AutonomousStateSchema } from './autonomous-state.js';
 
 const segment = z.object({ type: z.string(), data: z.record(z.unknown()) });
 const message = z.object({ chat: z.string(), id: z.number().int().safe(), user: z.number().int().safe(), name: z.string(), at: z.number(), text: z.string(), segments: z.array(segment), self: z.boolean(), recalled: z.boolean().default(false) });
@@ -17,7 +18,7 @@ const event = z.object({ id: z.string(), chat: z.string(), type: z.string(), at:
 const action = z.object({ id: z.string(), chat: z.string(), tool: z.string(), at: z.number(), state: z.enum(['running', 'success', 'failed', 'unknown']), summary: z.string() });
 const turn = z.object({ id: z.string(), chat: z.string(), at: z.number(), duration: z.number(), input: z.string(), output: z.string(), tools: z.array(z.string()), error: z.string(), inputTokens: z.number().nullable(), outputTokens: z.number().nullable() });
 const profile = z.object({ chat: z.string().regex(/^(group|private):\d+$/), persona: z.string().max(10000), responseMode: z.enum(['inherit','mention','keywords','probability','all']).default('inherit'), keywords: z.array(z.string().max(64)).max(100).default([]), probability: z.number().int().min(0).max(100).default(10), proactive: z.boolean().default(true) });
-const schema = z.object({ version: z.literal(1), account: z.number().int().default(0), messages: z.array(message), contacts: z.array(contact), memories: z.array(memory), stickers: z.array(sticker), tasks: z.array(task), events: z.array(event), actions: z.array(action), turns: z.array(turn), profiles: z.array(profile).default([]) });
+const schema = z.object({ version: z.literal(1), account: z.number().int().default(0), messages: z.array(message), contacts: z.array(contact), memories: z.array(memory), stickers: z.array(sticker), tasks: z.array(task), events: z.array(event), actions: z.array(action), turns: z.array(turn), profiles: z.array(profile).default([]), autonomous:AutonomousStateSchema });
 export type SocialData = z.infer<typeof schema>;
 export type StoredMessage = z.infer<typeof message>;
 export type ScheduledTask = z.infer<typeof task>;
@@ -33,6 +34,16 @@ export class SocialStore {
     await this.update(d => {
       for (const item of d.actions) if (item.state === 'running') item.state = 'unknown';
       for (const item of d.tasks) if (item.state === 'running') { item.state = 'unknown'; item.error = '上次执行中断，请核对聊天记录后再安排'; }
+      for (const item of d.autonomous.thoughts) if(item.state==='running'){
+        item.state='unknown';item.result='上次执行中断，结果待核对，不自动重试';
+        if(item.kind==='chat'){
+          let c=d.autonomous.contacts.find(c=>c.chat===item.chat);
+          if(!c){c={chat:item.chat,incomingAt:0,proactiveAt:0,unanswered:0,attemptAt:0};d.autonomous.contacts.push(c);}
+          c.unanswered=1;c.attemptAt=Date.now();
+        }
+      }
+      d.autonomous.contacts=d.autonomous.contacts.slice(-5000);
+      for (const item of d.autonomous.posts) if(item.state==='running')item.state='unknown';
     });
   }
   snapshot(): SocialData { return structuredClone(this.data); }

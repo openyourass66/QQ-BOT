@@ -104,7 +104,14 @@ export class GroupContextStore {
       const content = JSON.stringify({ version: 1, groups: Object.fromEntries(groups) });
       await mkdir(dirname(this.path), { recursive: true });
       await writeFile(`${this.path}.tmp`, `${content}\n`, 'utf8');
-      await rename(`${this.path}.tmp`, this.path);
+      // Windows readers may briefly hold the destination without delete sharing.
+      for(let attempt=0;;attempt++) {
+        try {await rename(`${this.path}.tmp`,this.path);break;}
+        catch(error) {
+          if(process.platform!=='win32'||!['EPERM','EACCES','EBUSY'].includes((error as NodeJS.ErrnoException).code??'')||attempt>=5)throw error;
+          await new Promise(resolve=>setTimeout(resolve,20*(attempt+1)));
+        }
+      }
       this.persisted = revision;
     });
     this.writes = task.catch(() => undefined);

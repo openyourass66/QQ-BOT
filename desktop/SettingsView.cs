@@ -58,6 +58,16 @@ partial class App
         new FieldSpec("social.remindersEnabled", "主动与提醒", "提醒与主动机会", "定时提醒", "允许设置、查询和取消持久化提醒。"),
         new FieldSpec("social.proactiveEnabled", "主动与提醒", "提醒与主动机会", "主动聊天机会", "定期判断是否值得开口；没有话题时可以保持安静。"),
         new FieldSpec("social.proactiveIntervalMinutes", "主动与提醒", "提醒与主动机会", "主动机会间隔", "从最近一次互动或主动机会开始计时。", "分钟", 5, 1440, 5),
+        new FieldSpec("social.autonomousEnabled", "主动与提醒", "兴趣与想法", "持续兴趣与想法", "结合实际互动积累兴趣和未完话题；关闭后暂停自主判断。"),
+        new FieldSpec("social.personalInterests", "主动与提醒", "兴趣与想法", "全局创作兴趣", "空间独立创作可使用这些公开主题；多个主题用逗号分隔。聊天中的兴趣保留在原会话。"),
+        new FieldSpec("social.autonomousDecisionsPerDay", "主动与提醒", "兴趣与想法", "每日后台判断上限", "候选想法才会唤醒模型；没有内容时可以安静结束。", "次/天", 0, 200),
+        new FieldSpec("social.autonomousChatCooldownMinutes", "主动与提醒", "兴趣与想法", "同会话主动间隔", "主动联系后至少等待这段时间；对方未回应时暂停再次主动聊天。", "分钟", 5, 10080, 5),
+        new FieldSpec("social.autoCollectStickers", "主动与提醒", "表情习惯", "后台挑选表情收藏", "收到图片后结合含义和兴趣判断，收藏任务安静执行。需开启主动聊天机会。"),
+        new FieldSpec("social.autoCollectPerDay", "主动与提醒", "表情习惯", "每日后台新增收藏", "后台任务新增到 QQ 收藏的上限；同图复用不重复占用。", "张/天", 0, 100),
+        new FieldSpec("social.stickerRepeatHours", "主动与提醒", "表情习惯", "主动表情重复间隔", "自主聊天在同一会话中避免反复发送同一张表情。", "小时", 0, 168),
+        new FieldSpec("social.autoQzoneEnabled", "主动与提醒", "自主空间分享", "自主空间创作", "使用独立会话和公开创作兴趣决定是否发布，需同时开启 QQ 空间发布和主动聊天机会。"),
+        new FieldSpec("social.autoQzonePerDay", "主动与提醒", "自主空间分享", "每日自主空间上限", "同时受空间总额度约束；没有内容时可以一天不发。", "条/天", 0, 10),
+        new FieldSpec("social.qzoneIntervalHours", "主动与提醒", "自主空间分享", "空间创作判断间隔", "每次判断后间隔至少这么久，避免反复生成相似内容。", "小时", 1, 168),
         new FieldSpec("chat.group.proactive.enabled", "主动与提醒", "群聊与安静时段", "允许群聊主动发言", "跨群发送和群提醒也受此开关约束。"),
         new FieldSpec("social.quietStartHour", "主动与提醒", "群聊与安静时段", "安静时段开始", "按上海时间计算；只暂停主动聊天机会。", "时", 0, 23),
         new FieldSpec("social.quietEndHour", "主动与提醒", "群聊与安静时段", "安静时段结束", "开始与结束相同表示不设置安静时段。", "时", 0, 23),
@@ -163,6 +173,8 @@ partial class App
         if(fields.ContainsKey("social.allowAll")) {bool allow=((CheckBox)fields["social.allowAll"]).IsChecked==true;enabled("social.allowedGroups",!allow);enabled("social.allowedUsers",!allow);}
         if(fields.ContainsKey("social.responseMode")) {var choice=((ComboBox)fields["social.responseMode"]).SelectedItem as Choice;string mode=choice==null?"":choice.Value;enabled("chat.group.requireMention",mode=="legacy");enabled("social.responseProbability",mode=="probability");enabled("social.keywords",mode=="keywords"||mode=="probability");}
         if(fields.ContainsKey("social.proactiveEnabled")) {bool on=((CheckBox)fields["social.proactiveEnabled"]).IsChecked==true;foreach(string key in new[]{"social.proactiveIntervalMinutes","social.quietStartHour","social.quietEndHour"})enabled(key,on);}
+        if(fields.ContainsKey("social.autoCollectStickers"))enabled("social.autoCollectPerDay",((CheckBox)fields["social.autoCollectStickers"]).IsChecked==true);
+        if(fields.ContainsKey("social.autoQzoneEnabled")){bool on=((CheckBox)fields["social.autoQzoneEnabled"]).IsChecked==true;enabled("social.autoQzonePerDay",on);enabled("social.qzoneIntervalHours",on);}
     }
     static void FilterSettings() {
         if(Find<TextBox>("SettingsSearch")==null||settingsCards.Count==0)return;
@@ -205,6 +217,10 @@ partial class App
         Find<TextBox>("SettingsSearch").Text="主动消息";
         if(!settingsCards.Any(c=>c.Surface.Visibility==Visibility.Visible))throw new Exception("设置搜索没有匹配结果");
         Find<TextBox>("SettingsSearch").Clear();
+        var autoCollect=(CheckBox)fields["social.autoCollectStickers"];bool oldCollect=autoCollect.IsChecked==true;
+        autoCollect.IsChecked=false;if(fields["social.autoCollectPerDay"].IsEnabled)throw new Exception("后台收藏额度未随开关禁用");autoCollect.IsChecked=oldCollect;
+        var interests=(TextBox)fields["social.personalInterests"];string oldInterests=interests.Text;interests.Text="猫猫, 轻松日常";
+        if(((IEnumerable)((Dictionary<string,object>)Collect(settings,"")["social"])["personalInterests"]).Cast<object>().Count()!=2)throw new Exception("全局创作兴趣未按列表保存");interests.Text=oldInterests;
         var name=(TextBox)fields["identity.name"];string originalName=name.Text;name.Text="测试中的名称";Find<ListBox>("SettingsNav").SelectedIndex=6;Find<ListBox>("SettingsNav").SelectedIndex=5;if(name.Text!="测试中的名称")throw new Exception("切换分类丢失了未保存输入");name.Text=originalName;
         if(json.Serialize(Collect(settings,""))!=before)throw new Exception("切换分类或搜索丢失了设置值");
         for(int i=0;i<7;i++){Find<ListBox>("SettingsNav").SelectedIndex=i;Capture(System.IO.Path.Combine(root,"settings-"+i+".png"),2);}

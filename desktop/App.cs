@@ -36,7 +36,7 @@ partial class App
     static EventWaitHandle restore;
     public class Choice { public string Value { get; set; } public string Label { get; set; } }
     public partial class SocialRow { public string Id { get; set; } public string Chat { get; set; } public string Name { get; set; } public string Summary { get; set; } public string Status { get; set; } public string Time { get; set; } public string Detail { get; set; } public string Text { get; set; } }
-    static string[] socialSections = { "contacts", "messages", "memories", "stickers", "tasks", "events", "actions", "turns", "capabilities" };
+    static string[] socialSections = { "contacts", "messages", "memories", "stickers", "tasks", "events", "actions", "turns", "capabilities", "thoughts", "interests", "decisions" };
     static Dictionary<string, Dictionary<string, object>> socialProfiles = new Dictionary<string, Dictionary<string, object>>();
     static Window profileDialog;
     static SocialRow socialSelection;
@@ -53,13 +53,13 @@ partial class App
         if (socialBusy) return;
         var row = Find<ListView>("SocialList").SelectedItem as SocialRow;
         if (op != "list" && op != "refresh_contacts" && row == null) { Feedback("请先选择一条记录。"); return; }
-        if (dirtySections.Contains("memory") && op != "edit_memory" && MessageBox.Show(window,"记忆编辑尚未保存，继续会放弃编辑。", "群友记忆", MessageBoxButton.YesNo) != MessageBoxResult.Yes) return;
-        string deletePrompt=Find<ComboBox>("SocialSection").SelectedIndex==3?(row!=null&&row.Status.StartsWith("QQ收藏")?"从 QQ 账号的收藏表情中移除这张？本地理解缓存会保留。":"删除所选本地待同步记录？"):"删除这条记忆，或取消所选提醒？";
+        if (dirtySections.Contains("memory") && op != "edit_memory"&&op!="edit_interest" && MessageBox.Show(window,"记录编辑尚未保存，继续会放弃编辑。", "记录编辑", MessageBoxButton.YesNo) != MessageBoxResult.Yes) return;
+        string deletePrompt=Find<ComboBox>("SocialSection").SelectedIndex==9?"取消这条自主想法？已发出的操作无法撤回。":Find<ComboBox>("SocialSection").SelectedIndex==10?"删除这条兴趣记录？":Find<ComboBox>("SocialSection").SelectedIndex==3?(row!=null&&row.Status.StartsWith("QQ收藏")?"从 QQ 账号的收藏表情中移除这张？本地理解缓存会保留。":"删除所选本地待同步记录？"):"删除这条记忆，或取消所选提醒？";
         if ((op == "delete" || op == "reset_session") && MessageBox.Show(window, op == "delete" ? deletePrompt : "清除该会话的 Agent 上下文？消息存档仍会保留。", "确认操作", MessageBoxButton.YesNo) != MessageBoxResult.Yes) return;
         Find<TextBlock>("SocialNote").Text = "正在读取，请稍候…";
         SetSocialBusy(true);
-        var data=new Dictionary<string,object> {{"op",op},{"section",socialSections[Math.Max(0,Find<ComboBox>("SocialSection").SelectedIndex)]},{"query",Find<TextBox>("SocialSearch").Text},{"id",row==null?"":row.Id},{"chat",op=="list"||op=="refresh_contacts"?"":row.Chat},{"text",op=="edit_memory"?Find<TextBox>("SocialDetail").Text:""},{"blocked",blocked}};
-        if(row!=null&&Find<ComboBox>("SocialSection").SelectedIndex==2&&(op=="edit_memory"||op=="delete"))data["expectedText"]=row.Text;
+        var data=new Dictionary<string,object> {{"op",op},{"section",socialSections[Math.Max(0,Find<ComboBox>("SocialSection").SelectedIndex)]},{"query",Find<TextBox>("SocialSearch").Text},{"id",row==null?"":row.Id},{"chat",op=="list"||op=="refresh_contacts"?"":row.Chat},{"text",op=="edit_memory"||op=="edit_interest"?Find<TextBox>("SocialDetail").Text:""},{"blocked",blocked}};
+        if(row!=null&&(Find<ComboBox>("SocialSection").SelectedIndex==2||Find<ComboBox>("SocialSection").SelectedIndex==10)&&(op=="edit_memory"||op=="edit_interest"||op=="delete"))data["expectedText"]=row.Text;
         Send("social",data);
     }
     static void EditProfile() {
@@ -369,13 +369,25 @@ partial class App
                     if(Find<Button>("SocialSave").Visibility!=Visibility.Collapsed||Convert.ToString(Find<Button>("SocialDelete").Content)!="从 QQ 收藏移除"||Convert.ToString(Find<Button>("SocialRefresh").Content)!="刷新 QQ 收藏"||!Find<TextBlock>("SocialNote").Text.Contains("离线缓存"))throw new Exception("QQ favorite actions or offline state are incorrect");
                     Capture(Path.Combine(root,"qq-favorites-native.png"),6);smokeStep=21;
                 } else if(smokeStep==21) {
+                    Find<ComboBox>("SocialSection").SelectedIndex=9;smokeStep=22;
+                } else if(smokeStep==22&&!socialBusy&&Find<ListView>("SocialList").Items.Count==1) {
+                    if(Convert.ToString(Find<Button>("SocialSave").Content)!="推迟一小时"||Convert.ToString(Find<Button>("SocialDelete").Content)!="取消想法"||!Find<TextBox>("SocialDetail").IsReadOnly)throw new Exception("Autonomous thought controls are incorrect");
+                    Capture(Path.Combine(root,"autonomy-thoughts.png"),6);Find<ComboBox>("SocialSection").SelectedIndex=10;smokeStep=23;
+                } else if(smokeStep==23&&!socialBusy&&Find<ListView>("SocialList").Items.Count==1) {
+                    if(Find<TextBox>("SocialDetail").IsReadOnly||Find<TextBox>("SocialDetail").Text!="Cat stickers")throw new Exception("Interest editor is unavailable");
+                    Find<TextBox>("SocialDetail").Text="Edited interest from native controls.";SocialRequest("edit_interest");smokeStep=24;
+                } else if(smokeStep==24&&!socialBusy&&socialSelection!=null&&socialSelection.Text=="Edited interest from native controls.") {
+                    if(dirtySections.Contains("memory"))throw new Exception("Interest draft was not cleared after save");Capture(Path.Combine(root,"autonomy-interests.png"),6);Find<ComboBox>("SocialSection").SelectedIndex=11;smokeStep=25;
+                } else if(smokeStep==25&&!socialBusy&&Find<ListView>("SocialList").Items.Count==1) {
+                    if(!Find<TextBox>("SocialDetail").IsReadOnly||Find<StackPanel>("SocialActionPanel").Visibility!=Visibility.Collapsed||!Find<TextBox>("SocialDetail").Text.Contains("Nothing worth publishing"))throw new Exception("Autonomous decision summary is incorrect");Capture(Path.Combine(root,"autonomy-decisions.png"),6);smokeStep=26;
+                } else if(smokeStep==26) {
                     Find<TabControl>("Tabs").SelectedIndex = 0;
                     window.Close();
                     if (window.IsVisible) throw new Exception("Close did not hide window");
                     Process.Start(new ProcessStartInfo(Path.Combine(root, "QQ-BOT.exe")) { UseShellExecute = false, CreateNoWindow = true });
                     smokeStep = 1;
                 } else if (smokeStep == 1 && window.IsVisible) {
-                    File.WriteAllText(Path.Combine(root, "smoke-result.txt"), "PASS: persona library save and selection, independent conversation copies, retained drafts, workspace and friend memory editing, compact layout, settings and model validation, activity isolation, QQ favorites and local migration controls, Shell tray restore, graceful exit");
+                    File.WriteAllText(Path.Combine(root, "smoke-result.txt"), "PASS: persona library save and selection, independent conversation copies, retained drafts, workspace and friend memory editing, compact layout, settings and model validation, activity isolation, QQ favorites and local migration controls, autonomous thought controls, interest editing, decision summaries, Shell tray restore, graceful exit");
                     smokeStep = 2; Exit();
                 }
             }

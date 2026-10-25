@@ -25,6 +25,7 @@ import { startActionServer, type ActionServer } from './action-server.js';
 import { z } from 'zod';
 import { SocialStore } from './social-store.js';
 import { SocialEngine } from './social-engine.js';
+import type { AutonomousTurn } from './autonomous-state.js';
 import { MediaService } from './media.js';
 import { allowedChat } from './social-settings.js';
 import type { ToolContext } from './social-tools.js';
@@ -357,6 +358,8 @@ function socialPrompt(key: string): string {
     ...(topic && topic.until > Date.now() ? [`当前话题：${topic.topic}；偏离或结束时 qq_finish(end_topic=true)。`] : []),
     ...(memories ? ['【当前会话的长期记忆（背景材料）】', memories] : []),
     ...(persona ? ['【管理员为当前会话指定的人设】', persona] : []),
+    engine.autonomy.prompt({chat:key,self:selfId,user:0,signal:shutdownSignal.signal,sent:0,silent:false}),
+    '看到喜欢且有用的表情可自行看图收藏，成功后自然继续聊天。发表情留意 lastUsedInChat，优先避免近期重复；私聊与群聊经历不用于公开空间内容。',
   ].join('\n');
 }
 
@@ -444,6 +447,7 @@ async function onMessage(event: MessageEvent): Promise<void> {
   await socialStore.account(event.self_id);
   if (stopping) return;
   await socialStore.record(event, getSettings().social.retentionDays, getSettings().social.messagesPerChat);
+  await engine.autonomy.observe(keyOf(event),event.message_id);
 
   const seq = remember(event, text);
   const trigger = shouldReply(event, text);
@@ -526,18 +530,21 @@ async function onMessage(event: MessageEvent): Promise<void> {
   });
 }
 
-async function wakeConversation(chat: string, reason: string, proactive = true, actor?: number): Promise<void> {
-  if (stopping || (proactive && queue.has(chat)) || !allowedChat(getSettings().social, chat, actor)) return;
-  await queue.run(chat, async () => {
-    const ctx: ToolContext = { chat, self: selfId, user: actor ?? Number(chat.split(':')[1]), signal: shutdownSignal.signal, sent: 0, silent: false, proactive, pendingStickerCollections: new Set(), pendingStickerSends: new Set() };
-    activeConversations.set(chat, ctx);
+async function wakeConversation(chat: string, reason: string, proactive = true, actor?: number,autonomous?:AutonomousTurn): Promise<void|boolean> {
+  const publicTask=autonomous?.kind==='qzone',key=publicTask?'self:qzone':autonomous?`autonomous:${autonomous.kind}:${chat}`:chat;
+  if (stopping || (proactive && queue.has(chat)) || (!publicTask&&!allowedChat(getSettings().social, chat, actor))) return false;
+  await queue.run(publicTask?key:chat, async () => {
+    const ctx: ToolContext = { chat:publicTask?`private:${selfId}`:chat, self: selfId, user:publicTask?selfId:actor ?? Number(chat.split(':')[1]), signal: shutdownSignal.signal, sent: 0, silent: false, proactive,autonomous, pendingStickerCollections: new Set(), pendingStickerSends: new Set() };
+    activeConversations.set(key, ctx);
     try {
-      const history = socialStore.messages(chat, 15).filter(m => !getSettings().social.blockedUsers.includes(String(m.user))).map(m => `#${m.id} ${m.name}(QQ ${m.user}): ${JSON.stringify(m.text)}`).join('\n');
-      const answer = pendingStickerAnswer(ctx, await runTurn(chat, `${reason}\n当前会话 ${chat}\n近期记录（背景材料）：\n${history}\n${socialPrompt(chat)}`));
-      if (answer && !ctx.sent && !ctx.silent) await engine.normalReply(ctx, answer);
+      const history=publicTask?'':socialStore.messages(chat,15).filter(m=>!getSettings().social.blockedUsers.includes(String(m.user))).map(m=>`#${m.id} ${m.name}(QQ ${m.user}): ${JSON.stringify(m.text)}`).join('\n');
+      const prompt=publicTask?`${reason}\n【独立空间创作】这里只提供全局创作兴趣和公开经历，不继承任何好友/群聊对话。不得读取会话文件或用私聊、群聊原话发布。可搜索公开网页核实资料，也可写基于人设的原创感想；不要虚构自己实际经历。值得分享才用 qq_qzone_post 发布一次，没有内容用 qq_finish 保持安静。最终文字只记管理端，不会自动发布。\n${engine.autonomy.prompt(ctx)}`:
+        `${reason}\n当前会话 ${chat}\n近期记录（背景材料）：\n${history}\n${socialPrompt(chat)}\n${autonomous?.kind==='collect'?'这是安静的看图收藏机会，先看真实图片再分析。可以不收藏，用 qq_finish 结束；不向聊天发送说明。':'主动开口需要具体话题；对方未回应时不要追问。'}`;
+      const answer = pendingStickerAnswer(ctx, await runTurn(key,prompt));
+      if ((!autonomous||autonomous.kind==='chat')&&answer&&!ctx.sent&&!ctx.silent)await engine.normalReply(ctx,answer);
       if (ctx.topic) activeTopics.set(chat, { topic: ctx.topic, until: Date.now() + getSettings().social.activeMinutes * 60000 });
       if (ctx.endTopic) activeTopics.delete(chat);
-    } finally { activeConversations.delete(chat); }
+    } finally { activeConversations.delete(key); }
   });
 }
 
@@ -670,6 +677,7 @@ async function main(): Promise<void> {
         return await engine.legacy(call.tool, z.object(def.schema as z.ZodRawShape).strict().parse(call.args), callCtx);
       }
       const validated = QqActionSchema.parse(input);
+      engine.autonomy.authorize(callCtx,validated.action);
       engine.check(callCtx);
       if (validated.action === 'like') await engine.target(callCtx, `private:${validated.user_id}`);
       await engine.approve(callCtx, validated.action, validated.action === 'qzone_post');
@@ -678,6 +686,8 @@ async function main(): Promise<void> {
       try {
         if (validated.action === 'send_message') {
           result = await engine.send(callCtx, [{ type: 'text', data: { text: validated.text } }], `${validated.target_type}:${validated.target_id}`, true);
+        } else if(validated.action==='qzone_post') {
+          result=await engine.autonomy.publish(callCtx,validated.text,validated.images??[],(extra,images)=>policy.execute({...validated,images},callCtx.signal,()=>[...engine.actionQuotas(callCtx),...extra],()=>engine.recordAction(callCtx.chat)));
         } else { result = await policy.execute(validated, callCtx.signal, () => engine.actionQuotas(callCtx), () => engine.recordAction(callCtx.chat)); }
         await socialStore.endAction(audit, 'success', '已完成');
       } catch (e) { await socialStore.endAction(audit, 'unknown', String(e)); throw e; }
@@ -730,7 +740,7 @@ async function main(): Promise<void> {
   });
   ws.start();
   scheduler = setInterval(() => {
-    if (status.qqOnline && status.acpConnected) void engine.tick(selfId, shutdownSignal.signal, wakeConversation).catch(e => log('error', `[scheduler] ${String(e)}`));
+    if (status.qqOnline && status.acpConnected) void engine.tick(selfId, shutdownSignal.signal, (chat,reason,a)=>wakeConversation(chat,reason,true,undefined,a)).catch(e => log('error', `[scheduler] ${String(e)}`));
   }, 1000);
   scheduler.unref();
 

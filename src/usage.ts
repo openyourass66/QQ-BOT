@@ -38,6 +38,7 @@ export class DailyUsageStore {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
     }
   }
+  used(key:string):number { return this.data.date===shanghaiDate(this.now()) ? this.data.counters[key] ?? 0 : 0; }
 
   /** 在远端动作前持久化预扣。远端失败或结果未知时不退回额度。 */
   consume(getQuotas: () => Quota[], onReserved: () => void = () => undefined): Promise<void> {

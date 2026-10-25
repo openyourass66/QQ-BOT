@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { StickerAnalysisSchema } from './sticker-review.js';
+import type { AutonomousTurn } from './autonomous-state.js';
 
 const id = z.number().int().safe();
 const user = z.number().int().positive().safe();
@@ -7,6 +8,9 @@ const short = z.string().min(1).max(2000);
 const chat = z.string().regex(/^(group|private):\d+$/);
 const empty = {};
 export const socialTools = [
+  {name:'qq_self_state',title:'查看兴趣与未完想法',description:'查看当前会话的兴趣、未完想法及近期行动摘要。空间独立任务只能查看公开兴趣，不能读取聊天记忆。',schema:empty},
+  {name:'qq_interest',title:'记下或调整兴趣',description:'依据实际互动逐渐调整当前会话的兴趣；message_id 使用真实收到的消息。兴趣不跨会话传播。空间任务中只记录公开兴趣。无需每轮更新。',schema:{topic:z.string().trim().min(1).max(80),reason:z.string().trim().min(1).max(300),strength:z.number().int().min(1).max(5).default(3),message_id:id.optional()}},
+  {name:'qq_thought',title:'记住、推迟或放弃想法',description:'保存值得以后继续的具体想法；chat 为后续聊天，collect 为看图判断是否收藏。message_id 必须来自当前会话收到的真实消息。空间任务只可保存 qzone 想法。完成由实际工具结果确认，不能自行标记成功。',schema:{op:z.enum(['remember','defer','dismiss']).default('remember'),thought_id:z.string().optional(),kind:z.enum(['chat','collect','qzone']).default('chat'),summary:z.string().trim().min(1).max(200).optional(),reason:z.string().trim().min(1).max(500),message_id:id.optional(),delay_minutes:z.number().min(1).max(10080).default(60),expires_hours:z.number().min(1).max(720).default(72),priority:z.number().int().min(1).max(100).default(50)}},
   { name: 'qq_capabilities', title: '查看可用能力', description: '查看真实启用的 QQ 工具、媒体服务和协议端限制。未配置的能力不可假装成功。', schema: empty },
   { name: 'qq_reply', title: '回复当前会话', description: '向当前群/私聊发送文字，可引用或 @。不扣主动消息额度；成功后本轮不要重复输出同样回答。', schema: { text: z.string().max(4000).default(''), reply_to: id.optional(), at_user: user.optional() } },
   { name: 'qq_recent_messages', title: '查看聊天记录', description: '查看当前会话已收到或主动拉取的历史消息，返回真实消息编号；支持翻页和搜索。', schema: { limit: z.number().int().min(1).max(100).default(30), offset: z.number().int().min(0).max(20000).default(0), query: z.string().max(128).default(''), refresh: z.boolean().default(false) } },
@@ -49,5 +53,5 @@ export const socialTools = [
 
 export const SocialCallSchema = z.object({ action: z.literal('social'), tool: z.string().max(64), args: z.record(z.unknown()).default({}) }).strict();
 export type SocialCall = z.infer<typeof SocialCallSchema>;
-export type ToolContext = { chat: string; self: number; user: number; signal: AbortSignal; sent: number; silent: boolean; topic?: string; endTopic?: boolean; proactive?: boolean; pendingStickerCollections?: Set<string>; pendingStickerSends?: Set<string> };
+export type ToolContext = { chat: string; self: number; user: number; signal: AbortSignal; sent: number; silent: boolean; topic?: string; endTopic?: boolean; proactive?: boolean; autonomous?:AutonomousTurn; pendingStickerCollections?: Set<string>; pendingStickerSends?: Set<string> };
 export const ChatSchema = chat;

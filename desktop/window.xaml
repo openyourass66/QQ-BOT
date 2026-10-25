@@ -151,7 +151,7 @@
      <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
      <Border Background="White" CornerRadius="12" BorderBrush="{StaticResource Line}" BorderThickness="1" Padding="16" Margin="0,0,0,15">
       <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="155"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-       <ComboBox x:Name="SocialSection" SelectedIndex="0" AutomationProperties.Name="活动类型"><ComboBoxItem Content="联系人与群"/><ComboBoxItem Content="聊天记录"/><ComboBoxItem Content="群友记忆"/><ComboBoxItem Content="QQ 收藏表情"/><ComboBoxItem Content="定时提醒"/><ComboBoxItem Content="QQ 事件"/><ComboBoxItem Content="动作结果"/><ComboBoxItem Content="模型会话"/><ComboBoxItem Content="能力状态"/></ComboBox>
+       <ComboBox x:Name="SocialSection" SelectedIndex="0" AutomationProperties.Name="活动类型"><ComboBoxItem Content="联系人与群"/><ComboBoxItem Content="聊天记录"/><ComboBoxItem Content="群友记忆"/><ComboBoxItem Content="QQ 收藏表情"/><ComboBoxItem Content="定时提醒"/><ComboBoxItem Content="QQ 事件"/><ComboBoxItem Content="动作结果"/><ComboBoxItem Content="模型会话"/><ComboBoxItem Content="能力状态"/><ComboBoxItem Content="自主想法"/><ComboBoxItem Content="兴趣偏好"/><ComboBoxItem Content="自主行动摘要"/></ComboBox>
        <TextBox x:Name="SocialSearch" Grid.Column="1" Tag="搜索名字、会话或内容…" Margin="12,0" AutomationProperties.Name="搜索活动"/>
        <Button x:Name="SocialRefresh" Grid.Column="2" Content="刷新列表"/>
        <Button x:Name="SocialContacts" Grid.Column="3" Content="同步联系人" Style="{StaticResource Primary}" Margin="9,0,0,0"/>

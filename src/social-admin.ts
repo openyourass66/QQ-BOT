@@ -7,8 +7,8 @@ import { getSettings, saveSettings } from './settings.js';
 import { stickerSearchText } from './sticker-review.js';
 
 const requestSchema = z.object({
-  op: z.enum(['list', 'edit_memory', 'delete', 'block', 'allow', 'refresh_contacts', 'reset_session', 'profile', 'collect_sticker']),
-  section: z.enum(['contacts','messages','memories','stickers','tasks','events','actions','turns','capabilities']).default('contacts'),
+  op: z.enum(['list', 'edit_memory', 'delete', 'block', 'allow', 'refresh_contacts', 'reset_session', 'profile', 'collect_sticker','edit_interest','defer_thought']),
+  section: z.enum(['contacts','messages','memories','stickers','tasks','events','actions','turns','capabilities','thoughts','interests','decisions']).default('contacts'),
   chat: z.string().max(64).default(''), query: z.string().max(256).default(''), id: z.string().max(128).default(''),
   text: z.string().max(10000).default(''), expectedText: z.string().max(2000).optional(), blocked: z.boolean().default(true),
   responseMode: z.enum(['inherit','mention','keywords','probability','all']).default('inherit'),
@@ -18,6 +18,14 @@ const requestSchema = z.object({
 export async function socialAdmin(input: unknown, store: SocialStore, media: MediaService,
   live?: { refresh(): Promise<void>; reset(chat: string): Promise<void>; stickers?: { sync(): Promise<unknown>;collect(id:string):Promise<void>;remove(id:string):Promise<void> } }): Promise<unknown> {
   const a = requestSchema.parse(input);
+  if(a.op==='edit_interest') {
+    if(a.section!=='interests'||!a.text.trim()||a.text.trim().length>80)throw new Error('兴趣主题需要 1–80 字');
+    await store.update(d=>{const i=d.autonomous.interests.find(i=>i.id===a.id);if(!i)throw new Error('兴趣不存在');if(a.expectedText!==undefined&&i.topic!==a.expectedText)throw new Error('兴趣已被其他操作修改，请刷新后核对');i.topic=a.text.trim();i.updatedAt=Date.now();});
+  }
+  if(a.op==='defer_thought') {
+    if(a.section!=='thoughts')throw new Error('请选择自主想法');
+    await store.update(d=>{const t=d.autonomous.thoughts.find(t=>t.id===a.id);if(!t||t.state!=='pending')throw new Error('只能推迟尚未执行的想法');const due=Date.now()+3600000;if(due>=t.expires)throw new Error('想法即将过期，无法再推迟一小时');t.due=due;t.result='管理员推迟一小时';});
+  }
   if(a.section==='stickers'&&live?.stickers&&['list','refresh_contacts'].includes(a.op))await live.stickers.sync();
   if(a.op==='collect_sticker') { if(a.section!=='stickers'||!live?.stickers)throw new Error('请启动机器人后将所选表情存入 QQ 收藏');await live.stickers.collect(a.id); }
   if (a.op === 'profile') {
@@ -49,6 +57,8 @@ export async function socialAdmin(input: unknown, store: SocialStore, media: Med
   if (a.op === 'delete'&&a.section!=='stickers') await store.update(d => {
     if (a.section === 'memories') { const m = d.memories.find(m => m.id === a.id); if (!m) throw new Error('记忆不存在'); if (a.expectedText !== undefined && m.text !== a.expectedText) throw new Error('记忆已被其他操作修改，请刷新后核对；当前编辑仍保留'); d.memories = d.memories.filter(m => m.id !== a.id); }
     else if (a.section === 'tasks') { const t = d.tasks.find(t => t.id === a.id); if (!t || t.state !== 'pending') throw new Error('只能取消尚未执行的提醒'); t.state = 'cancelled'; }
+    else if(a.section==='thoughts'){const t=d.autonomous.thoughts.find(t=>t.id===a.id);if(!t||!['pending','running'].includes(t.state))throw new Error('这条想法已经结束');t.state='dismissed';t.result='管理员取消，不再执行';}
+    else if(a.section==='interests'){if(!d.autonomous.interests.some(i=>i.id===a.id))throw new Error('兴趣不存在');d.autonomous.interests=d.autonomous.interests.filter(i=>i.id!==a.id);}
     else throw new Error('该列表不支持删除');
   });
   const data = store.snapshot(), s = getSettings();
@@ -61,6 +71,12 @@ export async function socialAdmin(input: unknown, store: SocialStore, media: Med
     rows.push({ id, chat, name, summary: summary.slice(0,160), status, time: date(at), detail, text });
   };
   switch (a.section) {
+    case 'thoughts':for(const t of [...data.autonomous.thoughts].sort((x,y)=>Number(['pending','running'].includes(y.state))-Number(['pending','running'].includes(x.state))||y.at-x.at)) {
+      const status={pending:'等待判断',running:'执行中',done:'完成',dismissed:'已放弃',expired:'已过期',unknown:'结果待核对'}[t.state];
+      add(t.id,t.chat,t.summary,t.reason,status,t.at,`行动：${{chat:'主动聊天',collect:'看图判断收藏',qzone:'独立空间创作'}[t.kind]}\n来源：${t.chat||'公开创作兴趣'}${t.messageId!==undefined?' · 消息 #'+t.messageId:''}\n\n理由：${t.reason}\n适合时间：${date(t.due)}\n有效期至：${date(t.expires)}\n\n结果：${t.result||'尚未判断'}`);
+    }break;
+    case 'interests':for(const i of [...data.autonomous.interests].sort((x,y)=>y.updatedAt-x.updatedAt))add(i.id,i.chat,i.topic,i.reason,`兴趣程度 ${i.strength}/5`,i.updatedAt,`来源：${i.chat||'公开兴趣'}\n兴趣程度：${i.strength}/5\n\n依据：${i.reason}`,i.topic);break;
+    case 'decisions':for(const d of [...data.autonomous.decisions].reverse())add(d.id,d.chat,{chat:'主动聊天判断',collect:'收藏判断',qzone:'空间创作判断'}[d.kind],d.reason,{done:'完成',dismissed:'保持安静',pending:'已推迟',unknown:'结果待核对',expired:'已过期'}[d.outcome]??d.outcome,d.at,`${d.reason}\n关联想法：${d.thoughtId}`);break;
     case 'contacts': for (const c of data.contacts) {
       const [kind,id] = c.chat.split(':');
       const blocked = (kind === 'group' ? s.social.blockedGroups : s.social.blockedUsers).includes(id);

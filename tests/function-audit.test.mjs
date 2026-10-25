@@ -19,7 +19,7 @@ import { legacyTools } from '../dist/legacy-tools.js';
 import { startActionServer } from '../dist/action-server.js';
 import { mockStickerAnalysis, fakeQqFavorites } from './helpers/sticker-review.mjs';
 
-test('功能审计：49 个 MCP 工具逐项经过真实传输、参数校验和受控协议/服务适配', { timeout: 30000 }, async t => {
+test('功能审计：全部 MCP 工具逐项经过真实传输、参数校验和受控协议/服务适配', { timeout: 30000 }, async t => {
   const dir = await mkdtemp(join(tmpdir(), 'qq-tool-audit-'));
   const keys = ['BOT_MEDIA_BASE_URL','BOT_MEDIA_API_KEY','BOT_SEARCH_URL','BOT_QZONE_ADAPTER_URL','BOT_FFMPEG_BIN'];
   const saved = Object.fromEntries(keys.map(k => [k,process.env[k]]));
@@ -91,7 +91,7 @@ test('功能审计：49 个 MCP 工具逐项经过真实传输、参数校验和
     client=new Client({name:'feature-audit',version:'1'});
     await client.connect(new StdioClientTransport({command:process.execPath,args:[resolve('dist/mcp-qq.js')],env:{BOT_ACTION_URL:actions.url,BOT_ACTION_TOKEN:actions.token,BOT_ACTION_CONTEXT:'audit-context'},stderr:'pipe'}));
     const registry=(await client.listTools()).tools;
-    assert.equal(registry.length,49);assert.deepEqual(registry.map(d=>d.name).sort(),[...socialTools,...legacyTools].map(d=>d.name).sort());
+    assert.equal(registry.length,52);assert.deepEqual(registry.map(d=>d.name).sort(),[...socialTools,...legacyTools].map(d=>d.name).sort());
     const call=async(name,args={},error)=>{
       let value;
       await t.test(name,async()=>{
@@ -106,6 +106,8 @@ test('功能审计：49 个 MCP 工具逐项经过真实传输、参数校验和
       });return value;
     };
     await call('qq_capabilities');await call('qq_reply',{text:'收到',reply_to:1,at_user:20001});
+    await call('qq_self_state');await call('qq_interest',{topic:'咖啡',reason:'聊天提到了咖啡',message_id:1});
+    await call('qq_thought',{summary:'以后继续聊咖啡',reason:'有实际话题可以延续',message_id:1});
     await call('qq_recent_messages',{refresh:true});await call('qq_message',{message_id:1});
     await call('qq_read_forward',{message_id:3});await call('qq_active_members');await call('qq_chats');await call('qq_poke',{user_id:20001});
     await call('qq_images',{message_id:2});await call('qq_send_image',{source:png});
@@ -126,7 +128,7 @@ test('功能审计：49 个 MCP 工具逐项经过真实传输、参数校验和
     await call('qq_get_friend_list');await call('qq_get_group_list');await call('qq_get_group_member_list',{group_id:30001});
     await call('qq_set_profile',{nickname:'小鲸',signature:'测试签名'});await call('qq_set_group_card',{group_id:30001,card:'小鲸'});
     await call('qq_set_avatar',{file:png});await call('qq_recall',{message_id:7});await call('qq_self_info',{group_id:30001});
-    assert.equal(exercised.size,49);assert.equal(requests.length,8);
+    assert.equal(exercised.size,52);assert.equal(requests.length,8);
     for(const endpoint of ['send_group_msg','send_private_msg','send_like','send_qzone_msg','upload_group_file','set_qq_profile','set_self_longnick','set_group_card','set_qq_avatar','delete_msg','group_poke','set_group_add_request','add_custom_face','fetch_custom_face_detail'])assert.ok(calls.some(c=>c.action===endpoint),endpoint);
     assert.equal(favorites.items.length,1);assert.equal(store.snapshot().stickers[0].qqPresent,true);
     assert.equal(store.message('group:30001',7).recalled,true);
