@@ -15,7 +15,7 @@ partial class App
         public string Avatar { get { return string.IsNullOrWhiteSpace(Name)?"鲸":Name.Trim().Substring(0,1); } }
         public Brush AvatarFill { get { return Color(Chat!=null&&Chat.StartsWith("group:")?"#EAF5F0":Chat!=null&&Chat.StartsWith("private:")?"#EEF1FF":"#F1EEFC"); } }
         public Brush AvatarInk { get { return Color(Chat!=null&&Chat.StartsWith("group:")?"#35755C":Chat!=null&&Chat.StartsWith("private:")?"#4B5FB4":"#735A9F"); } }
-        public string ChatLabel { get { return string.IsNullOrEmpty(Chat)?"本地记录":Chat.StartsWith("private:")?"好友 · QQ "+Chat.Substring(8):Chat.StartsWith("group:")?"群聊 · "+Chat.Substring(6):Chat; } }
+        public string ChatLabel { get { return string.IsNullOrEmpty(Chat)?(Status!=null&&Status.StartsWith("QQ收藏")?"QQ 收藏表情":Status!=null&&Status.StartsWith("仅本地")?"本地待同步":"本地记录"):Chat.StartsWith("private:")?"好友 · QQ "+Chat.Substring(8):Chat.StartsWith("group:")?"群聊 · "+Chat.Substring(6):Chat; } }
         public string SummaryDisplay { get { return Summary==Chat?ChatLabel:string.IsNullOrWhiteSpace(Summary)?ChatLabel:Summary.Replace("\r"," ").Replace("\n"," "); } }
         public string TimeLabel { get { DateTime date;return DateTime.TryParse(Time,out date)?date.ToString("MM-dd HH:mm"):""; } }
         public Brush StatusFill { get { return Color(IsGood?"#EAF5EF":IsWarning?"#FFF1E9":Status=="已注册"?"#EFF2FE":"#F0F3F8"); } }
@@ -28,7 +28,7 @@ partial class App
         Find<Button>("SocialContacts").Click+=(s,e)=>SocialRequest("refresh_contacts");
         Find<Button>("SocialBlock").Click+=(s,e)=>SocialRequest("block");
         Find<Button>("SocialUnblock").Click+=(s,e)=>SocialRequest("block",false);
-        Find<Button>("SocialSave").Click+=(s,e)=>SocialRequest("edit_memory");
+        Find<Button>("SocialSave").Click+=(s,e)=>SocialRequest(Find<ComboBox>("SocialSection").SelectedIndex==3?"collect_sticker":"edit_memory");
         Find<Button>("SocialDelete").Click+=(s,e)=>SocialRequest("delete");
         Find<Button>("SocialReset").Click+=(s,e)=>SocialRequest("reset_session");
         Find<Button>("SocialProfile").Click+=(s,e)=>EditProfile();
@@ -58,7 +58,7 @@ partial class App
         socialBusy=busy;
         Find<Button>("SocialRefresh").IsEnabled=!busy;Find<Button>("SocialContacts").IsEnabled=!busy;Find<ComboBox>("SocialSection").IsEnabled=!busy;
         Find<TextBox>("SocialSearch").IsEnabled=!busy;Find<StackPanel>("SocialActionPanel").IsEnabled=!busy;Find<TextBox>("SocialDetail").IsEnabled=!busy;
-        Find<Button>("SocialRefresh").Content=busy?"读取中…":"刷新列表";
+        Find<Button>("SocialRefresh").Content=busy?"读取中…":Find<ComboBox>("SocialSection").SelectedIndex==3?"刷新 QQ 收藏":"刷新列表";
     }
     static void RenderActivity(Dictionary<string,object> message) {
         if(profileDialog!=null&&message.ContainsKey("op")&&(string)message["op"]=="profile")profileDialog.Close();
@@ -72,7 +72,7 @@ partial class App
         foreach(Dictionary<string,object> row in (IEnumerable)message["rows"])rows.Add(new SocialRow {Id=(string)row["id"],Chat=(string)row["chat"],Name=(string)row["name"],Summary=(string)row["summary"],Status=(string)row["status"],Time=(string)row["time"],Detail=(string)row["detail"],Text=(string)row["text"]});
         Find<ListView>("SocialList").ItemsSource=rows;socialSelection=null;
         Find<TextBlock>("SocialCount").Text=((ComboBoxItem)Find<ComboBox>("SocialSection").SelectedItem).Content+"  ·  "+Convert.ToString(message["total"])+" 条";
-        Find<TextBlock>("SocialNote").Text=rows.Count>0?"按需刷新 · 时间为上海时间":"暂无记录";
+        Find<TextBlock>("SocialNote").Text=visibleSocialSection==3?Convert.ToString(message["note"]):rows.Count>0?"按需刷新 · 时间为上海时间":"暂无记录";
         Find<TextBlock>("SocialNote").ToolTip=message["note"];
         Find<StackPanel>("SocialEmpty").Visibility=rows.Count==0?Visibility.Visible:Visibility.Collapsed;
         Find<TextBlock>("SocialEmptyTitle").Text=Find<TextBox>("SocialSearch").Text.Length>0?"没有找到相关记录":"这里还没有记录";
@@ -100,9 +100,10 @@ partial class App
         Find<Button>("SocialBlock").Visibility=chat&&row.Status!="已屏蔽"?Visibility.Visible:Visibility.Collapsed;
         Find<Button>("SocialUnblock").Visibility=chat&&row.Status=="已屏蔽"?Visibility.Visible:Visibility.Collapsed;
         Find<Button>("SocialReset").Visibility=chat?Visibility.Visible:Visibility.Collapsed;
-        Find<Button>("SocialSave").Visibility=row!=null&&memory?Visibility.Visible:Visibility.Collapsed;
+        Find<Button>("SocialSave").Visibility=row!=null&&(memory||(section==3&&row.Status.StartsWith("仅本地")))?Visibility.Visible:Visibility.Collapsed;
+        Find<Button>("SocialSave").Content=section==3?"存入 QQ 收藏":"保存记忆更改";
         Find<Button>("SocialDelete").Visibility=row!=null&&new[]{2,3,4}.Contains(section)?Visibility.Visible:Visibility.Collapsed;
-        Find<Button>("SocialDelete").Content=section==4?"取消提醒":section==3?"删除表情":"删除记忆";
+        Find<Button>("SocialDelete").Content=section==4?"取消提醒":section==3?(row!=null&&row.Status.StartsWith("QQ收藏")?"从 QQ 收藏移除":"删除本地记录"):"删除记忆";
         Find<StackPanel>("SocialActionPanel").Visibility=row!=null&&(chat||new[]{2,3,4}.Contains(section))?Visibility.Visible:Visibility.Collapsed;
         loading=false;
     }

@@ -7,7 +7,7 @@ import { getSettings, saveSettings } from './settings.js';
 import { stickerSearchText } from './sticker-review.js';
 
 const requestSchema = z.object({
-  op: z.enum(['list', 'edit_memory', 'delete', 'block', 'allow', 'refresh_contacts', 'reset_session', 'profile']),
+  op: z.enum(['list', 'edit_memory', 'delete', 'block', 'allow', 'refresh_contacts', 'reset_session', 'profile', 'collect_sticker']),
   section: z.enum(['contacts','messages','memories','stickers','tasks','events','actions','turns','capabilities']).default('contacts'),
   chat: z.string().max(64).default(''), query: z.string().max(256).default(''), id: z.string().max(128).default(''),
   text: z.string().max(10000).default(''), expectedText: z.string().max(2000).optional(), blocked: z.boolean().default(true),
@@ -16,8 +16,10 @@ const requestSchema = z.object({
 }).strict().refine(value => value.op === 'profile' || value.text.length <= 2000, { message: '记忆内容最多 2000 字', path: ['text'] });
 
 export async function socialAdmin(input: unknown, store: SocialStore, media: MediaService,
-  live?: { refresh(): Promise<void>; reset(chat: string): Promise<void> }): Promise<unknown> {
+  live?: { refresh(): Promise<void>; reset(chat: string): Promise<void>; stickers?: { sync(): Promise<unknown>;collect(id:string):Promise<void>;remove(id:string):Promise<void> } }): Promise<unknown> {
   const a = requestSchema.parse(input);
+  if(a.section==='stickers'&&live?.stickers&&['list','refresh_contacts'].includes(a.op))await live.stickers.sync();
+  if(a.op==='collect_sticker') { if(a.section!=='stickers'||!live?.stickers)throw new Error('请启动机器人后将所选表情存入 QQ 收藏');await live.stickers.collect(a.id); }
   if (a.op === 'profile') {
     if (!/^(group|private):\d+$/.test(a.chat)) throw new Error('请选择一个有效会话');
     await store.update(d => {
@@ -25,7 +27,8 @@ export async function socialAdmin(input: unknown, store: SocialStore, media: Med
       const index = d.profiles.findIndex(p => p.chat === a.chat); if (index < 0) d.profiles.push(profile); else d.profiles[index] = profile;
     });
   }
-  if (a.op === 'refresh_contacts') { if (!live) throw new Error('请启动机器人后刷新 QQ 联系人'); await live.refresh(); }
+  if (a.op === 'refresh_contacts'&&a.section!=='stickers') { if (!live) throw new Error('请启动机器人后刷新 QQ 联系人'); await live.refresh(); }
+  if(a.op==='refresh_contacts'&&a.section==='stickers'&&!live?.stickers)throw new Error('请启动机器人后刷新 QQ 收藏');
   if (a.op === 'reset_session') { if (!live) throw new Error('请启动机器人后重置会话'); await live.reset(a.chat); }
   if (a.op === 'block' || a.op === 'allow') {
     if (!/^(group|private):\d+$/.test(a.chat)) throw new Error('请选择一个有效会话');
@@ -38,9 +41,13 @@ export async function socialAdmin(input: unknown, store: SocialStore, media: Med
     if (!a.text.trim()) throw new Error('记忆内容不能为空');
     await store.update(d => { const m = d.memories.find(m => m.id === a.id); if (!m) throw new Error('记忆不存在'); if (a.expectedText !== undefined && m.text !== a.expectedText) throw new Error('记忆已被其他操作修改，请刷新后核对；当前编辑仍保留'); m.text = a.text; });
   }
-  if (a.op === 'delete') await store.update(d => {
+  if(a.op==='delete'&&a.section==='stickers') {
+    const item=store.snapshot().stickers.find(s=>s.id===a.id);if(!item)throw new Error('表情不存在');
+    if(item.qq) {if(!live?.stickers)throw new Error('请启动机器人后从 QQ 收藏中移除表情');await live.stickers.remove(a.id);}
+    else await store.update(d=>{d.stickers=d.stickers.filter(s=>s.id!==a.id);});
+  }
+  if (a.op === 'delete'&&a.section!=='stickers') await store.update(d => {
     if (a.section === 'memories') { const m = d.memories.find(m => m.id === a.id); if (!m) throw new Error('记忆不存在'); if (a.expectedText !== undefined && m.text !== a.expectedText) throw new Error('记忆已被其他操作修改，请刷新后核对；当前编辑仍保留'); d.memories = d.memories.filter(m => m.id !== a.id); }
-    else if (a.section === 'stickers') d.stickers = d.stickers.filter(s => s.id !== a.id);
     else if (a.section === 'tasks') { const t = d.tasks.find(t => t.id === a.id); if (!t || t.state !== 'pending') throw new Error('只能取消尚未执行的提醒'); t.state = 'cancelled'; }
     else throw new Error('该列表不支持删除');
   });
@@ -62,10 +69,11 @@ export async function socialAdmin(input: unknown, store: SocialStore, media: Med
     case 'messages': for (const m of [...data.messages].reverse()) add(String(m.id), m.chat, m.name, m.text, m.recalled ? '已撤回' : m.self ? '自己发送' : '收到', m.at, `${m.name}（${m.user}）\n消息 #${m.id}\n${m.text}\n\n媒体：${m.segments.filter(s => s.type !== 'text').map(s => s.type).join('、')}`); break;
     case 'memories': for (const m of [...data.memories].reverse()) add(m.id,m.chat,m.name,m.text,'长期记忆',m.at,`QQ ${m.user}\n${m.text}`,m.text); break;
     case 'stickers': for (const t of data.stickers) {
+      if(t.qq&&!t.qqPresent)continue;
       if (a.query && !(stickerSearchText(t) + ' ' + (t.analysis?.avoid.join(' ') ?? '').toLocaleLowerCase()).includes(a.query.toLocaleLowerCase())) continue;
       const understanding = t.analysis, confidence = understanding?.confidence === 'high' ? '高' : understanding?.confidence === 'medium' ? '中' : '低';
-      const detail = `${t.note}\n标签：${t.tags.join('、')}\n` + (understanding ? `\n画面：${understanding.description}\n图片文字：${understanding.image_text || '无或看不清'}\n含义：${understanding.meaning}\n情绪：${understanding.emotions.join('、')}\n适用：${understanding.usage.join('；')}\n不适用：${understanding.avoid.join('；') || '未列出'}\n理解置信度：${confidence}\n` : '\n尚未完成看图理解，使用前需要补充分析。\n') + t.file;
-      add(t.id,'',t.note,[t.tags.join('、'),understanding?.meaning,...(understanding?.emotions ?? []),...(understanding?.usage ?? [])].filter(Boolean).join(' · '),`${!understanding ? '待理解' : understanding.confidence === 'low' ? '含义待确认' : '已理解'} · 已用 ${t.uses} 次`,t.at,detail);
+      const detail = `${t.qqPresent?'已在 QQ 账号收藏中':'仅保存在本地，尚未写入 QQ 收藏'}\n${t.qq?.description?'QQ 备注：'+t.qq.description+'\n':''}${t.note}\n标签：${t.tags.join('、')}\n` + (understanding ? `\n画面：${understanding.description}\n图片文字：${understanding.image_text || '无或看不清'}\n含义：${understanding.meaning}\n情绪：${understanding.emotions.join('、')}\n适用：${understanding.usage.join('；')}\n不适用：${understanding.avoid.join('；') || '未列出'}\n理解置信度：${confidence}\n` : '\n尚未完成看图理解，使用前需要补充分析。\n') + (t.file?'本地缓存：'+t.file:'图片尚未缓存到本机');
+      add(t.id,'',t.note,[t.tags.join('、'),understanding?.meaning,...(understanding?.emotions ?? []),...(understanding?.usage ?? [])].filter(Boolean).join(' · '),`${t.qqPresent?'QQ收藏':'仅本地·待同步QQ'} · ${!understanding ? '待理解' : understanding.confidence === 'low' ? '含义待确认' : '已理解'} · 已用 ${t.uses} 次`,t.at,detail);
     } break;
     case 'tasks': for (const t of [...data.tasks].reverse()) add(t.id,t.chat,t.text,t.error || t.text,{ pending:'等待执行',running:'执行中',sent:'已发送',failed:'失败',unknown:'结果待核对',cancelled:'已取消' }[t.state],t.due,`${t.text}\n${t.error || ''}\n${t.interval ? `每 ${t.interval/60000} 分钟` : '一次性'}`); break;
     case 'events': for (const e of [...data.events].reverse()) add(e.id,e.chat,e.type,String(e.data.comment ?? e.data.sub_type ?? ''),e.handled ? '已处理' : '已记录',e.at,JSON.stringify(e.data,null,2)); break;
@@ -82,5 +90,6 @@ export async function socialAdmin(input: unknown, store: SocialStore, media: Med
       break;
     }
   }
-  return { op: a.op, section: a.section, rows: rows.slice(0,200), total: rows.length, profiles: data.profiles, socialSettings: s.social, note: rows.length ? `显示前 ${Math.min(200,rows.length)} 条；时间为上海时间。` : '暂无记录。启动机器人后接收消息，或刷新联系人。', usage: { turns: data.turns.length, tokensKnown: data.turns.filter(t => t.inputTokens !== null).length } };
+  const note=a.section==='stickers'?`${live?.stickers?'已读取 QQ 收藏':'离线缓存，启动机器人后可刷新 QQ 收藏'} · QQ 收藏 ${data.stickers.filter(t=>t.qqPresent).length} 张；本地待同步 ${data.stickers.filter(t=>!t.qq).length} 张。` : rows.length?`显示前 ${Math.min(200,rows.length)} 条；时间为上海时间。`:'暂无记录。启动机器人后接收消息，或刷新联系人。';
+  return { op: a.op, section: a.section, rows: rows.slice(0,200), total: rows.length, profiles: data.profiles, socialSettings: s.social, note, usage: { turns: data.turns.length, tokensKnown: data.turns.filter(t => t.inputTokens !== null).length } };
 }

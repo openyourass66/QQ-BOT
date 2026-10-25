@@ -8,14 +8,16 @@ import { mkdtemp, mkdir, writeFile, readFile, rm } from 'node:fs/promises';
 import { join,resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
+import { fakeQqFavorites } from './helpers/sticker-review.mjs';
 
 test('ACP + 真实 QQ MCP：回复不重复、潜水、记忆、表情先理解后收藏发送与事件持久化', {timeout:20000}, async () => {
   const dir=await mkdtemp(join(tmpdir(),'qq-social-e2e-'));
   let child,output='',next=100;
   const sent=[];
-  const http=createServer(async(req,res)=>{
+  const favorites=fakeQqFavorites();const http=createServer(async(req,res)=>{
     let raw='';for await(const chunk of req)raw+=chunk;
     const args=JSON.parse(raw||'{}');let data={};
+    const favorite=await favorites.protocol(req.url.slice(1),args);if(favorite.matched){res.setHeader('content-type','application/json');res.end(JSON.stringify({status:'ok',retcode:0,data:favorite.data}));return;}
     if(req.url==='/get_login_info')data={user_id:10000,nickname:'小鲸'};
     if(req.url==='/send_group_msg'||req.url==='/send_private_msg'){data={message_id:next++};sent.push(args);}
     res.setHeader('content-type','application/json');res.end(JSON.stringify({status:'ok',retcode:0,data}));
@@ -43,11 +45,14 @@ test('ACP + 真实 QQ MCP：回复不重复、潜水、记忆、表情先理解�
     send(-4,'SOCIAL_STICKER',20001,[{type:'image',data:{file:image}}]);await until(()=>sent.length===3);await until(async()=>(await data()).turns.length>=4);
     assert.equal(sent[2].message[0].type,'image');assert.deepEqual(await readFile(fileURLToPath(sent[2].message[0].data.file)),png);
     send(-5,'SOCIAL_STICKER_PENDING',20001,[{type:'image',data:{file:otherImage}}]);await until(()=>sent.length===4);await until(async()=>(await data()).turns.length>=5);
-    assert.match(sent[3].message,/分析还没完成，暂未加入表情库/);assert.doesNotMatch(sent[3].message,/收藏成功/);
+    assert.match(sent[3].message,/分析或 QQ 收藏尚未完成/);assert.doesNotMatch(sent[3].message,/收藏成功/);
     socket.send(JSON.stringify({post_type:'notice',notice_type:'group_recall',self_id:10000,group_id:30001,user_id:20001,message_id:-1,time:Math.floor(Date.now()/1000)}));
     await until(async()=>{const current=await data();return current.events.length===1&&current.messages.find(m=>m.id===-1)?.recalled===true;});
     const stored=await data();assert.equal(stored.memories[0].text,'喜欢咖啡');assert.equal(stored.turns[0].inputTokens,120);assert.equal(stored.messages.find(m=>m.id===-1).recalled,true);
     assert.equal(stored.stickers.length,1);assert.equal(stored.stickers[0].analysis.meaning,'轻松地表示赞同');assert.equal(stored.stickers[0].uses,1);
+    assert.equal(favorites.items.length,1);assert.equal(stored.stickers[0].qqPresent,true);
+    assert.equal(stored.stickers[0].qq.resId,favorites.items[0].resId);
+    assert.equal(favorites.calls.filter(c=>c.action==='add_custom_face').length,1);
     assert.equal(stored.actions.filter(a=>a.tool==='qq_collect_sticker'&&a.state==='success').length,1);
     assert.ok(!sent.some(s=>JSON.stringify(s.message).includes('重复文本')));
   } finally {

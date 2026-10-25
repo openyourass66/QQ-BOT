@@ -10,7 +10,7 @@ import { DailyUsageStore } from '../dist/usage.js';
 import { DEFAULT_SETTINGS } from '../dist/settings.js';
 import { allowedChat } from '../dist/social-settings.js';
 import { socialAdmin } from '../dist/social-admin.js';
-import { completeCollection } from './helpers/sticker-review.mjs';
+import { completeCollection, fakeQqFavorites } from './helpers/sticker-review.mjs';
 
 async function fixture(run) {
   const dir = await mkdtemp(join(tmpdir(), 'qq-social-'));
@@ -18,7 +18,9 @@ async function fixture(run) {
   const usage = new DailyUsageStore(join(dir,'usage.json')); await usage.load();
   const settings = structuredClone(DEFAULT_SETTINGS); settings.social.messagesPerMinute = 100;
   const calls = []; let nextId = 100;
-  const api = { call: async (action, params) => {
+  const favorites=fakeQqFavorites();
+  const api = { hasLocalMedia:true,call: async (action, params) => {
+    const favorite=await favorites.protocol(action,params);if(favorite.matched)return favorite.data;
     calls.push({ action, params });
     if (action === 'get_friend_list') return [{ user_id:20001,nickname:'甲' }];
     if (action === 'get_group_list') return [{ group_id:30001,group_name:'测试群' }];

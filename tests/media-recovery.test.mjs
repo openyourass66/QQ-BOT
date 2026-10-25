@@ -12,7 +12,7 @@ import { SocialStore } from '../dist/social-store.js';
 import { DailyUsageStore } from '../dist/usage.js';
 import { MediaService, downloadPublic } from '../dist/media.js';
 import { DEFAULT_SETTINGS } from '../dist/settings.js';
-import { completeCollection } from './helpers/sticker-review.mjs';
+import { completeCollection, fakeQqFavorites } from './helpers/sticker-review.mjs';
 
 const png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jP1kAAAAASUVORK5CYII=','base64');
 const signal=()=>new AbortController().signal;
@@ -20,9 +20,10 @@ const signal=()=>new AbortController().signal;
 test('QQ 图片解析到 Fake-IP 时，通过本机 OneBot 缓存完成看图、收藏、重启恢复与发送',async()=>{
   const root=await mkdtemp(join(tmpdir(),'qq-image-recovery-')),calls=[];
   const file=join(root,'qq-cache.png');await writeFile(file,png);
-  const server=createServer(async(req,res)=>{
+  const favorites=fakeQqFavorites();const server=createServer(async(req,res)=>{
     let raw='';for await(const chunk of req)raw+=chunk;const args=JSON.parse(raw||'{}');calls.push({action:req.url,args});
     assert.equal(req.headers.authorization,'Bearer fixture-token');let data;
+    const favorite=await favorites.protocol(req.url.slice(1),args);if(favorite.matched){res.setHeader('content-type','application/json');res.end(JSON.stringify({status:'ok',retcode:0,data:favorite.data}));return;}
     if(req.url==='/get_image'){
       if(args.file==='expired-reference'){res.setHeader('content-type','application/json');res.end(JSON.stringify({status:'failed',retcode:200,message:'file not found'}));return;}
       assert.equal(args.file,'recorded-image-reference');data={file,url:'https://198.18.0.115/qq-image.png'};

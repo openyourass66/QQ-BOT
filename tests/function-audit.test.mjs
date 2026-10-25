@@ -17,7 +17,7 @@ import { DEFAULT_SETTINGS } from '../dist/settings.js';
 import { socialTools } from '../dist/social-tools.js';
 import { legacyTools } from '../dist/legacy-tools.js';
 import { startActionServer } from '../dist/action-server.js';
-import { mockStickerAnalysis } from './helpers/sticker-review.mjs';
+import { mockStickerAnalysis, fakeQqFavorites } from './helpers/sticker-review.mjs';
 
 test('功能审计：49 个 MCP 工具逐项经过真实传输、参数校验和受控协议/服务适配', { timeout: 30000 }, async t => {
   const dir = await mkdtemp(join(tmpdir(), 'qq-tool-audit-'));
@@ -51,8 +51,9 @@ test('功能审计：49 个 MCP 工具逐项经过真实传输、参数校验和
     const text=await media.save(Buffer.from('文件正文：咖啡'),'.txt');
     const voice=await media.save(Buffer.from('test-audio'),'.wav');
     const video=await media.save(Buffer.from('test-video'),'.mp4');
-    const api={async call(action,params,signal) {
+    const favorites=fakeQqFavorites();const api={hasLocalMedia:true,async call(action,params,signal) {
       signal?.throwIfAborted();calls.push({action,params});
+      const favorite=await favorites.protocol(action,params);if(favorite.matched)return favorite.data;
       if(action==='get_friend_list')return [{user_id:20001,nickname:'甲'}];
       if(action==='get_group_list')return [{group_id:30001,group_name:'测试群'}];
       if(action==='get_group_member_list')return [{user_id:20001,nickname:'甲'}];
@@ -126,7 +127,8 @@ test('功能审计：49 个 MCP 工具逐项经过真实传输、参数校验和
     await call('qq_set_profile',{nickname:'小鲸',signature:'测试签名'});await call('qq_set_group_card',{group_id:30001,card:'小鲸'});
     await call('qq_set_avatar',{file:png});await call('qq_recall',{message_id:7});await call('qq_self_info',{group_id:30001});
     assert.equal(exercised.size,49);assert.equal(requests.length,8);
-    for(const endpoint of ['send_group_msg','send_private_msg','send_like','send_qzone_msg','upload_group_file','set_qq_profile','set_self_longnick','set_group_card','set_qq_avatar','delete_msg','group_poke','set_group_add_request'])assert.ok(calls.some(c=>c.action===endpoint),endpoint);
+    for(const endpoint of ['send_group_msg','send_private_msg','send_like','send_qzone_msg','upload_group_file','set_qq_profile','set_self_longnick','set_group_card','set_qq_avatar','delete_msg','group_poke','set_group_add_request','add_custom_face','fetch_custom_face_detail'])assert.ok(calls.some(c=>c.action===endpoint),endpoint);
+    assert.equal(favorites.items.length,1);assert.equal(store.snapshot().stickers[0].qqPresent,true);
     assert.equal(store.message('group:30001',7).recalled,true);
   } finally {
     await client?.close();await actions?.close();http.closeAllConnections();await new Promise(done=>http.close(done));

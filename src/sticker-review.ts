@@ -42,12 +42,12 @@ export class StickerReviews {
   complete(token: string): void { this.pending.delete(token); }
 }
 
-export function stickerSearchText(sticker: { note: string; tags: string[]; analysis?: StickerAnalysis }): string {
+export function stickerSearchText(sticker: { note: string; tags: string[]; analysis?: StickerAnalysis; qq?: {description:string} }): string {
   const a = sticker.analysis;
-  return [sticker.note, ...sticker.tags, ...(a ? [a.description, a.image_text, a.meaning, ...a.emotions, ...a.usage, ...a.tags] : [])].join(' ').toLocaleLowerCase();
+  return [sticker.note, sticker.qq?.description ?? '', ...sticker.tags, ...(a ? [a.description, a.image_text, a.meaning, ...a.emotions, ...a.usage, ...a.tags] : [])].join(' ').toLocaleLowerCase();
 }
 
-export function stickerInfo<T extends { file: string; analysis?: StickerAnalysis }>(sticker: T) {
-  const { file, ...info } = sticker;
-  return { ...info, analysisStatus: !info.analysis ? 'needs_analysis' : info.analysis.confidence === 'low' ? 'uncertain' : 'understood' };
+export function stickerInfo<T extends { file: string; analysis?: StickerAnalysis; qq?:unknown; qqPresent?:boolean }>(sticker: T) {
+  const { file, qq, ...info } = sticker;
+  return { ...info, qqCollected:info.qqPresent===true, analysisStatus: !info.analysis ? 'needs_analysis' : info.analysis.confidence === 'low' ? 'uncertain' : 'understood' };
 }

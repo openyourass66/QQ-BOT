@@ -15,7 +15,11 @@ try {
     $fixturePersonas = @{ version = 1; personas = @(@{ id = 'preset-friendly'; name = 'Friendly'; text = 'Speak warmly and briefly.'; updatedAt = 1 }, @{ id = 'preset-work'; name = 'Work'; text = 'Answer precisely.'; updatedAt = 1 }) } | ConvertTo-Json -Depth 5
     [IO.File]::WriteAllText((Join-Path $testRoot '.whale/personas.json'), $fixturePersonas, [Text.UTF8Encoding]::new($false))
     [IO.File]::WriteAllText((Join-Path $testRoot 'memory/notes.md'), 'Remember the fixture workspace.', [Text.UTF8Encoding]::new($false))
-    $fixtureSocial = @{ version = 1; account = 0; messages = @(); contacts = @(); memories = @(@{ id = 'memory-fixture'; chat = 'private:10001'; user = '10001'; name = 'Fixture friend'; text = 'Does not drink coffee.'; at = 1 }); stickers = @(); tasks = @(); events = @(); actions = @(); turns = @(); profiles = @() } | ConvertTo-Json -Depth 5
+    $fixtureStickers = @(
+        @{ id = 'pending-sticker'; file = ''; note = 'Local pending sticker'; tags = @(); uses = 0; at = 1 },
+        @{ id = 'qq-sticker'; file = ''; note = 'QQ favorite sticker'; tags = @(); uses = 0; at = 1; qqPresent = $true; md5 = ('a' * 32); qq = @{ resId = 'fixture-resource'; emojiId = '7'; md5 = ('a' * 32); url = ''; cachePath = ''; description = 'QQ favorite' } }
+    )
+    $fixtureSocial = @{ version = 1; account = 0; messages = @(); contacts = @(); memories = @(@{ id = 'memory-fixture'; chat = 'private:10001'; user = '10001'; name = 'Fixture friend'; text = 'Does not drink coffee.'; at = 1 }); stickers = $fixtureStickers; tasks = @(); events = @(); actions = @(); turns = @(); profiles = @() } | ConvertTo-Json -Depth 6
     [IO.File]::WriteAllText((Join-Path $testRoot 'data/social.json'), $fixtureSocial, [Text.UTF8Encoding]::new($false))
     # Use the installed dependencies while keeping settings and persona isolated.
     New-Item -ItemType Junction -Path (Join-Path $testRoot 'node_modules') -Target (Join-Path $projectRoot 'node_modules') | Out-Null

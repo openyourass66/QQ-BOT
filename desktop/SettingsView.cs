@@ -44,7 +44,7 @@ partial class App
         new FieldSpec("social.blockedGroups", "联系与权限", "屏蔽名单", "屏蔽的群", "这些群不触发回应，也不接收主动消息。"),
         new FieldSpec("social.blockedUsers", "联系与权限", "屏蔽名单", "屏蔽的用户", "这些用户的后续发言不会进入模型上下文。"),
         new FieldSpec("social.memoryEnabled", "功能与媒体", "日常能力", "群友长期记忆", "记住偏好与重要事实，可在 QQ 活动里编辑。"),
-        new FieldSpec("social.stickersEnabled", "功能与媒体", "日常能力", "本地表情库", "允许收藏、理解、查找和发送表情。"),
+        new FieldSpec("social.stickersEnabled", "功能与媒体", "日常能力", "QQ 收藏表情", "允许存入 QQ 账号收藏、同步、理解、查找和发送表情；本地保留缓存与理解记录。"),
         new FieldSpec("social.mediaEnabled", "功能与媒体", "日常能力", "图片、语音与视频", "图片优先交给现有模型；语音和视频需相应服务。"),
         new FieldSpec("social.filesEnabled", "功能与媒体", "日常能力", "文件收发", "允许制作文本、接收文件和发送媒体库文件。"),
         new FieldSpec("social.requestsEnabled", "功能与媒体", "日常能力", "好友与群申请", "允许理解并处理真实收到的申请和邀请。"),

@@ -9,6 +9,7 @@ import type { BotSettings } from './settings.js';
 import { OneBotHttp, parseMessageEvent, parseCqMessage, segmentsToText, type Segment } from './onebot.js';
 import type { DailyUsageStore, Quota } from './usage.js';
 import { StickerReviews, imageHash, stickerReviewPrompt, stickerSearchText, stickerInfo, type StickerAnalysis } from './sticker-review.js';
+import { QqStickers } from './qq-stickers.js';
 
 export class SocialEngine {
   private sending = new Map<string, Promise<unknown>>();
@@ -21,11 +22,12 @@ export class SocialEngine {
   private tickRunning = false;
   private proactiveAt = new Map<string, number>();
   private stickerReviews = new StickerReviews();
+  readonly qqStickers: QqStickers;
   constructor(readonly store: SocialStore, readonly media: MediaService, private readonly api: OneBotHttp,
     private readonly usage: DailyUsageStore, private readonly settings: () => BotSettings,
     private readonly confirm: (title: string, signal: AbortSignal) => Promise<boolean>,
     private readonly onSent: (chat: string, id: number, segments: Segment[], source?: string) => void,
-    private readonly log: (text: string) => void) {}
+    private readonly log: (text: string) => void) { this.qqStickers=new QqStickers(store,media,api); }
 
   async contacts(signal: AbortSignal, force = false): Promise<void> {
     if (!force && Date.now() - this.contactsAt < 60000) return;
@@ -148,6 +150,7 @@ export class SocialEngine {
     }
   }
   private async perform(tool: string, a: Record<string, any>, ctx: ToolContext): Promise<unknown> {
+    if(['qq_stickers','qq_sticker_note'].includes(tool)) { this.feature('stickersEnabled');await this.qqStickers.sync(ctx.signal); }
     const state = () => this.store.snapshot();
     switch (tool) {
       case 'qq_capabilities': return { media: this.media.capabilities(), settings: this.settings().social, tools: socialTools.map(t => ({ name: t.name, description: t.description })), notes: ['消息、成员必须使用真实编号', '本地记录仅包含已收到或主动拉取的消息', '接口成功不等于接收者已阅读'] };
@@ -228,7 +231,7 @@ export class SocialEngine {
         this.feature('stickersEnabled');
         const terms = a.query.toLocaleLowerCase().trim().split(/\s+/).filter(Boolean);
         const score = (s: ReturnType<typeof state>['stickers'][number]) => s.analysis ? { high:3,medium:2,low:1 }[s.analysis.confidence] : 0;
-        return state().stickers.filter(s => terms.every((term: string) => stickerSearchText(s).includes(term)))
+        return state().stickers.filter(s => s.qqPresent && terms.every((term: string) => stickerSearchText(s).includes(term)))
           .sort((x,y) => score(y) - score(x)).slice(0, a.limit)
           .map(stickerInfo);
       }
@@ -237,21 +240,21 @@ export class SocialEngine {
         const segment = entry.segments.find(s => s.type === 'image'); if (!segment) throw new Error('该消息没有图片');
         if (Boolean(a.analysis_token) !== Boolean(a.analysis)) throw new Error('收藏必须先取得原图分析凭证，再提交完整 analysis，不能只提交备注');
         if (!a.analysis_token) {
+          await this.qqStickers.sync(ctx.signal);
           const image = await this.messageImage(segment, ctx), hash = imageHash(Buffer.from(image.data, 'base64'));
-          const existing = state().stickers.find(s => s.analysis?.imageHash === hash && s.analysis.confidence !== 'low');
+          const existing = state().stickers.find(s => s.qqPresent && s.analysis?.imageHash === hash && s.analysis.confidence !== 'low');
           if (existing) { ctx.pendingStickerCollections?.delete(hash); return { ...stickerInfo(existing), collected: true, reused: true }; }
           return this.prepareStickerReview(ctx, { messageId: a.message_id }, image, a.note, 'collect');
         }
         return this.serial('sticker-review:' + a.analysis_token, async () => {
           const review = await this.checkedStickerReview(ctx, a.analysis_token, { messageId: a.message_id });
           const analysis: StickerAnalysis = { ...a.analysis, imageHash: review.hash, at: Date.now() };
+          const favorite=await this.qqStickers.collect(review.file,ctx.signal,()=>this.quota(ctx,ctx.chat));
           const result = await this.store.update(d => {
-            const existing = d.stickers.find(s => s.file === review.file);
+            const existing = d.stickers.find(s => s.id===favorite.id);
             const note = a.note ?? analysis.meaning, tags = [...new Set<string>([...analysis.tags, ...(a.tags ?? [])])].slice(0,20);
-            if (existing) { existing.note = note; existing.tags = tags; existing.analysis = analysis; return existing; }
-            if (d.stickers.length >= 2000) throw new Error('表情库已满，请在控制台删除不再需要的表情');
-            const sticker = { id: randomUUID(), file: review.file, note, tags, analysis, uses: 0, at: Date.now() };
-            d.stickers.push(sticker); return sticker;
+            if (!existing) throw new Error('QQ 收藏记录已变化，请刷新后核对');
+            existing.note = note; existing.tags = tags; existing.analysis = analysis; return existing;
           });
           this.stickerReviews.complete(a.analysis_token);
           ctx.pendingStickerCollections?.delete(review.hash);
@@ -281,8 +284,8 @@ export class SocialEngine {
       }
       case 'qq_sticker_image':
       case 'qq_send_sticker': {
-        this.feature('stickersEnabled'); const s = state().stickers.find(s => s.id === a.sticker_id); if (!s) throw new Error('表情不存在');
-        const image = await this.media.image(s.file, ctx.signal);
+        this.feature('stickersEnabled');if(!state().stickers.some(s=>s.id===a.sticker_id))throw new Error('表情不存在');
+        const image = await this.qqStickers.image(a.sticker_id, ctx.signal),s=state().stickers.find(s=>s.id===a.sticker_id);if(!s?.qqPresent)throw new Error('表情已从 QQ 收藏移除');
         if (tool === 'qq_sticker_image' || !s.analysis) return this.prepareStickerReview(ctx, { stickerId: s.id }, image, s.note, tool === 'qq_send_sticker' ? 'send' : 'view');
         if (imageHash(Buffer.from(image.data, 'base64')) !== s.analysis.imageHash) throw new Error('表情图片与理解记录不一致，请先用 qq_sticker_image 重新分析');
         if (s.analysis.confidence === 'low') throw new Error('这张表情含义尚不确定，请结合上下文重新看图分析，或选择其他已理解的表情');

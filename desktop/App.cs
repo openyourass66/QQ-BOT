@@ -54,10 +54,11 @@ partial class App
         var row = Find<ListView>("SocialList").SelectedItem as SocialRow;
         if (op != "list" && op != "refresh_contacts" && row == null) { Feedback("请先选择一条记录。"); return; }
         if (dirtySections.Contains("memory") && op != "edit_memory" && MessageBox.Show(window,"记忆编辑尚未保存，继续会放弃编辑。", "群友记忆", MessageBoxButton.YesNo) != MessageBoxResult.Yes) return;
-        if ((op == "delete" || op == "reset_session") && MessageBox.Show(window, op == "delete" ? "删除这条记忆/表情，或取消所选提醒？" : "清除该会话的 Agent 上下文？消息存档仍会保留。", "确认操作", MessageBoxButton.YesNo) != MessageBoxResult.Yes) return;
+        string deletePrompt=Find<ComboBox>("SocialSection").SelectedIndex==3?(row!=null&&row.Status.StartsWith("QQ收藏")?"从 QQ 账号的收藏表情中移除这张？本地理解缓存会保留。":"删除所选本地待同步记录？"):"删除这条记忆，或取消所选提醒？";
+        if ((op == "delete" || op == "reset_session") && MessageBox.Show(window, op == "delete" ? deletePrompt : "清除该会话的 Agent 上下文？消息存档仍会保留。", "确认操作", MessageBoxButton.YesNo) != MessageBoxResult.Yes) return;
         Find<TextBlock>("SocialNote").Text = "正在读取，请稍候…";
         SetSocialBusy(true);
-        var data=new Dictionary<string,object> {{"op",op},{"section",socialSections[Math.Max(0,Find<ComboBox>("SocialSection").SelectedIndex)]},{"query",Find<TextBox>("SocialSearch").Text},{"id",row==null?"":row.Id},{"chat",op=="list"||op=="refresh_contacts"?"":row.Chat},{"text",Find<TextBox>("SocialDetail").Text},{"blocked",blocked}};
+        var data=new Dictionary<string,object> {{"op",op},{"section",socialSections[Math.Max(0,Find<ComboBox>("SocialSection").SelectedIndex)]},{"query",Find<TextBox>("SocialSearch").Text},{"id",row==null?"":row.Id},{"chat",op=="list"||op=="refresh_contacts"?"":row.Chat},{"text",op=="edit_memory"?Find<TextBox>("SocialDetail").Text:""},{"blocked",blocked}};
         if(row!=null&&Find<ComboBox>("SocialSection").SelectedIndex==2&&(op=="edit_memory"||op=="delete"))data["expectedText"]=row.Text;
         Send("social",data);
     }
@@ -303,7 +304,7 @@ partial class App
         Find<Button>("SaveSettings").IsEnabled = false;
         labels["social"] = "QQ 自主行为";
         string[] socialKeys = { "autonomy", "allowAll", "allowedGroups", "allowedUsers", "blockedGroups", "blockedUsers", "responseMode", "keywords", "responseProbability", "batchWindowMs", "activeMinutes", "messagesPerMinute", "actionsPerDay", "memoryEnabled", "stickersEnabled", "mediaEnabled", "requestsEnabled", "filesEnabled", "remindersEnabled", "proactiveEnabled", "proactiveIntervalMinutes", "quietStartHour", "quietEndHour", "retentionDays", "messagesPerChat", "visionModel", "transcriptionModel", "speechModel", "speechVoice", "videoFrames" };
-        string[] socialLabels = { "QQ 动作执行方式", "允许全部现有好友和群", "允许的群号", "允许的好友 QQ", "屏蔽群号", "屏蔽用户 QQ", "群聊参与方式", "参与关键词", "旁聊参与概率（百分比）", "消息聚合窗口（毫秒）", "话题活跃时间（分钟）", "每会话每分钟动作上限", "每日 QQ 动作上限", "群友长期记忆", "本地表情库", "图片、语音与视频", "好友与群申请处理", "文件收发", "定时提醒", "定时主动聊天机会", "主动机会间隔（分钟）", "安静时段开始（上海时间）", "安静时段结束（上海时间）", "消息保留天数", "每会话消息条数上限", "独立视觉模型（留空使用 DSH）", "语音转写模型（可选）", "语音合成模型（可选）", "合成声音", "视频抽帧数" };
+        string[] socialLabels = { "QQ 动作执行方式", "允许全部现有好友和群", "允许的群号", "允许的好友 QQ", "屏蔽群号", "屏蔽用户 QQ", "群聊参与方式", "参与关键词", "旁聊参与概率（百分比）", "消息聚合窗口（毫秒）", "话题活跃时间（分钟）", "每会话每分钟动作上限", "每日 QQ 动作上限", "群友长期记忆", "QQ 收藏表情", "图片、语音与视频", "好友与群申请处理", "文件收发", "定时提醒", "定时主动聊天机会", "主动机会间隔（分钟）", "安静时段开始（上海时间）", "安静时段结束（上海时间）", "消息保留天数", "每会话消息条数上限", "独立视觉模型（留空使用 DSH）", "语音转写模型（可选）", "语音合成模型（可选）", "合成声音", "视频抽帧数" };
         for (int i=0; i<socialKeys.Length; i++) labels[socialKeys[i]] = socialLabels[i];
         Find<Button>("SaveSettings").Click += (s, e) => { try { if (ValidateSettingsForm()) Send("settings", Collect(settings, "")); } catch (Exception error) { Feedback(error.Message); } };
         Find<Button>("SaveEnv").Click += (s, e) => { if (dirtySections.Contains("runtime")) {Feedback("请先保存连接表单中的修改，再保存高级文本。");return;} Send("env", Find<TextBox>("Env").Text); };
@@ -359,13 +360,22 @@ partial class App
                     Capture(Path.Combine(root,"knowledge-friends.png"),4);Find<TextBox>("Persona").Text="Edited friend memory from native controls.";SaveKnowledge();smokeStep=16;
                 } else if(smokeStep==16&&!knowledgeBusy&&knowledgeDrafts.Count==0) {
                     if(knowledgeSelection.Text!="Edited friend memory from native controls."||Find<ListView>("SocialList").Items.Count!=0)throw new Exception("Friend memory save or activity isolation failed");
+                    Find<TextBox>("SocialSearch").Clear();Find<TabControl>("Tabs").SelectedIndex=6;Find<ComboBox>("SocialSection").SelectedIndex=3;smokeStep=20;
+                } else if(smokeStep==20&&!socialBusy&&Find<ListView>("SocialList").Items.Count==2) {
+                    var list=Find<ListView>("SocialList");list.SelectedItem=list.Items.Cast<SocialRow>().First(row=>row.Id=="pending-sticker");
+                    if(Find<Button>("SocialSave").Visibility!=Visibility.Visible||Convert.ToString(Find<Button>("SocialSave").Content)!="存入 QQ 收藏"||Convert.ToString(Find<Button>("SocialDelete").Content)!="删除本地记录"||!Find<TextBox>("SocialDetail").IsReadOnly)throw new Exception("Pending local sticker actions are incorrect");
+                    Capture(Path.Combine(root,"qq-favorites-pending.png"),6);
+                    list.SelectedItem=list.Items.Cast<SocialRow>().First(row=>row.Id=="qq-sticker");
+                    if(Find<Button>("SocialSave").Visibility!=Visibility.Collapsed||Convert.ToString(Find<Button>("SocialDelete").Content)!="从 QQ 收藏移除"||Convert.ToString(Find<Button>("SocialRefresh").Content)!="刷新 QQ 收藏"||!Find<TextBlock>("SocialNote").Text.Contains("离线缓存"))throw new Exception("QQ favorite actions or offline state are incorrect");
+                    Capture(Path.Combine(root,"qq-favorites-native.png"),6);smokeStep=21;
+                } else if(smokeStep==21) {
                     Find<TabControl>("Tabs").SelectedIndex = 0;
                     window.Close();
                     if (window.IsVisible) throw new Exception("Close did not hide window");
                     Process.Start(new ProcessStartInfo(Path.Combine(root, "QQ-BOT.exe")) { UseShellExecute = false, CreateNoWindow = true });
                     smokeStep = 1;
                 } else if (smokeStep == 1 && window.IsVisible) {
-                    File.WriteAllText(Path.Combine(root, "smoke-result.txt"), "PASS: persona library save and selection, independent conversation copies, retained drafts, workspace and friend memory editing, compact layout, settings and model validation, activity isolation, Shell tray restore, graceful exit");
+                    File.WriteAllText(Path.Combine(root, "smoke-result.txt"), "PASS: persona library save and selection, independent conversation copies, retained drafts, workspace and friend memory editing, compact layout, settings and model validation, activity isolation, QQ favorites and local migration controls, Shell tray restore, graceful exit");
                     smokeStep = 2; Exit();
                 }
             }

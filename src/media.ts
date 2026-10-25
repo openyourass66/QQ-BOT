@@ -112,7 +112,7 @@ export class MediaService {
     const { buffer } = await this.bytes(source, signal);
     return { type: 'image', data: buffer.toString('base64'), mimeType: imageMime(buffer) };
   }
-  /** Only pass a get_image response for an opaque reference from a recorded QQ message. */
+  /** Only pass trusted protocol responses for a recorded image or QQ favorite. */
   async onebotImage(result: { file?: unknown; url?: unknown; base64?: unknown }, signal: AbortSignal, localCache = false): Promise<{ type: 'image'; data: string; mimeType: string }> {
     signal.throwIfAborted();
     if (!result || typeof result !== 'object') throw new Error('协议端未返回有效的图片信息');

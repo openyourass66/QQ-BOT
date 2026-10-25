@@ -10,6 +10,7 @@ import { DailyUsageStore } from '../dist/usage.js';
 import { DEFAULT_SETTINGS } from '../dist/settings.js';
 import { StickerReviews, imageHash } from '../dist/sticker-review.js';
 import { socialAdmin } from '../dist/social-admin.js';
+import { fakeQqFavorites } from './helpers/sticker-review.mjs';
 
 const png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jP1kAAAAASUVORK5CYII=','base64');
 const analysis=()=>({description:'测试表情中的人物微笑鼓掌',image_text:'你真棒',meaning:'用夸奖的字面意思表达反讽',emotions:['无奈','嘲讽'],usage:['熟悉朋友间委婉吐槽'],avoid:['严肃求助与安慰场景'],tags:['阴阳怪气','反讽'],confidence:'high'});
@@ -20,12 +21,12 @@ async function fixture(run) {
     const usage=new DailyUsageStore(join(dir,'usage.json'));await usage.load();const calls=[];
     const media=new MediaService(join(dir,'media'),()=>settings.social),file=await media.save(png,'.png');
     for(const [chat,id]of [['group:30001',1],['group:30001',2],['group:30002',1]])await store.add({chat,id,user:20001,name:'甲',at:Date.now(),text:'[图片]',self:false,recalled:false,segments:[{type:'image',data:{file}}]});
-    const api={call:async(action,params)=>{calls.push({action,params});return {message_id:101};}};
+    const favorites=fakeQqFavorites();const api={hasLocalMedia:true,call:async(action,params)=>{const favorite=await favorites.protocol(action,params);if(favorite.matched)return favorite.data;calls.push({action,params});return {message_id:101};}};
     const engine=new SocialEngine(store,media,api,usage,()=>settings,async()=>true,()=>{},()=>{});
     const ctx=(extra={})=>({chat:'group:30001',self:10000,user:20001,sent:0,silent:false,signal:new AbortController().signal,...extra});
     const call=(tool,args={},context=ctx())=>engine.execute({action:'social',tool,args},context);
     const finish=(preview,extra={})=>call(preview.next_tool,{...(preview.message_id!==undefined?{message_id:preview.message_id}:{sticker_id:preview.sticker_id}),analysis_token:preview.analysis_token,analysis:analysis(),...extra});
-    await run({dir,settings,store,media,engine,ctx,call,finish,file,calls});
+    await run({dir,settings,store,media,engine,ctx,call,finish,file,calls,favorites});
   } finally {await rm(dir,{recursive:true,force:true,maxRetries:10,retryDelay:100});}
 }
 
@@ -65,8 +66,9 @@ test('画面、文字、情绪、含义与场景持久化；搜索匹配正向�
   assert.equal(view.rows.length,1);assert.match(view.rows[0].status,/已理解/);assert.match(view.rows[0].detail,/图片文字：你真棒/);assert.match(view.rows[0].detail,/不适用：严肃求助/);
 }));
 
-test('旧表情标为待理解，修改备注不能解锁发送，补看原图并分析后才能发送',()=>fixture(async({call,finish,store,file,calls,media})=>{
+test('旧表情标为待理解，修改备注不能解锁发送，补看原图并分析后才能发送',()=>fixture(async({call,finish,store,file,calls,media,engine})=>{
   await store.update(d=>d.stickers.push({id:'legacy',file,note:'以前随手写的备注',tags:[],uses:0,at:1}));
+  await engine.qqStickers.collectLegacy('legacy',new AbortController().signal);
   assert.equal((await call('qq_stickers'))[0].analysisStatus,'needs_analysis');
   assert.match((await socialAdmin({op:'list',section:'stickers'},store,media)).rows[0].status,/待理解/);
   const pending=await call('qq_send_sticker',{sticker_id:'legacy'});assert.equal(pending.sent,false);assert.equal(pending.collected,true);assert.equal(pending.next_tool,'qq_sticker_note');assert.equal(calls.length,0);

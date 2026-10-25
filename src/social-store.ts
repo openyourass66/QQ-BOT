@@ -10,7 +10,8 @@ const segment = z.object({ type: z.string(), data: z.record(z.unknown()) });
 const message = z.object({ chat: z.string(), id: z.number().int().safe(), user: z.number().int().safe(), name: z.string(), at: z.number(), text: z.string(), segments: z.array(segment), self: z.boolean(), recalled: z.boolean().default(false) });
 const contact = z.object({ chat: z.string(), name: z.string(), at: z.number() });
 const memory = z.object({ id: z.string(), chat: z.string(), user: z.string(), name: z.string(), text: z.string(), at: z.number() });
-const sticker = z.object({ id: z.string(), file: z.string(), note: z.string(), tags: z.array(z.string()), uses: z.number(), at: z.number(), analysis: StoredStickerAnalysisSchema.optional() });
+const qqSticker = z.object({ resId: z.string().min(1), emojiId: z.string(), md5: z.string().regex(/^[a-f0-9]{32}$/), url: z.string(), cachePath: z.string(), description: z.string() });
+const sticker = z.object({ id: z.string(), file: z.string(), note: z.string(), tags: z.array(z.string()), uses: z.number(), at: z.number(), analysis: StoredStickerAnalysisSchema.optional(), md5: z.string().regex(/^[a-f0-9]{32}$/).optional(), qq: qqSticker.optional(), qqPresent: z.boolean().default(false) });
 const task = z.object({ id: z.string(), chat: z.string(), creator: z.string(), text: z.string(), due: z.number(), interval: z.number().default(0), state: z.enum(['pending', 'running', 'sent', 'failed', 'unknown', 'cancelled']), error: z.string().default('') });
 const event = z.object({ id: z.string(), chat: z.string(), type: z.string(), at: z.number(), data: z.record(z.unknown()), handled: z.boolean().default(false) });
 const action = z.object({ id: z.string(), chat: z.string(), tool: z.string(), at: z.number(), state: z.enum(['running', 'success', 'failed', 'unknown']), summary: z.string() });
@@ -46,7 +47,14 @@ export class SocialStore {
       const validated = schema.parse(next);
       await mkdir(dirname(this.path), { recursive: true });
       await writeFile(`${this.path}.tmp`, JSON.stringify(validated) + '\n', 'utf8');
-      await rename(`${this.path}.tmp`, this.path);
+      // Windows readers/antivirus may briefly hold the destination without delete sharing.
+      for (let attempt = 0; ; attempt++) {
+        try { await rename(`${this.path}.tmp`, this.path); break; }
+        catch (error) {
+          if (process.platform !== 'win32' || !['EPERM','EACCES','EBUSY'].includes((error as NodeJS.ErrnoException).code ?? '') || attempt >= 5) throw error;
+          await new Promise(resolve => setTimeout(resolve, 20 * (attempt + 1)));
+        }
+      }
       this.data = validated;
       return structuredClone(result);
     });
