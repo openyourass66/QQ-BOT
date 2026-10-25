@@ -1,14 +1,14 @@
 import { z } from 'zod';
 import { SocialStore } from './social-store.js';
-import { MediaService } from './media.js';
+import { MediaService } from '../services/media.js';
 import { socialTools } from './social-tools.js';
 import { legacyTools } from './legacy-tools.js';
-import { getSettings, getSettingsPath, saveSettings } from './settings.js';
-import type { DailyUsageStore } from './usage.js';
+import { getSettings, getSettingsPath, saveSettings } from '../core/settings.js';
+import type { DailyUsageStore } from '../core/usage.js';
 import { stickerSearchText } from './sticker-review.js';
-import { reviseMemory, forgetMemory, memoryMeta, fingerprint } from './cognition.js';
-import { learningModel } from './learning-model.js';
-import { toolAvailable } from './context-policy.js';
+import { reviseMemory, forgetMemory, memoryMeta, fingerprint } from '../agent/cognition.js';
+import { learningModel } from '../agent/learning-model.js';
+import { toolAvailable } from '../agent/context-policy.js';
 
 const requestSchema = z.object({
   op: z.enum(['list', 'edit_memory', 'delete', 'block', 'allow', 'refresh_contacts', 'reset_session', 'profile', 'collect_sticker','edit_interest','defer_thought','lock_memory','restore_memory','edit_lexicon','activate_lexicon','disable_lexicon','restore_lexicon','review_memory']),

@@ -3,8 +3,8 @@ import { test } from 'node:test';
 import { mkdtemp, readFile, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { GroupContextStore, groupTrigger } from '../dist/group-context.js';
-import { DEFAULT_SETTINGS } from '../dist/settings.js';
+import { GroupContextStore, groupTrigger } from '../dist/qq/group-context.js';
+import { DEFAULT_SETTINGS } from '../dist/core/settings.js';
 
 test('群上下文保存双向消息；排队中的提问能看到上一轮回答但看不到未来发言；重启、隔离及重置有效', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'qq-context-'));

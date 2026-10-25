@@ -1,4 +1,4 @@
-import type { BotSettings } from './settings.js';
+import type { BotSettings } from '../core/settings.js';
 
 /** Shared by all copies of a turn context so parallel tools cannot reset their counters. */
 export type TurnBudget = {tools:number;searches:number;pages:number;urls:Set<string>};

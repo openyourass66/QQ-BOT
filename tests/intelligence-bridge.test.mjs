@@ -7,7 +7,7 @@ import { mkdtemp, readFile, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { WebSocketServer } from 'ws';
-import { DEFAULT_SETTINGS } from '../dist/settings.js';
+import { DEFAULT_SETTINGS } from '../dist/core/settings.js';
 
 async function scenario(fail,learning=false,changePolicy=false) {
   const root=await mkdtemp(join(tmpdir(),'qq-intelligence-bridge-')),replies=[],analysisRequests=[];let child,output='',message=100;

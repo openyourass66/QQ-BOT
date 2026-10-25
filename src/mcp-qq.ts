@@ -1,9 +1,9 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
-import { requestQqAction } from './action-client.js';
-import { socialTools } from './social-tools.js';
-import { legacyTools } from './legacy-tools.js';
+import { requestQqAction } from './services/action-client.js';
+import { socialTools } from './qq/social-tools.js';
+import { legacyTools } from './qq/legacy-tools.js';
 
 const server = new McpServer({ name: 'qq', version: '2.0.0' });
 function result(value: unknown): { content: any[] } {

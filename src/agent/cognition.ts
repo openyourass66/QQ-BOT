@@ -1,10 +1,10 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { MemoryMetaSchema } from './cognition-state.js';
-import type { BotSettings } from './settings.js';
-import { allowedChat } from './social-settings.js';
-import type { SocialData, SocialStore, StoredMessage } from './social-store.js';
-import type { DailyUsageStore } from './usage.js';
+import type { BotSettings } from '../core/settings.js';
+import { allowedChat } from '../qq/social-settings.js';
+import type { SocialData, SocialStore, StoredMessage } from '../qq/social-store.js';
+import type { DailyUsageStore } from '../core/usage.js';
 
 const evidence = z.object({messageId:z.number().int().safe(),quote:z.string().trim().min(2).max(500)}).strict();
 export const LearningProposalSchema = z.object({

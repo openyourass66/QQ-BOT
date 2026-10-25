@@ -8,15 +8,15 @@ import { join, resolve } from 'node:path';
 import { z } from 'zod';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
-import { SocialStore } from '../dist/social-store.js';
-import { SocialEngine } from '../dist/social-engine.js';
-import { MediaService } from '../dist/media.js';
-import { DailyUsageStore } from '../dist/usage.js';
-import { QqActionPolicy } from '../dist/qq-actions.js';
-import { DEFAULT_SETTINGS } from '../dist/settings.js';
-import { socialTools } from '../dist/social-tools.js';
-import { legacyTools } from '../dist/legacy-tools.js';
-import { startActionServer } from '../dist/action-server.js';
+import { SocialStore } from '../dist/qq/social-store.js';
+import { SocialEngine } from '../dist/qq/social-engine.js';
+import { MediaService } from '../dist/services/media.js';
+import { DailyUsageStore } from '../dist/core/usage.js';
+import { QqActionPolicy } from '../dist/qq/qq-actions.js';
+import { DEFAULT_SETTINGS } from '../dist/core/settings.js';
+import { socialTools } from '../dist/qq/social-tools.js';
+import { legacyTools } from '../dist/qq/legacy-tools.js';
+import { startActionServer } from '../dist/services/action-server.js';
 import { mockStickerAnalysis, fakeQqFavorites } from './helpers/sticker-review.mjs';
 
 test('功能审计：全部 MCP 工具逐项经过真实传输、参数校验和受控协议/服务适配', { timeout: 30000 }, async t => {

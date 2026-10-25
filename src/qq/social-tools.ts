@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { StickerAnalysisSchema } from './sticker-review.js';
-import type { AutonomousTurn } from './autonomous-state.js';
-import type { TurnBudget } from './context-policy.js';
+import type { AutonomousTurn } from '../agent/autonomous-state.js';
+import type { TurnBudget } from '../agent/context-policy.js';
 
 const id = z.number().int().safe();
 const user = z.number().int().positive().safe();

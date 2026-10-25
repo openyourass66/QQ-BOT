@@ -1,33 +1,54 @@
-# 依赖
-node_modules/
+# 依赖与构建产物
+/node_modules/
+/dist/
+/release/
+/desktop/bin/
+/desktop/obj/
+/QQ-BOT*.exe
+/QQ-BOT*.pdb
+*.tsbuildinfo
 
-# 构建产物
-dist/
-QQ-BOT.exe
-QQ-BOT-next.exe
-desktop-preview*.png
-*.desktop.tmp
-
-# 本地环境与密钥
+# 本地环境与密钥；配置示例保留在仓库
 .env
-.env.local
-bot.config.json
-bot.config.json.tmp
+.env.*
+!.env.example
+/.credentials.yaml
+/.dsh/
+/bot.config.json
+/bot.config.json.*
 *.pem
 *.key
+*.p12
+*.pfx
 
-# 运行时数据（QQ 会话映射、记忆等）
-data/
-bot-workspace/memory/
-bot-workspace/.whale/
+# 运行时数据：会话、聊天存档、媒体、个人记忆与人设库
+/data/
+/bot-workspace/
 
 # NapCat 运行时（含账号配置与依赖）
-napcat/
+/napcat/
+
+# 原生界面预览与测试输出；不忽略桌面端源素材
+/desktop-preview*.png
+/page-*.png
+/runtime-*.png
+/settings-*.png
+/model-*.png
+/knowledge-*.png
+/smoke-result.txt
+*.desktop.tmp
+
+# 本地工具安装临时目录
+/pip-build-tracker-*/
+/pip-ephem-wheel-cache-*/
+/pip-install-*/
 
 # 含真实 OneBot token / QQ 号的本地联调脚本
-send-test.mjs
+/send-test.mjs
 
 # 日志与系统文件
 *.log
+*.log.*
 .DS_Store
 Thumbs.db
+Desktop.ini

@@ -1,4 +1,4 @@
-import type { MessageEvent } from './onebot.js';
+import type { MessageEvent } from '../qq/onebot.js';
 
 /** 按会话去重，逐条淘汰；容量达到上限时保留其余消息记录。 */
 export class RecentMessages {

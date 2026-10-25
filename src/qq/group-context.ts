@@ -3,7 +3,7 @@ import { dirname, resolve } from 'node:path';
 import { z } from 'zod';
 import type { MessageEvent } from './onebot.js';
 import { segmentsToText, stripMention } from './onebot.js';
-import type { BotSettings } from './settings.js';
+import type { BotSettings } from '../core/settings.js';
 
 const EntrySchema = z.object({
   seq: z.number().int().positive().safe(),

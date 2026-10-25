@@ -5,37 +5,37 @@ import process from 'node:process';
 import { randomBytes } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import * as acp from '@agentclientprotocol/sdk';
-import { config } from './config.js';
-import { recall } from './cognition.js';
-import { clipBackground, readContextUsage, toolAvailable, turnBudget } from './context-policy.js';
-import { socialTools } from './social-tools.js';
+import { config } from './core/config.js';
+import { recall } from './agent/cognition.js';
+import { clipBackground, readContextUsage, toolAvailable, turnBudget } from './agent/context-policy.js';
+import { socialTools } from './qq/social-tools.js';
 import {
   OneBotHttp,
   OneBotWs,
   segmentsToText,
   type MessageEvent,
-} from './onebot.js';
-import { SessionStore } from './store.js';
-import { getSettings, loadSettings, watchSettings, flushSettings, type BotSettings } from './settings.js';
-import { log, status } from './state.js';
-import { ConversationQueue, QueueFullError, withTimeout } from './runtime.js';
-import { RecentMessages, splitForQq } from './message-utils.js';
-import { GroupContextStore, groupTrigger, formatGroupEntry } from './group-context.js';
-import { parseApprovalReply, permissionOutcome } from './permissions.js';
-import { DailyUsageStore } from './usage.js';
-import { QqActionPolicy } from './qq-actions.js';
-import { startActionServer, type ActionServer } from './action-server.js';
+} from './qq/onebot.js';
+import { SessionStore } from './core/store.js';
+import { getSettings, loadSettings, watchSettings, flushSettings, type BotSettings } from './core/settings.js';
+import { log, status } from './core/state.js';
+import { ConversationQueue, QueueFullError, withTimeout } from './core/runtime.js';
+import { RecentMessages, splitForQq } from './core/message-utils.js';
+import { GroupContextStore, groupTrigger, formatGroupEntry } from './qq/group-context.js';
+import { parseApprovalReply, permissionOutcome } from './core/permissions.js';
+import { DailyUsageStore } from './core/usage.js';
+import { QqActionPolicy } from './qq/qq-actions.js';
+import { startActionServer, type ActionServer } from './services/action-server.js';
 import { z } from 'zod';
-import { SocialStore } from './social-store.js';
-import { SocialEngine } from './social-engine.js';
-import type { AutonomousTurn } from './autonomous-state.js';
-import { MediaService } from './media.js';
-import { allowedChat } from './social-settings.js';
-import type { ToolContext } from './social-tools.js';
-import { legacyTools, LegacyCallSchema } from './legacy-tools.js';
-import { QqActionSchema } from './qq-actions.js';
-import { socialAdmin } from './social-admin.js';
-import { chatModelSelection, prepareChatModelPatch } from './chat-model.js';
+import { SocialStore } from './qq/social-store.js';
+import { SocialEngine } from './qq/social-engine.js';
+import type { AutonomousTurn } from './agent/autonomous-state.js';
+import { MediaService } from './services/media.js';
+import { allowedChat } from './qq/social-settings.js';
+import type { ToolContext } from './qq/social-tools.js';
+import { legacyTools, LegacyCallSchema } from './qq/legacy-tools.js';
+import { QqActionSchema } from './qq/qq-actions.js';
+import { socialAdmin } from './qq/social-admin.js';
+import { chatModelSelection, prepareChatModelPatch } from './agent/chat-model.js';
 
 const api = new OneBotHttp(config.onebot.httpUrl, config.onebot.token);
 const sessionStorePath = resolve(process.env.SESSION_STORE || 'data/sessions.json');

@@ -3,11 +3,11 @@ import { resolve, dirname } from 'node:path';
 import { loadEnvFile } from 'node:process';
 import { parseEnv } from 'node:util';
 import { runtimeFields, chatRuntimeKeys, initialDefaultKeys, mergeRuntimeEnv, validateRuntimeEnv } from './runtime-fields.mjs';
-import { readChatModelConfig, listChatModels, testChatModel } from '../dist/chat-model.js';
+import { readChatModelConfig, listChatModels, testChatModel } from '../dist/agent/chat-model.js';
 import { knowledge } from './knowledge.mjs';
 import { mediaKeys, settingsFileFor, validateMediaService, mergeSettingsDraft } from './settings-config.mjs';
 try { loadEnvFile('.env'); } catch (e) { if (e.code !== 'ENOENT') throw e; }
-const settings = await import('../dist/settings.js');
+const settings = await import('../dist/core/settings.js');
 const read = async (p) => readFile(p, 'utf8').catch(e => { if (e.code === 'ENOENT') return ''; throw e; });
 const personaPath = resolve(process.env.BOT_WORKSPACE || 'bot-workspace', 'AGENTS.md');
 const atomic = async (p, text) => { await mkdir(dirname(p), { recursive: true }); await writeFile(p + '.desktop.tmp', text, 'utf8'); await rename(p + '.desktop.tmp', p); };
@@ -32,13 +32,13 @@ process.once('message', async ({ action, data }) => {
     else if (action === 'knowledge') result = await knowledge(dirname(personaPath), data);
     else if (action === 'social') {
       await settings.loadSettings();
-      const { SocialStore } = await import('../dist/social-store.js');
-      const { MediaService } = await import('../dist/media.js');
-      const { socialAdmin } = await import('../dist/social-admin.js');
+      const { SocialStore } = await import('../dist/qq/social-store.js');
+      const { MediaService } = await import('../dist/services/media.js');
+      const { socialAdmin } = await import('../dist/qq/social-admin.js');
       const folder = dirname(resolve(process.env.SESSION_STORE || 'data/sessions.json'));
       const store = new SocialStore(process.env.BOT_SOCIAL_STORE || resolve(folder, 'social.json')); await store.load();
       const media = new MediaService(process.env.BOT_MEDIA_DIR || resolve(folder, 'media'), () => settings.getSettings().social);
-      const { DailyUsageStore } = await import('../dist/usage.js');
+      const { DailyUsageStore } = await import('../dist/core/usage.js');
       const usage = new DailyUsageStore(process.env.BOT_USAGE_STORE || resolve(folder, 'daily-usage.json')); await usage.load();
       result = await socialAdmin(data, store, media, undefined, usage);
     }

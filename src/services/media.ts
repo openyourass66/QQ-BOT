@@ -7,7 +7,7 @@ import { resolve, dirname, relative, isAbsolute } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHash, randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
-import type { SocialSettings } from './social-settings.js';
+import type { SocialSettings } from '../qq/social-settings.js';
 
 function publicAddress(address: string): boolean {
   if (isIP(address) === 4) {

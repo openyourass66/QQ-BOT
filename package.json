@@ -3,14 +3,17 @@
   "private": true,
   "type": "module",
   "version": "0.2.0",
-  "engines": { "node": "^22.13.0 || >=24.0.0" },
+  "engines": {
+    "node": "^22.13.0 || >=24.0.0"
+  },
   "scripts": {
+    "setup": "node scripts/setup.mjs",
     "desktop:build": "npm run build && powershell -NoProfile -ExecutionPolicy Bypass -File desktop/build.ps1",
     "desktop": "powershell -NoProfile -ExecutionPolicy Bypass -File desktop/start.ps1",
-    "build": "tsc -p tsconfig.json",
+    "build": "node scripts/build.mjs",
     "start": "node --env-file=.env dist/bridge.js",
     "mcp": "node --env-file=.env dist/mcp-qq.js",
-    "mock": "node mock-onebot.mjs",
+    "mock": "node scripts/dev/mock-onebot.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "npm run build && node --test tests/*.test.mjs",
     "napcat": "node --env-file=.env scripts/napcat-node.mjs"
@@ -19,12 +22,11 @@
     "@agentclientprotocol/sdk": "1.4.0",
     "@modelcontextprotocol/sdk": "^1.20.0",
     "@mozilla/readability": "^0.6.0",
-    "jsdom": "^29.1.1",
+    "linkedom": "^0.18.14",
     "ws": "^8.18.0",
     "zod": "^3.25.0"
   },
   "devDependencies": {
-    "@types/jsdom": "^30.0.0",
     "@types/node": "^24.0.0",
     "@types/ws": "^8.18.0",
     "typescript": "^5.9.0"

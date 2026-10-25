@@ -5,8 +5,8 @@ import { z } from 'zod';
 import type { MessageEvent, Segment } from './onebot.js';
 import { segmentsToText } from './onebot.js';
 import { StoredStickerAnalysisSchema } from './sticker-review.js';
-import { AutonomousStateSchema } from './autonomous-state.js';
-import { CognitionStateSchema, MemoryMetaSchema } from './cognition-state.js';
+import { AutonomousStateSchema } from '../agent/autonomous-state.js';
+import { CognitionStateSchema, MemoryMetaSchema } from '../agent/cognition-state.js';
 
 const segment = z.object({ type: z.string(), data: z.record(z.unknown()) });
 const message = z.object({ chat: z.string(), id: z.number().int().safe(), user: z.number().int().safe(), name: z.string(), at: z.number(), text: z.string(), segments: z.array(segment), self: z.boolean(), recalled: z.boolean().default(false) });

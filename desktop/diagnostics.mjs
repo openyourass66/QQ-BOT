@@ -2,7 +2,7 @@ import { readFile, access, open, stat } from 'node:fs/promises';
 import { parseEnv } from 'node:util';
 import { resolve, join } from 'node:path';
 import { homedir } from 'node:os';
-import { readChatModelConfig } from '../dist/chat-model.js';
+import { readChatModelConfig } from '../dist/agent/chat-model.js';
 export async function environment(root) {
   return { ...process.env, ...parseEnv(await readFile(join(root, '.env'), 'utf8').catch(e => { if (e.code === 'ENOENT') return ''; throw e; })) };
 }

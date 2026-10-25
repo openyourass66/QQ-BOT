@@ -3,9 +3,9 @@ import { test } from 'node:test';
 import { once } from 'node:events';
 import { createServer } from 'node:http';
 import { WebSocketServer } from 'ws';
-import { OneBotWs, parseMessageEvent } from '../dist/onebot.js';
-import { ConversationQueue, QueueFullError, withTimeout } from '../dist/runtime.js';
-import { RecentMessages, splitForQq } from '../dist/message-utils.js';
+import { OneBotWs, parseMessageEvent } from '../dist/qq/onebot.js';
+import { ConversationQueue, QueueFullError, withTimeout } from '../dist/core/runtime.js';
+import { RecentMessages, splitForQq } from '../dist/core/message-utils.js';
 
 const event = (overrides = {}) => ({
   post_type: 'message', message_type: 'private', time: 0,

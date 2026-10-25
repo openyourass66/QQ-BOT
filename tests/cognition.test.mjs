@@ -3,13 +3,13 @@ import assert from 'node:assert/strict';
 import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { SocialStore } from '../dist/social-store.js';
-import { DEFAULT_SETTINGS } from '../dist/settings.js';
-import { DailyUsageStore } from '../dist/usage.js';
-import { Cognition, cognitionRevision, recall, reviseMemory, forgetMemory } from '../dist/cognition.js';
-import { MemoryMetaSchema } from '../dist/cognition-state.js';
-import { socialAdmin } from '../dist/social-admin.js';
-import { MediaService } from '../dist/media.js';
+import { SocialStore } from '../dist/qq/social-store.js';
+import { DEFAULT_SETTINGS } from '../dist/core/settings.js';
+import { DailyUsageStore } from '../dist/core/usage.js';
+import { Cognition, cognitionRevision, recall, reviseMemory, forgetMemory } from '../dist/agent/cognition.js';
+import { MemoryMetaSchema } from '../dist/agent/cognition-state.js';
+import { socialAdmin } from '../dist/qq/social-admin.js';
+import { MediaService } from '../dist/services/media.js';
 
 async function fixture(run) {
   const root=await mkdtemp(join(tmpdir(),'qq-cognition-')),now=Date.now(),chat='group:30001';

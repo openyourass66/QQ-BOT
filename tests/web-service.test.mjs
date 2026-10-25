@@ -5,14 +5,25 @@ import { once } from 'node:events';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { WebService, readJsonLimited } from '../dist/web-service.js';
-import { DEFAULT_SETTINGS } from '../dist/settings.js';
-import { turnBudget, readContextUsage, toolAvailable, clipBackground } from '../dist/context-policy.js';
-import { learningModel } from '../dist/learning-model.js';
+import { WebService, readJsonLimited } from '../dist/services/web-service.js';
+import { DEFAULT_SETTINGS } from '../dist/core/settings.js';
+import { turnBudget, readContextUsage, toolAvailable, clipBackground } from '../dist/agent/context-policy.js';
+import { learningModel } from '../dist/agent/learning-model.js';
 
 const signal=()=>new AbortController().signal;
 const bing='<ol><li class="b_algo"><h2><a href="https://example.test/article">测试文章</a></h2><p>真实摘要</p></li></ol>';
 const article='<html><head><title>测试正文</title></head><body><article><h1>测试正文</h1>'+('<p>这是用于验证正文分页与来源的长文章。页面内容需要保留，脚本不能执行。</p>'.repeat(120))+'</article><script>throw new Error("script executed")</script></body></html>';
+
+test('静态解析容忍无效 base、保留中文与实体，不执行脚本或加载资源，拒绝超大结构',async()=>{
+  const s=structuredClone(DEFAULT_SETTINGS);
+  const html=article.replace('<head>','<head><base href="http://[invalid">').replace('<body>','<body><img src="http://127.0.0.1:1/private"><script>globalThis.qqParserExecuted=true</script>').replaceAll('这是','中文 &amp; 这是');
+  const service=new WebService(()=>s,undefined,{},async()=>({buffer:Buffer.from(html),mime:'text/html'}));
+  const result=await service.read('group:1',{url:'https://example.test/article',offset:0},turnBudget(),signal());
+  assert.match(result.text,/中文 & 这是/);assert.equal(result.title,'测试正文');
+  assert.equal(globalThis.qqParserExecuted,undefined);assert.doesNotMatch(result.text,/globalThis/);
+  const large=new WebService(()=>s,undefined,{},async()=>({buffer:Buffer.from('<html><body>'+'<span>x</span>'.repeat(40001)+'</body></html>'),mime:'text/html'}));
+  await assert.rejects(large.read('group:1',{url:'https://example.test/large',offset:0},turnBudget(),signal()),/网页结构过大/);
+});
 
 test('搜索缓存隔离会话并可刷新，磁盘恢复后沿用缓存，本轮次数不能绕过',async()=>{
   const root=await mkdtemp(join(tmpdir(),'qq-web-'));let count=0;const s=structuredClone(DEFAULT_SETTINGS);s.web.provider='bing';

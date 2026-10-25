@@ -7,8 +7,8 @@ import { mkdtemp, readFile, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { WebSocketServer } from 'ws';
-import { withTimeout } from '../dist/runtime.js';
-import { SocialStore } from '../dist/social-store.js';
+import { withTimeout } from '../dist/core/runtime.js';
+import { SocialStore } from '../dist/qq/social-store.js';
 
 test('聚合保留全部消息、会话继承全局概率、屏蔽引用过滤、停止延迟与最后轮次落盘', {timeout:30000},async()=>{
   const dir=await mkdtemp(join(tmpdir(),'qq-batch-audit-')),sent=[];

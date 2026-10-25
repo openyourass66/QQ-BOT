@@ -1,5 +1,5 @@
 import { parseEnv } from 'node:util';
-import { readChatModelConfig, defaultChatBaseUrl, defaultChatModel, normalizeChatBaseUrl } from '../dist/chat-model.js';
+import { readChatModelConfig, defaultChatBaseUrl, defaultChatModel, normalizeChatBaseUrl } from '../dist/agent/chat-model.js';
 
 export const chatRuntimeKeys = new Set(['BOT_CHAT_MODE', 'BOT_CHAT_MODEL', 'BOT_CHAT_BASE_URL', 'QQ_BOT_DEEPSEEK_API_KEY']);
 export const initialDefaultKeys = new Set(['ADMIN_QQ','GROUP_PREFIX','GROUP_COOLDOWN_MS','GROUP_CONTEXT_LINES','REPLY_CHUNK_SIZE','MIN_DELAY_MS','MAX_DELAY_MS','ALLOW_EXEC']);

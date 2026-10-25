@@ -5,10 +5,10 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { once } from 'node:events';
 import { createServer } from 'node:http';
-import { SessionStore } from '../dist/store.js';
-import { ConversationQueue, withTimeout } from '../dist/runtime.js';
-import { permissionOutcome, parseApprovalReply } from '../dist/permissions.js';
-import { OneBotHttp } from '../dist/onebot.js';
+import { SessionStore } from '../dist/core/store.js';
+import { ConversationQueue, withTimeout } from '../dist/core/runtime.js';
+import { permissionOutcome, parseApprovalReply } from '../dist/core/permissions.js';
+import { OneBotHttp } from '../dist/qq/onebot.js';
 
 test('拒绝审批时不选择允许项；缺失或空选项取消审批', () => {
   const allow = { kind: 'allow_once', optionId: 'yes' };
@@ -85,7 +85,7 @@ test('环境变量补齐缺失配置；文件优先；并发保存及多次原�
   process.env.ADMIN_QQ = '12345';
   process.env.ALLOW_EXEC = '1';
   process.env.GROUP_PREFIX = '!';
-  const settings = await import('../dist/settings.js');
+  const settings = await import('../dist/core/settings.js');
   let stop = () => {};
   try {
     const initial = await settings.loadSettings();

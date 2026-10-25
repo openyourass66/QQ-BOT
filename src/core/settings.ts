@@ -3,8 +3,8 @@ import { watch } from 'node:fs';
 import { basename, dirname, resolve } from 'node:path';
 import { z } from 'zod';
 import { config } from './config.js';
-import { SocialSettingsSchema } from './social-settings.js';
-import { LearningSettingsSchema, WebSettingsSchema, ContextSettingsSchema } from './intelligence-settings.js';
+import { SocialSettingsSchema } from '../qq/social-settings.js';
+import { LearningSettingsSchema, WebSettingsSchema, ContextSettingsSchema } from '../agent/intelligence-settings.js';
 
 const GroupSchema = z
   .object({

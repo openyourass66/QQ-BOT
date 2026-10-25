@@ -7,7 +7,7 @@ import { mkdtemp, readFile, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { WebSocketServer } from 'ws';
-import { withTimeout } from '../dist/runtime.js';
+import { withTimeout } from '../dist/core/runtime.js';
 
 test('群聊链路：连续 @、排队上下文、引用、追问、异常反馈与重启恢复', { timeout: 30000 }, async () => {
   const dir = await mkdtemp(join(tmpdir(), 'qq-group-'));

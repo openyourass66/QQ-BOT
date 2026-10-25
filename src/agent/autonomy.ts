@@ -1,12 +1,12 @@
 import { createHash, randomUUID } from 'node:crypto';
-import type { SocialStore, SocialData } from './social-store.js';
-import type { BotSettings } from './settings.js';
-import type { ToolContext } from './social-tools.js';
+import type { SocialStore, SocialData } from '../qq/social-store.js';
+import type { BotSettings } from '../core/settings.js';
+import type { ToolContext } from '../qq/social-tools.js';
 import type { Thought, AutonomousTurn } from './autonomous-state.js';
-import type { DailyUsageStore, Quota } from './usage.js';
-import { shanghaiDate } from './usage.js';
-import { allowedChat } from './social-settings.js';
-import { MediaService, downloadPublic, imageMime } from './media.js';
+import type { DailyUsageStore, Quota } from '../core/usage.js';
+import { shanghaiDate } from '../core/usage.js';
+import { allowedChat } from '../qq/social-settings.js';
+import { MediaService, downloadPublic, imageMime } from '../services/media.js';
 import { pathToFileURL } from 'node:url';
 
 const minute=60000,hour=60*minute;

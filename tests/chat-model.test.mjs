@@ -5,7 +5,7 @@ import { once } from 'node:events';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { readChatModelConfig, normalizeChatBaseUrl, chatModelPatches, chatModelSelection, prepareChatModelPatch, listChatModels, testChatModel } from '../dist/chat-model.js';
+import { readChatModelConfig, normalizeChatBaseUrl, chatModelPatches, chatModelSelection, prepareChatModelPatch, listChatModels, testChatModel } from '../dist/agent/chat-model.js';
 
 test('项目模型配置：独立凭据引用、不在覆盖文件中写入密钥、兼容沿用 Profile', async () => {
   assert.equal(chatModelSelection(readChatModelConfig({})), undefined);

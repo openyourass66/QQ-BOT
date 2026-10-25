@@ -1,11 +1,11 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, readFile, readdir, stat, unlink, rename, writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
-import { JSDOM } from 'jsdom';
+import { DOMParser } from 'linkedom';
 import { Readability } from '@mozilla/readability';
 import { downloadPublic } from './media.js';
-import type { BotSettings } from './settings.js';
-import type { TurnBudget } from './context-policy.js';
+import type { BotSettings } from '../core/settings.js';
+import type { TurnBudget } from '../agent/context-policy.js';
 
 export async function readJsonLimited(response:Response,max=1_000_000):Promise<unknown> {
   if(!response.body)throw new Error('服务返回空内容');
@@ -44,9 +44,8 @@ export class WebService {
       if(images)throw new Error('Bing 实验入口只支持网页搜索，请配置图片搜索适配服务');
       const url=new URL('https://cn.bing.com/search');url.searchParams.set('q',query);
       const {buffer}=await this.publicDownload(url.href,signal,2_000_000);
-      const dom=new JSDOM(buffer.toString('utf8'),{url:url.href});
-      try {data={results:[...dom.window.document.querySelectorAll('li.b_algo')].slice(0,5).map(node=>({title:node.querySelector('h2')?.textContent,url:node.querySelector('h2 a')?.getAttribute('href'),snippet:node.querySelector('p')?.textContent??''}))};}
-      finally{dom.window.close();}
+      const document=new DOMParser().parseFromString(buffer.toString('utf8'),'text/html');
+      data={results:[...document.querySelectorAll('li.b_algo')].slice(0,5).map(node=>({title:node.querySelector('h2')?.textContent,url:node.querySelector('h2 a')?.getAttribute('href'),snippet:node.querySelector('p')?.textContent??''}))};
     }
     if(!data||!Array.isArray(data.results))throw new Error('搜索服务未返回结构化 results 列表');
     const seen=new Set<string>(),result:SearchResult[]=[];
@@ -102,13 +101,16 @@ export class WebService {
     let text:string,title:string;
     if(mime==='text/plain'){text=buffer.toString('utf8');title=url;}
     else {
-      const dom=new JSDOM(buffer.toString('utf8'),{url});
-      try{
-        if(dom.window.document.getElementsByTagName('*').length>40000)throw new Error('网页结构过大');
-        const article=new Readability(dom.window.document,{maxElemsToParse:40000}).parse();
-        title=article?.title||dom.window.document.title||url;text=article?.textContent??'';
-        if(!text.trim())throw new Error('无法提取正文；页面可能需要登录或 JavaScript');
-      }finally{dom.window.close();}
+      const document=new DOMParser().parseFromString(buffer.toString('utf8'),'text/html');
+      if(document.querySelectorAll('*').length>40000)throw new Error('网页结构过大');
+      let base=url;
+      try {base=new URL(document.querySelector('base[href]')?.getAttribute('href')||url,url).href;}
+      catch { /* Ignore malformed base URLs in otherwise readable pages. */ }
+      // Readability resolves relative links against the downloaded page.
+      Object.defineProperties(document,{documentURI:{value:url},baseURI:{value:base}});
+      const article=new Readability(document,{maxElemsToParse:40000}).parse();
+      title=article?.title||document.title||url;text=article?.textContent??'';
+      if(!text.trim())throw new Error('无法提取正文；页面可能需要登录或 JavaScript');
     }
     if(args.offset>text.length)throw new Error('正文偏移超出范围');
     return {url,title,text:text.slice(args.offset,args.offset+s.web.pageChars),offset:args.offset,

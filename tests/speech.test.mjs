@@ -3,8 +3,8 @@ import assert from 'node:assert/strict';
 import { mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { MediaService } from '../dist/media.js';
-import { DEFAULT_SETTINGS } from '../dist/settings.js';
+import { MediaService } from '../dist/services/media.js';
+import { DEFAULT_SETTINGS } from '../dist/core/settings.js';
 
 const signal = () => new AbortController().signal;
 const event = value => 'event:result\n' + JSON.stringify(value, null, 2).split('\n').map(line => 'data:' + line).join('\n') + '\n\n';

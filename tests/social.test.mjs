@@ -3,13 +3,13 @@ import assert from 'node:assert/strict';
 import { mkdtemp, readFile, writeFile, mkdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { SocialStore } from '../dist/social-store.js';
-import { SocialEngine, parseShanghaiTime } from '../dist/social-engine.js';
-import { MediaService, downloadPublic } from '../dist/media.js';
-import { DailyUsageStore } from '../dist/usage.js';
-import { DEFAULT_SETTINGS } from '../dist/settings.js';
-import { allowedChat } from '../dist/social-settings.js';
-import { socialAdmin } from '../dist/social-admin.js';
+import { SocialStore } from '../dist/qq/social-store.js';
+import { SocialEngine, parseShanghaiTime } from '../dist/qq/social-engine.js';
+import { MediaService, downloadPublic } from '../dist/services/media.js';
+import { DailyUsageStore } from '../dist/core/usage.js';
+import { DEFAULT_SETTINGS } from '../dist/core/settings.js';
+import { allowedChat } from '../dist/qq/social-settings.js';
+import { socialAdmin } from '../dist/qq/social-admin.js';
 import { completeCollection, fakeQqFavorites } from './helpers/sticker-review.mjs';
 
 async function fixture(run) {

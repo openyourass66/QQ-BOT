@@ -4,9 +4,9 @@ import { fork } from 'node:child_process';
 import { mkdtemp, readFile, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { DEFAULT_SETTINGS } from '../dist/settings.js';
-import { SocialStore } from '../dist/social-store.js';
-import { DailyUsageStore } from '../dist/usage.js';
+import { DEFAULT_SETTINGS } from '../dist/core/settings.js';
+import { SocialStore } from '../dist/qq/social-store.js';
+import { DailyUsageStore } from '../dist/core/usage.js';
 
 async function fixture(run) {
   const root = await mkdtemp(join(tmpdir(), 'qq-settings-consistency-'));

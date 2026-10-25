@@ -8,7 +8,7 @@ import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { once } from 'node:events';
 import { WebSocketServer } from 'ws';
-import { withTimeout } from '../dist/runtime.js';
+import { withTimeout } from '../dist/core/runtime.js';
 
 test('完整桥接链路：群上下文、连续回复顺序、超时恢复、DSH 退出清理', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'qq-bridge-'));

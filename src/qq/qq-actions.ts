@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import type { OneBotHttp } from './onebot.js';
-import type { BotSettings } from './settings.js';
-import { DailyUsageStore, type Quota } from './usage.js';
+import type { BotSettings } from '../core/settings.js';
+import { DailyUsageStore, type Quota } from '../core/usage.js';
 
 export const QqActionSchema = z.discriminatedUnion('action', [
   z.object({

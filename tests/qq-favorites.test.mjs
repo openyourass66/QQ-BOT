@@ -4,12 +4,12 @@ import { mkdtemp, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
-import { SocialStore } from '../dist/social-store.js';
-import { MediaService } from '../dist/media.js';
-import { QqStickers } from '../dist/qq-stickers.js';
-import { DEFAULT_SETTINGS } from '../dist/settings.js';
-import { socialAdmin } from '../dist/social-admin.js';
-import { imageHash } from '../dist/sticker-review.js';
+import { SocialStore } from '../dist/qq/social-store.js';
+import { MediaService } from '../dist/services/media.js';
+import { QqStickers } from '../dist/qq/qq-stickers.js';
+import { DEFAULT_SETTINGS } from '../dist/core/settings.js';
+import { socialAdmin } from '../dist/qq/social-admin.js';
+import { imageHash } from '../dist/qq/sticker-review.js';
 import { fakeQqFavorites, mockStickerAnalysis } from './helpers/sticker-review.mjs';
 
 const png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jP1kAAAAASUVORK5CYII=','base64');

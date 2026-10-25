@@ -1,5 +1,6 @@
 import process from 'node:process';
-import { readChatModelConfig } from './chat-model.js';
+import { resolve } from 'node:path';
+import { readChatModelConfig } from '../agent/chat-model.js';
 
 function env(name: string, fallback = ''): string {
   const value = process.env[name];
@@ -23,10 +24,10 @@ export const config = {
     token: env('ONEBOT_TOKEN'),
   },
   dsh: {
-    bin: env('BOT_DSH_BIN', 'D:\\DeepSeek Harness\\resources\\runtime\\cli\\bin\\dsh.cmd'),
+    bin: env('BOT_DSH_BIN', 'dsh.cmd'),
     profile: env('BOT_DSH_PROFILE', 'acp'),
     home: env('BOT_DSH_HOME'),
-    workspace: env('BOT_WORKSPACE', process.cwd()),
+    workspace: resolve(env('BOT_WORKSPACE', process.cwd())),
   },
   bot: {
     selfId: num('BOT_SELF_ID', 0),

@@ -5,10 +5,10 @@ import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
-import { DailyUsageStore, shanghaiDate } from '../dist/usage.js';
-import { QqActionPolicy } from '../dist/qq-actions.js';
-import { DEFAULT_SETTINGS } from '../dist/settings.js';
-import { startActionServer } from '../dist/action-server.js';
+import { DailyUsageStore, shanghaiDate } from '../dist/core/usage.js';
+import { QqActionPolicy } from '../dist/qq/qq-actions.js';
+import { DEFAULT_SETTINGS } from '../dist/core/settings.js';
+import { startActionServer } from '../dist/services/action-server.js';
 
 const signal = () => new AbortController().signal;
 const like = { action: 'like', user_id: 12345, times: 1 };

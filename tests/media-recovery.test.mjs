@@ -6,12 +6,12 @@ import { mkdtemp, writeFile, readFile, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { pathToFileURL, fileURLToPath } from 'node:url';
-import { OneBotHttp } from '../dist/onebot.js';
-import { SocialEngine } from '../dist/social-engine.js';
-import { SocialStore } from '../dist/social-store.js';
-import { DailyUsageStore } from '../dist/usage.js';
-import { MediaService, downloadPublic } from '../dist/media.js';
-import { DEFAULT_SETTINGS } from '../dist/settings.js';
+import { OneBotHttp } from '../dist/qq/onebot.js';
+import { SocialEngine } from '../dist/qq/social-engine.js';
+import { SocialStore } from '../dist/qq/social-store.js';
+import { DailyUsageStore } from '../dist/core/usage.js';
+import { MediaService, downloadPublic } from '../dist/services/media.js';
+import { DEFAULT_SETTINGS } from '../dist/core/settings.js';
 import { completeCollection, fakeQqFavorites } from './helpers/sticker-review.mjs';
 
 const png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jP1kAAAAASUVORK5CYII=','base64');

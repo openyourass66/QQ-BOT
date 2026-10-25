@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { SocialStore, type SocialData } from './social-store.js';
-import { MediaService, imageMime } from './media.js';
+import { MediaService, imageMime } from '../services/media.js';
 import type { OneBotHttp } from './onebot.js';
 
 type Favorite = NonNullable<SocialData['stickers'][number]['qq']>;
