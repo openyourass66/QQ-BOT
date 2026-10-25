@@ -131,6 +131,10 @@ BOT_MEDIA_MAX_BYTES=536870912
 
 媒体服务使用兼容接口：`POST chat/completions`（图片理解）、`POST audio/transcriptions`（multipart，语音识别）、`POST audio/speech`（MP3，语音合成）。密钥仅由桥接服务读取，不作为工具参数交给模型。
 
+千问AI平台的 `qwen-audio-3.x-tts-flash` / `qwen-audio-3.x-tts-plus` 使用原生合成接口。媒体地址填写 `https://maas.qianwenaiapi.com/compatible-mode/v1`（国际站为 `https://maas.qwencloudapi.com/compatible-mode/v1`）时，程序自动调用同一服务的 `/api/v1/services/audio/tts/SpeechSynthesizer`，接收 SSE 中的 MP3 字节后发送为 QQ 语音，不依赖音频下载域名的解析。第三方兼容服务仍使用其 `audio/speech` 接口。
+
+例如合成模型填写 `qwen-audio-3.0-tts-flash`，声音填写 `longanlingxi`（龙安灵希），不能填写中文显示名。声音须与模型支持的音色匹配，参见[千问语音合成接口](https://platform.qianwenai.com/docs/api-reference/speech-synthesis/qwen-audio-tts/http-api)及[音色列表](https://platform.qianwenai.com/docs/developer-guides/speech/voice-list/qwen-audio-tts)。语音转写仍要求兼容 `audio/transcriptions` 的服务及识别模型，不能填写 TTS 合成模型；千问原生 ASR 接口尚未适配。
+
 DSH 生成的文件可放在机器人工作区的 `output/` 子目录，再交给文件发送工具；该目录和显式配置的媒体导入目录均按真实路径校验。其他任意本地路径不会自动获准读取。
 
 搜索适配服务接受 `POST {query, images}`，返回 JSON 搜索结果，建议提供 `results:[{title,url,snippet}]`；图片结果另含 `imageUrl`。机器人先查看图片后再决定发送。

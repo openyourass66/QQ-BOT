@@ -148,6 +148,65 @@ export class MediaService {
     return new URL(path, base);
   }
   private headers(): Record<string, string> { return process.env.BOT_MEDIA_API_KEY ? { authorization: `Bearer ${process.env.BOT_MEDIA_API_KEY}` } : {}; }
+  private qwenSpeechEndpoint(model: string): URL | undefined {
+    const base = this.endpoint('audio/speech');
+    if (!['maas.qianwenaiapi.com', 'maas.qwencloudapi.com'].includes(base.hostname) || !/^qwen-audio-\d+\.\d+-tts-(?:flash|plus)(?:-|$)/.test(model)) return undefined;
+    return new URL('/api/v1/services/audio/tts/SpeechSynthesizer', base);
+  }
+  private async audioError(response: Response, label: string): Promise<Error> {
+    const body = await response.json().catch(() => null) as { code?: unknown; message?: unknown; error?: { code?: unknown; message?: unknown } } | null;
+    let detail = [body?.code ?? body?.error?.code, body?.message ?? body?.error?.message].filter(v => typeof v === 'string').join('：');
+    const key = process.env.BOT_MEDIA_API_KEY;
+    if (key) detail = detail.replaceAll(key, '[已隐藏密钥]');
+    detail = detail.replace(/Bearer\s+\S+|\bsk-[\w-]+/gi, '[已隐藏密钥]').replace(/[\r\n]+/g, ' ').slice(0, 300);
+    if (!detail && response.status === 404) detail = '服务未提供此接口，请核对媒体服务地址、模型和接口协议';
+    return new Error(`${label} (${response.status})${detail ? '：' + detail : ''}`);
+  }
+  private async qwenSpeechAudio(response: Response, signal: AbortSignal): Promise<Buffer> {
+    if (!response.headers.get('content-type')?.includes('text/event-stream')) throw await this.audioError(response, '千问语音合成未返回音频流');
+    const reader = response.body?.getReader();
+    if (!reader) throw new Error('千问语音合成返回了空音频流');
+    const decoder = new TextDecoder(), chunks: Buffer[] = [];
+    let pending = '', size = 0, finished = false;
+    const event = async (frame: string): Promise<void> => {
+      const data = frame.split(/\r?\n/).filter(line => line.startsWith('data:')).map(line => line.slice(5).replace(/^ /, '')).join('\n');
+      if (!data) return;
+      if (data.trim() === '[DONE]') { finished = true; return; }
+      let value: { code?: unknown; error?: unknown; output?: { finish_reason?: unknown; audio?: { data?: unknown } } };
+      try { value = JSON.parse(data); } catch { throw new Error('千问语音合成返回了无效的流式事件'); }
+      if (!value || typeof value !== 'object') throw new Error('千问语音合成返回了无效的流式事件');
+      if (value.code || value.error) throw await this.audioError(Response.json(value), '千问语音合成失败');
+      if (value.output?.finish_reason === 'stop') finished = true;
+      const encoded = value.output?.audio?.data;
+      if (encoded === undefined || encoded === '') return;
+      if (typeof encoded !== 'string' || !/^[A-Za-z0-9+/]+={0,2}$/.test(encoded) || encoded.length % 4 === 1) throw new Error('千问语音合成返回了无效的音频数据');
+      if (encoded.length > Math.ceil(25_000_000 / 3) * 4) throw new Error('合成语音过大');
+      const buffer = Buffer.from(encoded, 'base64');
+      if (buffer.toString('base64').replace(/=+$/, '') !== encoded.replace(/=+$/, '')) throw new Error('千问语音合成返回了无效的音频数据');
+      size += buffer.length;
+      if (size > 25_000_000) throw new Error('合成语音过大');
+      chunks.push(buffer);
+    };
+    try {
+      while (true) {
+        signal.throwIfAborted();
+        const { value, done } = await reader.read();
+        pending += decoder.decode(value, { stream: !done });
+        let boundary: RegExpExecArray | null;
+        while ((boundary = /\r?\n\r?\n/.exec(pending))) {
+          await event(pending.slice(0, boundary.index));
+          pending = pending.slice(boundary.index + boundary[0].length);
+        }
+        if (pending.length > 36_000_000) throw new Error('合成语音流式事件过大');
+        if (done) break;
+      }
+      if (pending.trim()) await event(pending);
+      signal.throwIfAborted();
+      if (!size) throw new Error('千问语音合成未返回音频字节');
+      if (!finished) throw new Error('千问语音合成的音频流未完整结束，请重试');
+      return Buffer.concat(chunks, size);
+    } finally { await reader.cancel().catch(() => undefined); reader.releaseLock(); }
+  }
   async vision(images: Array<{ data: string; mimeType: string }>, question: string, signal: AbortSignal): Promise<unknown> {
     const model = this.settings().visionModel;
     if (!model) return { content: [{ type: 'text', text: '以下图片交给当前 Agent 的视觉能力处理；若当前模型不支持图片，请明确说明。' }, ...images.map(i => ({ type: 'image', ...i }))] };
@@ -158,17 +217,27 @@ export class MediaService {
   }
   async transcribe(source: string, signal: AbortSignal): Promise<unknown> {
     const model = this.settings().transcriptionModel; if (!model) throw new Error('语音转写模型未配置');
+    if (/-tts(?:-|$)/i.test(model)) throw new Error('语音转写模型填成了 TTS 合成模型；请配置服务支持的语音识别（ASR）模型与接口');
     const { buffer } = await this.bytes(source, signal, 25_000_000);
     const form = new FormData(); form.set('model', model); form.set('file', new Blob([new Uint8Array(buffer)]), 'voice.wav');
     const response = await fetch(this.endpoint('audio/transcriptions'), { method: 'POST', headers: this.headers(), body: form, signal: AbortSignal.any([signal, AbortSignal.timeout(60_000)]) });
-    if (!response.ok) throw new Error(`语音转写失败 (${response.status})`);
+    if (!response.ok) throw await this.audioError(response, '语音转写失败');
     return response.json();
   }
   async speech(text: string, signal: AbortSignal): Promise<string> {
     const s = this.settings(); if (!s.speechModel) throw new Error('语音合成模型未配置');
-    const response = await fetch(this.endpoint('audio/speech'), { method: 'POST', headers: { ...this.headers(), 'content-type': 'application/json' }, signal: AbortSignal.any([signal, AbortSignal.timeout(60_000)]), body: JSON.stringify({ model: s.speechModel, voice: s.speechVoice, input: text, response_format: 'mp3' }) });
-    if (!response.ok) throw new Error(`语音合成失败 (${response.status})`);
+    const qwen = this.qwenSpeechEndpoint(s.speechModel);
+    if (qwen && /[\u3400-\u9fff]/u.test(s.speechVoice)) throw new Error('千问合成声音需要填写音色 ID，例如龙安灵希为 longanlingxi，不能填写中文显示名');
+    const response = await fetch(qwen ?? this.endpoint('audio/speech'), { method: 'POST', headers: { ...this.headers(), 'content-type': 'application/json', ...(qwen ? { 'X-DashScope-SSE': 'enable' } : {}) }, signal: AbortSignal.any([signal, AbortSignal.timeout(60_000)]), body: JSON.stringify(qwen
+      ? { model: s.speechModel, input: { text, voice: s.speechVoice, format: 'mp3', sample_rate: 24000 } }
+      : { model: s.speechModel, voice: s.speechVoice, input: text, response_format: 'mp3' }) });
+    if (!response.ok) throw await this.audioError(response, '语音合成失败');
+    if (qwen) {
+      return this.save(await this.qwenSpeechAudio(response, signal), '.mp3');
+    }
+    if (/json|text\/|html/i.test(response.headers.get('content-type') ?? '')) throw new Error('语音合成服务返回了文本而非音频，请核对接口协议');
     const buffer = Buffer.from(await response.arrayBuffer()); if (buffer.length > 25_000_000) throw new Error('合成语音过大');
+    if (!buffer.length) throw new Error('语音合成返回了空音频');
     return this.save(buffer, '.mp3');
   }
   async video(source: string, question: string, signal: AbortSignal): Promise<unknown> {
