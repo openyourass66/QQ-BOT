@@ -3,6 +3,7 @@
   "private": true,
   "type": "module",
   "version": "0.2.0",
+  "engines": { "node": "^22.13.0 || >=24.0.0" },
   "scripts": {
     "desktop:build": "npm run build && powershell -NoProfile -ExecutionPolicy Bypass -File desktop/build.ps1",
     "desktop": "powershell -NoProfile -ExecutionPolicy Bypass -File desktop/start.ps1",
@@ -17,10 +18,13 @@
   "dependencies": {
     "@agentclientprotocol/sdk": "1.4.0",
     "@modelcontextprotocol/sdk": "^1.20.0",
+    "@mozilla/readability": "^0.6.0",
+    "jsdom": "^29.1.1",
     "ws": "^8.18.0",
     "zod": "^3.25.0"
   },
   "devDependencies": {
+    "@types/jsdom": "^30.0.0",
     "@types/node": "^24.0.0",
     "@types/ws": "^8.18.0",
     "typescript": "^5.9.0"

@@ -4,6 +4,7 @@ import { basename, dirname, resolve } from 'node:path';
 import { z } from 'zod';
 import { config } from './config.js';
 import { SocialSettingsSchema } from './social-settings.js';
+import { LearningSettingsSchema, WebSettingsSchema, ContextSettingsSchema } from './intelligence-settings.js';
 
 const GroupSchema = z
   .object({
@@ -23,6 +24,9 @@ const GroupSchema = z
 
 const SettingsSchema = z
   .object({
+    learning: LearningSettingsSchema,
+    web: WebSettingsSchema,
+    context: ContextSettingsSchema,
     social: SocialSettingsSchema,
     identity: z
       .object({
@@ -76,6 +80,9 @@ const SettingsSchema = z
       .default({}),
   })
   .default({})
+  .refine(value=>value.context.warningPercent<value.context.rolloverPercent,{
+    message:'会话更换比例应大于上下文提醒比例',path:['context','rolloverPercent'],
+  })
   .refine((value) => value.chat.delay.minMs <= value.chat.delay.maxMs, {
     message: 'minMs 不能大于 maxMs',
     path: ['chat', 'delay'],

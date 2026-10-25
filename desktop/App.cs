@@ -36,11 +36,13 @@ partial class App
     static EventWaitHandle restore;
     public class Choice { public string Value { get; set; } public string Label { get; set; } }
     public partial class SocialRow { public string Id { get; set; } public string Chat { get; set; } public string Name { get; set; } public string Summary { get; set; } public string Status { get; set; } public string Time { get; set; } public string Detail { get; set; } public string Text { get; set; } }
-    static string[] socialSections = { "contacts", "messages", "memories", "stickers", "tasks", "events", "actions", "turns", "capabilities", "thoughts", "interests", "decisions" };
+    static string[] socialSections = { "contacts", "messages", "memories", "stickers", "tasks", "events", "actions", "turns", "capabilities", "thoughts", "interests", "decisions", "lexicon", "learning" };
     static Dictionary<string, Dictionary<string, object>> socialProfiles = new Dictionary<string, Dictionary<string, object>>();
     static Window profileDialog;
     static SocialRow socialSelection;
     static Dictionary<string, string[]> choices = new Dictionary<string, string[]> {
+        { "web.provider",new[]{"adapter|自定义适配服务","tavily|Tavily","bing|Bing（实验性）"} },
+        { "web.fallback",new[]{"none|不使用备用","adapter|自定义适配服务","tavily|Tavily","bing|Bing（实验性）"} },
         { "social.autonomy", new[] { "autonomous|自主执行", "sensitive|敏感动作需确认", "confirm|所有动作需确认" } },
         { "social.responseMode", new[] { "legacy|沿用群聊开关", "mention|仅直接对话", "keywords|直接对话和关键词", "probability|关键词和概率参与", "all|参与全部消息" } }
     };
@@ -407,6 +409,22 @@ partial class App
                 } else if(smokeStep==29&&!knowledgeBusy&&KnowledgePage==1&&knowledgeSelection!=null&&knowledgeSelection.Id=="memory-fixture") {
                     if(Find<TabControl>("Tabs").SelectedIndex!=4||!Find<TextBox>("Persona").Text.Contains("Edited friend memory"))throw new Exception("Activity memory link did not select the canonical editor");
                     Capture(Path.Combine(root,"memory-editor-redirect.png"),4);
+                    if(Find<Button>("LockMemory").Visibility!=Visibility.Visible||Find<Button>("RestoreMemory").Visibility!=Visibility.Visible||Find<Button>("ReviewMemory").Visibility!=Visibility.Visible)throw new Exception("Memory source and revision controls are unavailable");
+                    Find<ListBox>("KnowledgeNav").SelectedIndex=3;smokeStep=30;
+                } else if(smokeStep==30&&!knowledgeBusy&&knowledgeSelection!=null&&knowledgeSelection.Kind=="lexicon") {
+                    if(Find<Button>("ActivateLexicon").Visibility!=Visibility.Visible||Find<Button>("LockMemory").Visibility!=Visibility.Collapsed)throw new Exception("Lexicon actions are incorrect");
+                    Capture(Path.Combine(root,"knowledge-lexicon-candidate.png"),4);Find<TextBox>("Persona").Text="Native corrected meaning";SaveKnowledge();smokeStep=31;
+                } else if(smokeStep==31&&!knowledgeBusy&&knowledgeDrafts.Count==0) {
+                    if(knowledgeSelection.Text!="Native corrected meaning")throw new Exception("Lexicon edit was not saved");
+                    Find<Button>("ActivateLexicon").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));smokeStep=32;
+                } else if(smokeStep==32&&!knowledgeBusy) {
+                    if(!knowledgeSelection.Meta.Contains("有效"))throw new Exception("Lexicon confirmation was not saved");
+                    Capture(Path.Combine(root,"knowledge-lexicon-active.png"),4);Find<Button>("DisableLexicon").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));smokeStep=33;
+                } else if(smokeStep==33&&!knowledgeBusy) {
+                    if(!knowledgeSelection.Meta.Contains("已停用"))throw new Exception("Lexicon disable was not saved");
+                    Find<Button>("RestoreMemory").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));smokeStep=34;
+                } else if(smokeStep==34&&!knowledgeBusy) {
+                    if(knowledgeSelection.Text!="Finish the game")throw new Exception("Lexicon previous version was not restored");
                     Find<TabControl>("Tabs").SelectedIndex = 0;
                     window.Close();
                     if (window.IsVisible) throw new Exception("Close did not hide window");

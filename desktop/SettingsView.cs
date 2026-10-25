@@ -31,6 +31,31 @@ partial class App
         "决定什么时候回应，以及如何自然地参与聊天。", "管理允许与屏蔽名单；动作确认统一在身份与审批设置。", "决定允许使用哪些能力；模型与服务在连接与运行配置。", "管理后台活动、联系间隔与安静时段；每日额度集中在额度与节奏。", "集中管理每日额度与回复节奏。", "管理机器人名称、管理员，以及 QQ 动作和工作区操作的确认规则。", "控制消息记录的保留时间与条数；文件位置在连接与运行管理。"
     };
     static readonly FieldSpec[] fieldSpecs = {
+        new FieldSpec("learning.memory", "功能开关", "记忆与群内学习", "自动整理群友记忆", "仅分析明确开启的会话；提案经来源与版本校验后保存。"),
+        new FieldSpec("learning.lexicon", "功能开关", "记忆与群内学习", "学习群内用语与表达", "至少三条消息、两位发送者支持，并由你确认后使用。"),
+        new FieldSpec("learning.useLexicon", "功能开关", "记忆与群内学习", "使用已确认群内用语", "暂停学习后仍可使用已确认词条；关闭本项暂停注入表达参考。"),
+        new FieldSpec("learning.chats", "功能开关", "记忆与群内学习", "允许学习的会话", "用逗号分隔，例如 group:123456、private:654321；空列表不学习。"),
+        new FieldSpec("learning.minMessages", "主动与提醒", "后台资料整理", "积累新消息数量", "只分析有效用户文字，不包含机器人回复与撤回消息。", "条", 3, 200),
+        new FieldSpec("learning.intervalMinutes", "主动与提醒", "后台资料整理", "同会话整理间隔", "记忆与群内用语共用一次分析；普通聊天优先。", "分钟", 5, 1440, 5),
+        new FieldSpec("learning.idleMinutes", "主动与提醒", "后台资料整理", "聊天空闲时间", "聊天安静后再开始整理。", "分钟", 1, 60),
+        new FieldSpec("learning.dailyCalls", "额度与节奏", "后台任务额度", "每日后台学习上限", "全局共享，上海零点重置；失败或未知请求保留次数。", "次/天", 0, 100),
+        new FieldSpec("learning.memoryCount", "对话与参与", "记忆与用语召回", "每轮相关记忆条数", "优先当前发言者和话题；0 表示不自动注入。", "条", 0, 30),
+        new FieldSpec("learning.memoryChars", "对话与参与", "记忆与用语召回", "每轮记忆字数", "按完整条目筛选，不在事实中间截断。", "字", 0, 6000, 100),
+        new FieldSpec("learning.lexiconCount", "对话与参与", "记忆与用语召回", "每轮群内用语条数", "只使用当前群已确认且相关的词条。", "条", 0, 10),
+        new FieldSpec("learning.lexiconChars", "对话与参与", "记忆与用语召回", "每轮用语字数", "表达参考不会改写人设。", "字", 0, 2000, 100),
+        new FieldSpec("features.browsing.enabled", "功能开关", "联网核实", "本项目联网", "控制 QQ 搜索与静态网页读取；DSH 外部联网独立管理。"),
+        new FieldSpec("web.provider", "功能开关", "联网核实", "搜索提供方", "Tavily 密钥在连接与运行填写；Bing 为实验性入口。"),
+        new FieldSpec("web.fallback", "功能开关", "联网核实", "备用搜索提供方", "首选失败时最多尝试一个明确配置的备用。"),
+        new FieldSpec("web.searchesPerTurn", "额度与节奏", "联网与工具预算", "每轮搜索次数", "缓存命中也占一次；0 表示禁止搜索。", "次", 0, 10),
+        new FieldSpec("features.browsing.maxNavigations", "额度与节奏", "联网与工具预算", "每轮网页读取次数", "正文分页同样占一次；外部浏览器独立管理。", "次", 1, 10),
+        new FieldSpec("web.cacheMinutes", "记录保留", "网页缓存", "搜索缓存有效时间", "按会话和提供方隔离，支持明确刷新。", "分钟", 0, 60),
+        new FieldSpec("web.pageChars", "对话与参与", "联网正文", "单页返回字数", "超长正文分页读取，保留真实来源。", "字", 1000, 16000, 1000),
+        new FieldSpec("context.backgroundChars", "对话与参与", "上下文预算", "附加群聊字数上限", "仅限制附加背景，保留当前问题。", "字", 500, 12000, 500),
+        new FieldSpec("context.warningPercent", "额度与节奏", "上下文管理", "上下文提醒比例", "依赖 DSH 上报；上下文占用不等于计费用量。", "%", 30, 95, 5),
+        new FieldSpec("context.rollover", "额度与节奏", "上下文管理", "高占用时更换会话", "默认沿用 DSH 压缩；开启后在下一轮交接近期记录。"),
+        new FieldSpec("context.rolloverPercent", "额度与节奏", "上下文管理", "会话更换比例", "新会话及映射保存成功后才替换旧会话。", "%", 50, 99),
+        new FieldSpec("context.toolsPerTurn", "额度与节奏", "联网与工具预算", "每轮 QQ 工具调用上限", "QQ 工具共享；不代表 DSH 原生工具全局限制。", "次", 1, 200),
+        new FieldSpec("context.filterTools", "功能开关", "能力清单", "按可用条件提供 QQ 工具", "配置变化在下一轮更换会话；执行时重新校验。"),
         new FieldSpec("chat.privateAutoReply", "对话与参与", "参与方式", "自动回复私聊", "收到好友私聊后，允许小鲸自然回应。"),
         new FieldSpec("social.responseMode", "对话与参与", "参与方式", "群聊参与方式", "直接找小鲸的消息仍会优先回应。"),
         new FieldSpec("chat.group.requireMention", "对话与参与", "参与方式", "仅被叫到时回应", "选择“沿用群聊开关”时，使用这个设置。"),
@@ -92,8 +117,6 @@ partial class App
         new FieldSpec("approval.timeoutMs", "身份与审批", "审批接收人", "审批等待时间", "QQ 动作和工作区操作共用；超时后取消本次审批。", "毫秒", 5000, 600000, 5000),
         new FieldSpec("social.retentionDays", "记录保留", "消息记录", "消息保留时间", "过期消息会在后续保存时淘汰。", "天", 1, 365),
         new FieldSpec("social.messagesPerChat", "记录保留", "消息记录", "每会话消息上限", "保留最近的消息，不影响独立存储的长期记忆。", "条", 80, 20000, 100),
-        new FieldSpec("features.browsing.enabled", "兼容保留", "浏览器", "浏览器开关", "未接入，保留已有配置。"),
-        new FieldSpec("features.browsing.maxNavigations", "兼容保留", "浏览器", "导航次数上限", "未接入，保留已有配置。", "次", 1, 10),
         new FieldSpec("features.browsing.maxScreenshots", "兼容保留", "浏览器", "截图次数上限", "未接入，保留已有配置。", "次", 0, 5)
     };
     static Brush Ink(string key) { return (Brush)Application.Current.Resources[key]; }
@@ -241,7 +264,10 @@ partial class App
         if(fields.ContainsKey("social.responseMode")) {var choice=((ComboBox)fields["social.responseMode"]).SelectedItem as Choice;string mode=choice==null?"":choice.Value;enabled("chat.group.requireMention",mode=="legacy");enabled("social.responseProbability",mode=="probability");enabled("social.keywords",mode=="keywords"||mode=="probability");}
         if(fields.ContainsKey("social.proactiveEnabled")) {bool on=((CheckBox)fields["social.proactiveEnabled"]).IsChecked==true;foreach(string key in new[]{"social.proactiveIntervalMinutes","social.quietStartHour","social.quietEndHour"})enabled(key,on);}
         if(fields.ContainsKey("social.autoQzoneEnabled"))enabled("social.qzoneIntervalHours",((CheckBox)fields["social.autoQzoneEnabled"]).IsChecked==true);
-        foreach(string key in new[]{"features.browsing.enabled","features.browsing.maxNavigations","features.browsing.maxScreenshots"})enabled(key,false);
+        enabled("features.browsing.maxScreenshots",false);
+        enabled("context.rolloverPercent",SettingOn("context.rollover"));
+        foreach(string key in new[]{"web.provider","web.fallback","web.searchesPerTurn","features.browsing.maxNavigations"})enabled(key,SettingOn("features.browsing.enabled"));
+        SettingStatus("learning.memory",SettingOn("learning.memory")?"需要明确会话、分析模型和学习额度；在 QQ 活动查看学习记录。":"自动整理已关闭；手动记忆和相关性召回仍可使用。");
         int hour=TimeZoneInfo.ConvertTimeBySystemTimeZoneId(DateTime.UtcNow,"China Standard Time").Hour;long start=SettingNumber("social.quietStartHour"),end=SettingNumber("social.quietEndHour");bool quiet=start>=0&&end>=0&&start!=end&&(start<end?hour>=start&&hour<end:hour>=start||hour<end);
         string background=!SettingOn("social.proactiveEnabled")?"等待开启后台自主活动":!SettingOn("social.autonomousEnabled")?"等待开启持续兴趣与想法":SettingNumber("social.autonomousDecisionsPerDay")==0?"每日后台判断上限为 0，后台不会唤醒模型":SettingNumber("social.actionsPerDay")==0?"QQ 动作总额为 0，后台动作暂停":quiet?"当前为上海时间安静时段，后台暂停":"基础条件已满足，等待候选话题、联系间隔与可用额度";
         SettingStatus("social.proactiveEnabled",background);
@@ -251,7 +277,7 @@ partial class App
         SettingStatus("social.autonomy","空间发布按实际正文合并确认；命令执行和文件修改使用独立的工作区审批。");
         SettingStatus("social.autoCollectPerDay",SettingOn("social.autoCollectStickers")?"后台收藏的独立上限，同时受 QQ 动作总额约束。":"后台收藏已关闭；可先设置额度，开关在主动与提醒管理。");
         SettingStatus("social.autoQzonePerDay",SettingOn("social.autoQzoneEnabled")?"后台发布的独立上限，同时受空间发布总额约束。":"自主空间创作已关闭；可先设置额度，开关在主动与提醒管理。");
-        SettingStatus("features.browsing.enabled","尚未接入，当前不可编辑；外部浏览器工具由 DSH 配置管理。");
+        SettingStatus("features.browsing.enabled","已接入本项目搜索与静态正文读取；DSH 外部联网独立管理，截图参数仅兼容保留。");
         if(Find<TextBlock>("SettingsContext")!=null)Find<TextBlock>("SettingsContext").Text="全局配置："+(settingsPath.Length>0?settingsPath:"当前动态配置文件")+"\n会话专属参与设置优先于这里的全局值；.env 同名项仅补齐缺失默认值。";
     }
     static void FilterSettings() {
@@ -273,6 +299,9 @@ partial class App
         foreach(var view in fieldViews.Values) {if(!categoryNames.Contains(view.Spec.Category))continue;var input=fields[view.Spec.Path] as TextBox;if(input==null)continue;object value=FlattenSettings(settings)[view.Spec.Path];if(value is string||value is IEnumerable)continue;if(!ValidateSetting(view.Spec,input,view.Error)){SelectSetting(view.Spec.Path);return false;}}
         long min,max;if(long.TryParse(((TextBox)fields["chat.delay.minMs"]).Text,out min)&&long.TryParse(((TextBox)fields["chat.delay.maxMs"]).Text,out max)&&min>max) {
             fieldViews["chat.delay.maxMs"].Error.Text="最长回复延迟不能小于最短回复延迟。";fieldViews["chat.delay.maxMs"].Error.Visibility=Visibility.Visible;SelectSetting("chat.delay.maxMs");return false;
+        }
+        if(SettingNumber("context.warningPercent")>=SettingNumber("context.rolloverPercent")){
+            fieldViews["context.rolloverPercent"].Error.Text="会话更换比例应大于上下文提醒比例。";fieldViews["context.rolloverPercent"].Error.Visibility=Visibility.Visible;SelectSetting("context.rolloverPercent");return false;
         }
         var savedSocial=(Dictionary<string,object>)settings["social"];
         if(SettingOn("social.mediaEnabled")&&new[]{"visionModel","transcriptionModel","speechModel"}.Any(key=>Convert.ToString(savedSocial[key]).Trim().Length>0)&&(!savedRuntimeValues.ContainsKey("BOT_MEDIA_BASE_URL")||savedRuntimeValues["BOT_MEDIA_BASE_URL"].Trim().Length==0)) {
@@ -346,7 +375,9 @@ partial class App
             if(((TextBox)fields["social.videoFrames"]).Text!="invalid"||!dirtySettingPaths.Contains("social.videoFrames"))throw new Exception("保存机器人设置清除了媒体草稿");
             if(settingsCards.Any(card=>card.Rows.Any(view=>IsMediaSetting(view.Spec.Path))))throw new Exception("媒体模型仍出现在机器人设置中");
             foreach(string key in mediaKeys)if(!object.ReferenceEquals(mediaInputs[key],fields["social."+key])||!Find<StackPanel>("RuntimeFields").IsAncestorOf(fieldViews["social."+key].Row))throw new Exception("媒体模型不是单一编辑入口");
-            if(fields["features.browsing.enabled"].IsEnabled)throw new Exception("未接入浏览器仍允许编辑");
+            if(!fields["features.browsing.enabled"].IsEnabled||fields["features.browsing.maxScreenshots"].IsEnabled)throw new Exception("联网与兼容截图设置的可用状态不正确");
+            ((CheckBox)fields["features.browsing.enabled"]).IsChecked=false;
+            if(fields["web.provider"].IsEnabled||fields["features.browsing.maxNavigations"].IsEnabled)throw new Exception("关闭联网后关联设置仍可编辑");
         } finally {
             savedRuntimeValues["BOT_MEDIA_BASE_URL"]=originalService;ApplySavedSettings(original,paths);socialProfiles=profiles;
             foreach(var view in fieldViews.Values)view.Error.Visibility=Visibility.Collapsed;

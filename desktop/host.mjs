@@ -81,13 +81,13 @@ async function command({ action, data }) {
   if (action === 'model') { const result = await config(action, data); emit({ type: 'model', ...result }); return; }
   if (action === 'knowledge') { const result = await config(action, data); emit({ type: 'knowledge', ...result }); return; }
   if (action === 'social' || action === 'memory' || action === 'settings-status') {
-    if (action === 'memory') data = { ...data, section: 'memories' };
+    if (action === 'memory') data = { ...data, section: data?.section==='lexicon'?'lexicon':'memories' };
     if (action === 'settings-status') data = { op: 'list', section: 'contacts' };
     const bridge = children.get('bridge');
     let result;
     if (bridge?.connected) result = await new Promise((done, reject) => {
       const id = String(++socialSequence);
-      const timer = setTimeout(() => { socialRequests.delete(id); reject(new Error('QQ 活动操作超时，请确认机器人运行状态')); }, 30000);
+      const timer = setTimeout(() => { socialRequests.delete(id); reject(new Error('QQ 活动操作超时，请确认机器人运行状态')); }, data?.op==='review_memory'?60000:30000);
       socialRequests.set(id, { done, reject, timer });
       bridge.send({ type: 'social', id, data }, error => { if (error) { clearTimeout(timer); socialRequests.delete(id); reject(error); } });
     });

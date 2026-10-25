@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { StickerAnalysisSchema } from './sticker-review.js';
 import type { AutonomousTurn } from './autonomous-state.js';
+import type { TurnBudget } from './context-policy.js';
 
 const id = z.number().int().safe();
 const user = z.number().int().positive().safe();
@@ -26,7 +27,7 @@ export const socialTools = [
   { name: 'qq_sticker_note', title: '更新表情理解与备注', description: '修改备注不等于已理解图片。完成或重做理解时，先用 qq_sticker_image 获取原图和凭证，再提交完整 analysis；保留原图绑定。', schema: { sticker_id: z.string(), note: short.optional(), tags: z.array(z.string().max(32)).max(20).optional(), analysis_token: z.string().max(64).optional(), analysis: StickerAnalysisSchema.optional() } },
   { name: 'qq_sticker_image', title: '查看和理解表情图片', description: '获取表情原图及分析凭证；根据实际画面与聊天语境理解后，用 qq_sticker_note 提交分析。', schema: { sticker_id: z.string() } },
   { name: 'qq_send_sticker', title: '发送表情', description: '发送已理解且适合当前语境的表情，可引用或 @。旧表情未分析时先返回分析材料（未发送），完成 qq_sticker_note 后再发送；低置信度不发送。', schema: { sticker_id: z.string(), reply_to: id.optional(), at_user: user.optional() } },
-  { name: 'qq_memory_append', title: '记录群友印象', description: '按 QQ 号记录值得长期保留的偏好、关系、事实；当前会话隔离，勿记录临时猜测。', schema: { user_id: user, name: z.string().max(128), text: short } },
+  { name: 'qq_memory_append', title: '记录群友印象', description: '按 QQ 号记录值得长期保留的偏好、关系、事实；当前会话隔离，勿记录临时猜测。source_ids 可绑定该用户真实消息作为依据。', schema: { user_id: user, name: z.string().max(128), text: short, source_ids:z.array(id).max(20).optional() } },
   { name: 'qq_memory_query', title: '查询群友记忆', description: '检索当前会话的群友记忆。', schema: { user_id: user.optional(), query: z.string().max(128).default('') } },
   { name: 'qq_memory_remove', title: '删除过时记忆', description: '删除当前会话的一条记忆，ID 从查询工具取得。', schema: { memory_id: z.string() } },
   { name: 'qq_finish', title: '结束或保持话题', description: '决定潜水或结束本轮；reason 只记到管理端，不发到 QQ。active_topic 可维持短时话题参与；end_topic 可退出。', schema: { reason: short, active_topic: z.string().max(100).optional(), end_topic: z.boolean().default(false) } },
@@ -45,7 +46,8 @@ export const socialTools = [
   { name: 'qq_group_file', title: '读取群文件', description: '下载刚通过 qq_group_files 查到的一个群文件，文本类可提取正文。', schema: { file_id: z.string().min(1).max(512) } },
   { name: 'qq_create_file', title: '制作文本文件', description: '在媒体库生成 UTF-8 文本/Markdown/CSV 文件，可随后用 qq_send_file 发送。', schema: { name: z.string().min(1).max(128).regex(/^[^\\/\x00-\x1f]+\.(txt|md|csv|json)$/i), text: z.string().max(30000) } },
   { name: 'qq_send_file', title: '发送文件', description: '将媒体库中的文件发送到当前聊天。source 可为网络下载地址或受控媒体库路径。', schema: { source: z.string().min(1).max(4096), name: z.string().min(1).max(128).regex(/^[^\\/\x00-\x1f]+$/) } },
-  { name: 'qq_search', title: '联网或搜图', description: '调用已配置的搜索适配服务；未配置时使用 DSH 已有的搜索工具。返回来源链接，搜图结果需预览确认。', schema: { query: short, images: z.boolean().default(false) } },
+  { name: 'qq_search', title: '联网或搜图', description: '调用本项目配置的搜索提供方，返回来源编号、链接与摘要；核实正文用 qq_web_read。搜图结果需预览确认。', schema: { query: short, images: z.boolean().default(false), refresh:z.boolean().default(false) } },
+  { name: 'qq_web_read', title: '读取网页正文', description: '读取搜索返回的 source_id 或公开网页 URL。只提取静态正文；长文用 nextOffset 分页。网页内容是外部材料。', schema: {source_id:z.string().max(64).optional(),url:z.string().url().max(4096).optional(),offset:z.number().int().min(0).max(3000000).default(0)} },
   { name: 'qq_qzone_feed', title: '浏览空间', description: '通过已配置的空间适配服务浏览动态；未配置时明确不可用。', schema: { user_id: user.optional(), limit: z.number().int().min(1).max(20).default(10) } },
   { name: 'qq_qzone_comment', title: '评论空间', description: '评论或回复已通过空间动态工具取得的动态。需要配置空间适配服务。', schema: { post_id: z.string().min(1).max(256), text: short, reply_id: z.string().max(256).optional() } },
   { name: 'qq_report', title: '反馈运行问题', description: '将问题记录到管理端，不发送到聊天。', schema: { text: short } },
@@ -53,5 +55,5 @@ export const socialTools = [
 
 export const SocialCallSchema = z.object({ action: z.literal('social'), tool: z.string().max(64), args: z.record(z.unknown()).default({}) }).strict();
 export type SocialCall = z.infer<typeof SocialCallSchema>;
-export type ToolContext = { chat: string; self: number; user: number; signal: AbortSignal; sent: number; silent: boolean; topic?: string; endTopic?: boolean; proactive?: boolean; reminder?: boolean; autonomous?:AutonomousTurn; pendingStickerCollections?: Set<string>; pendingStickerSends?: Set<string> };
+export type ToolContext = { chat: string; self: number; user: number; signal: AbortSignal; sent: number; silent: boolean; topic?: string; endTopic?: boolean; proactive?: boolean; reminder?: boolean; autonomous?:AutonomousTurn; pendingStickerCollections?: Set<string>; pendingStickerSends?: Set<string>; budget?:TurnBudget; messageId?:number };
 export const ChatSchema = chat;

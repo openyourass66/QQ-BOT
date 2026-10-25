@@ -5,6 +5,10 @@ export const chatRuntimeKeys = new Set(['BOT_CHAT_MODE', 'BOT_CHAT_MODEL', 'BOT_
 export const initialDefaultKeys = new Set(['ADMIN_QQ','GROUP_PREFIX','GROUP_COOLDOWN_MS','GROUP_CONTEXT_LINES','REPLY_CHUNK_SIZE','MIN_DELAY_MS','MAX_DELAY_MS','ALLOW_EXEC']);
 
 export const runtimeFields = [
+  ['后台分析服务', 'BOT_LEARNING_BASE_URL', '独立分析地址（Messages，留空复用项目地址）', ''],
+  ['后台分析服务', 'BOT_LEARNING_API_KEY', '独立分析密钥（留空复用项目 Key）', '', 'secret'],
+  ['后台分析服务', 'BOT_LEARNING_MODEL', '分析模型（留空复用对话模型名称）', ''],
+  ['搜索适配服务', 'BOT_TAVILY_API_KEY', 'Tavily 搜索密钥', '', 'secret'],
   ['模型选择', 'BOT_CHAT_MODE', '使用方式', 'profile', 'chat-mode'],
   ['模型选择', 'BOT_CHAT_MODEL', '对话模型', defaultChatModel, 'chat-model'],
   ['模型选择', 'QQ_BOT_DEEPSEEK_API_KEY', '本项目 API Key', '', 'secret'],

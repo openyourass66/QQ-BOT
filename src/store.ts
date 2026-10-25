@@ -4,12 +4,12 @@ import { z } from 'zod';
 
 const StoreSchema = z.object({
   version: z.literal(1),
-  sessions: z.record(z.object({ sessionId: z.string().min(1), updatedAt: z.number().finite() })),
+  sessions: z.record(z.object({ sessionId: z.string().min(1), updatedAt: z.number().finite(), policy:z.string().optional(), generation:z.number().int().positive().optional() })),
 });
 
 type StoreShape = {
   version: 1;
-  sessions: Record<string, { sessionId: string; updatedAt: number }>;
+  sessions: Record<string, { sessionId: string; updatedAt: number; policy?:string; generation?:number }>;
 };
 
 /**
@@ -40,8 +40,9 @@ export class SessionStore {
     return this.data.sessions[key]?.sessionId;
   }
 
-  set(key: string, sessionId: string): void {
-    this.data.sessions[key] = { sessionId, updatedAt: Date.now() };
+  metadata(key:string) {return structuredClone(this.data.sessions[key]);}
+  set(key: string, sessionId: string, policy?:string,generation?:number): void {
+    this.data.sessions[key] = { sessionId, updatedAt: Date.now(),...(policy===undefined?{}:{policy}),...(generation===undefined?{}:{generation}) };
     this.changed();
   }
 

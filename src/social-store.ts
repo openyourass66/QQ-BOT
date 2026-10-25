@@ -1,11 +1,12 @@
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { dirname } from 'node:path';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import type { MessageEvent, Segment } from './onebot.js';
 import { segmentsToText } from './onebot.js';
 import { StoredStickerAnalysisSchema } from './sticker-review.js';
 import { AutonomousStateSchema } from './autonomous-state.js';
+import { CognitionStateSchema, MemoryMetaSchema } from './cognition-state.js';
 
 const segment = z.object({ type: z.string(), data: z.record(z.unknown()) });
 const message = z.object({ chat: z.string(), id: z.number().int().safe(), user: z.number().int().safe(), name: z.string(), at: z.number(), text: z.string(), segments: z.array(segment), self: z.boolean(), recalled: z.boolean().default(false) });
@@ -16,22 +17,33 @@ const sticker = z.object({ id: z.string(), file: z.string(), note: z.string(), t
 const task = z.object({ id: z.string(), chat: z.string(), creator: z.string(), text: z.string(), due: z.number(), interval: z.number().default(0), state: z.enum(['pending', 'blocked', 'running', 'sent', 'failed', 'unknown', 'cancelled']), error: z.string().default(''), retryAt: z.number().default(0) });
 const event = z.object({ id: z.string(), chat: z.string(), type: z.string(), at: z.number(), data: z.record(z.unknown()), handled: z.boolean().default(false) });
 const action = z.object({ id: z.string(), chat: z.string(), tool: z.string(), at: z.number(), state: z.enum(['running', 'success', 'failed', 'unknown']), summary: z.string() });
-const turn = z.object({ id: z.string(), chat: z.string(), at: z.number(), duration: z.number(), input: z.string(), output: z.string(), tools: z.array(z.string()), error: z.string(), inputTokens: z.number().nullable(), outputTokens: z.number().nullable() });
+const turn = z.object({ id: z.string(), chat: z.string(), at: z.number(), duration: z.number(), input: z.string(), output: z.string(), tools: z.array(z.string()), error: z.string(), inputTokens: z.number().nullable(), outputTokens: z.number().nullable(), contextUsed:z.number().nonnegative().optional(),contextSize:z.number().positive().optional(),generation:z.number().optional() });
 const profile = z.object({ chat: z.string().regex(/^(group|private):\d+$/), persona: z.string().max(10000), responseMode: z.enum(['inherit','mention','keywords','probability','all']).default('inherit'), keywords: z.array(z.string().max(64)).max(100).default([]), probability: z.number().int().min(0).max(100).default(10), proactive: z.boolean().default(true) });
-const schema = z.object({ version: z.literal(1), account: z.number().int().default(0), messages: z.array(message), contacts: z.array(contact), memories: z.array(memory), stickers: z.array(sticker), tasks: z.array(task), events: z.array(event), actions: z.array(action), turns: z.array(turn), profiles: z.array(profile).default([]), autonomous:AutonomousStateSchema });
+const schema = z.object({ version: z.literal(2), account: z.number().int().default(0), messages: z.array(message), contacts: z.array(contact), memories: z.array(memory), stickers: z.array(sticker), tasks: z.array(task), events: z.array(event), actions: z.array(action), turns: z.array(turn), profiles: z.array(profile).default([]), autonomous:AutonomousStateSchema, cognition:CognitionStateSchema });
 export type SocialData = z.infer<typeof schema>;
 export type StoredMessage = z.infer<typeof message>;
 export type ScheduledTask = z.infer<typeof task>;
 
 export class SocialStore {
-  private data: SocialData = schema.parse({ version: 1, messages: [], contacts: [], memories: [], stickers: [], tasks: [], events: [], actions: [], turns: [] });
+  private data: SocialData = schema.parse({ version: 2, messages: [], contacts: [], memories: [], stickers: [], tasks: [], events: [], actions: [], turns: [] });
   private chain: Promise<unknown> = Promise.resolve();
   constructor(readonly path: string) {}
   async load(): Promise<void> {
-    try { this.data = schema.parse(JSON.parse(await readFile(this.path, 'utf8'))); }
-    catch (e) { if ((e as NodeJS.ErrnoException).code !== 'ENOENT') throw e; }
+    let found=false;
+    try {
+      const raw = await readFile(this.path, 'utf8');found=true;const parsed = JSON.parse(raw);
+      if (parsed.version === 1) {
+        const next = schema.parse({...parsed,version:2});
+        for(const m of next.memories) next.cognition.memories[m.id] ??= MemoryMetaSchema.parse({confirmedAt:m.at});
+        const backup = `${this.path}.v1-${createHash('sha256').update(raw).digest('hex').slice(0,12)}.bak`;
+        try { await writeFile(backup,raw,{flag:'wx'}); } catch(e) { if((e as NodeJS.ErrnoException).code!=='EEXIST')throw e;if(await readFile(backup,'utf8')!==raw)throw new Error('迁移备份与原文件不一致，原文件保留'); }
+        this.data = next;
+      } else this.data = schema.parse(parsed);
+    }
+    catch (e) { if (found || (e as NodeJS.ErrnoException).code !== 'ENOENT') throw e; }
     // A process crash during a send has an unknown outcome; never repeat it automatically.
     await this.update(d => {
+      for(const job of d.cognition.jobs) if(job.state==='running'){job.state='unknown';job.summary='上次分析中断，已保留处理游标，不自动重复提交';}
       for (const item of d.actions) if (item.state === 'running') item.state = 'unknown';
       for (const item of d.tasks) if (item.state === 'running') { item.state = 'unknown'; item.error = '上次执行中断，请核对聊天记录后再安排'; }
       for (const item of d.autonomous.thoughts) if(item.state==='running'){

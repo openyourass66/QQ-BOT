@@ -6,10 +6,13 @@ import { legacyTools } from './legacy-tools.js';
 import { getSettings, getSettingsPath, saveSettings } from './settings.js';
 import type { DailyUsageStore } from './usage.js';
 import { stickerSearchText } from './sticker-review.js';
+import { reviseMemory, forgetMemory, memoryMeta, fingerprint } from './cognition.js';
+import { learningModel } from './learning-model.js';
+import { toolAvailable } from './context-policy.js';
 
 const requestSchema = z.object({
-  op: z.enum(['list', 'edit_memory', 'delete', 'block', 'allow', 'refresh_contacts', 'reset_session', 'profile', 'collect_sticker','edit_interest','defer_thought']),
-  section: z.enum(['contacts','messages','memories','stickers','tasks','events','actions','turns','capabilities','thoughts','interests','decisions']).default('contacts'),
+  op: z.enum(['list', 'edit_memory', 'delete', 'block', 'allow', 'refresh_contacts', 'reset_session', 'profile', 'collect_sticker','edit_interest','defer_thought','lock_memory','restore_memory','edit_lexicon','activate_lexicon','disable_lexicon','restore_lexicon','review_memory']),
+  section: z.enum(['contacts','messages','memories','stickers','tasks','events','actions','turns','capabilities','thoughts','interests','decisions','lexicon','learning']).default('contacts'),
   chat: z.string().max(64).default(''), query: z.string().max(256).default(''), id: z.string().max(128).default(''),
   text: z.string().max(10000).default(''), expectedText: z.string().max(2000).optional(), blocked: z.boolean().default(true),
   responseMode: z.enum(['inherit','mention','keywords','probability','all']).default('inherit'),
@@ -17,8 +20,27 @@ const requestSchema = z.object({
 }).strict().refine(value => value.op === 'profile' || value.text.length <= 2000, { message: '记忆内容最多 2000 字', path: ['text'] });
 
 export async function socialAdmin(input: unknown, store: SocialStore, media: MediaService,
-  live?: { refresh(): Promise<void>; reset(chat: string): Promise<void>; usage?: DailyUsageStore; stickers?: { sync(): Promise<unknown>;collect(id:string):Promise<void>;remove(id:string):Promise<void> } }, offlineUsage?: DailyUsageStore): Promise<unknown> {
+  live?: { refresh(): Promise<void>; reset(chat: string): Promise<void>; review?(chat:string):Promise<void>; usage?: DailyUsageStore; stickers?: { sync(): Promise<unknown>;collect(id:string):Promise<void>;remove(id:string):Promise<void> } }, offlineUsage?: DailyUsageStore): Promise<unknown> {
   const a = requestSchema.parse(input);
+  if(a.op==='review_memory'){if(!live?.review)throw new Error('请启动机器人后整理当前会话');await live.review(a.chat);}
+  if(['lock_memory','restore_memory'].includes(a.op))await store.update(d=>{
+    if(a.section!=='memories')throw new Error('请选择群友记忆');
+    const m=d.memories.find(m=>m.id===a.id);if(!m)throw new Error('记忆不存在');
+    if(a.expectedText!==undefined&&m.text!==a.expectedText)throw new Error('记忆已修改，请刷新后核对');
+    const meta=memoryMeta(d,m.id);
+    if(a.op==='lock_memory'){meta.locked=!meta.locked;meta.revision++;d.cognition.memories[m.id]=meta;}
+    else {const old=meta.history.at(-1);if(!old)throw new Error('没有可恢复的版本');reviseMemory(d,m.id,old.text,'恢复上一版本');}
+  });
+  if(['edit_lexicon','activate_lexicon','disable_lexicon','restore_lexicon'].includes(a.op))await store.update(d=>{
+    if(a.section!=='lexicon')throw new Error('请选择群内用语');
+    const item=d.cognition.lexicon.find(l=>l.id===a.id);if(!item)throw new Error('词条不存在');
+    if(a.expectedText!==undefined&&item.meaning!==a.expectedText)throw new Error('词条已修改，当前编辑已保留，请刷新后核对');
+    if(a.op==='edit_lexicon'){if(!a.text.trim()||a.text.length>300)throw new Error('词条含义需要 1–300 字');item.history.push({text:item.meaning,at:Date.now(),reason:'管理员编辑'});item.meaning=a.text.trim();item.locked=true;}
+    else if(a.op==='restore_lexicon'){const old=item.history.at(-1);if(!old)throw new Error('没有可恢复的版本');const current=item.meaning;item.meaning=old.text;item.history.push({text:current,at:Date.now(),reason:'恢复上一版本'});item.locked=true;}
+    else if(a.op==='activate_lexicon'){item.status='active';item.locked=true;}
+    else item.status='disabled';
+    item.revision++;item.history=item.history.slice(-10);
+  });
   if(a.op==='edit_interest') {
     if(a.section!=='interests'||!a.text.trim()||a.text.trim().length>80)throw new Error('兴趣主题需要 1–80 字');
     await store.update(d=>{const i=d.autonomous.interests.find(i=>i.id===a.id);if(!i)throw new Error('兴趣不存在');if(a.expectedText!==undefined&&i.topic!==a.expectedText)throw new Error('兴趣已被其他操作修改，请刷新后核对');i.topic=a.text.trim();i.updatedAt=Date.now();});
@@ -48,7 +70,7 @@ export async function socialAdmin(input: unknown, store: SocialStore, media: Med
   }
   if (a.op === 'edit_memory') {
     if (!a.text.trim()) throw new Error('记忆内容不能为空');
-    await store.update(d => { const m = d.memories.find(m => m.id === a.id); if (!m) throw new Error('记忆不存在'); if (a.expectedText !== undefined && m.text !== a.expectedText) throw new Error('记忆已被其他操作修改，请刷新后核对；当前编辑仍保留'); m.text = a.text; });
+    await store.update(d => { const m = d.memories.find(m => m.id === a.id); if (!m) throw new Error('记忆不存在'); if (a.expectedText !== undefined && m.text !== a.expectedText) throw new Error('记忆已被其他操作修改，请刷新后核对；当前编辑仍保留'); reviseMemory(d,m.id,a.text); });
   }
   if(a.op==='delete'&&a.section==='stickers') {
     const item=store.snapshot().stickers.find(s=>s.id===a.id);if(!item)throw new Error('表情不存在');
@@ -56,7 +78,8 @@ export async function socialAdmin(input: unknown, store: SocialStore, media: Med
     else await store.update(d=>{d.stickers=d.stickers.filter(s=>s.id!==a.id);});
   }
   if (a.op === 'delete'&&a.section!=='stickers') await store.update(d => {
-    if (a.section === 'memories') { const m = d.memories.find(m => m.id === a.id); if (!m) throw new Error('记忆不存在'); if (a.expectedText !== undefined && m.text !== a.expectedText) throw new Error('记忆已被其他操作修改，请刷新后核对；当前编辑仍保留'); d.memories = d.memories.filter(m => m.id !== a.id); }
+    if (a.section === 'memories') { const m = d.memories.find(m => m.id === a.id); if (!m) throw new Error('记忆不存在'); if (a.expectedText !== undefined && m.text !== a.expectedText) throw new Error('记忆已被其他操作修改，请刷新后核对；当前编辑仍保留'); forgetMemory(d,m.id); }
+    else if(a.section==='lexicon'){const item=d.cognition.lexicon.find(l=>l.id===a.id);if(!item)throw new Error('词条不存在');if(a.expectedText!==undefined&&item.meaning!==a.expectedText)throw new Error('词条已修改，当前编辑已保留');d.cognition.suppressed.push({chat:item.chat,hash:fingerprint(item.term),at:Date.now()});d.cognition.suppressed=d.cognition.suppressed.slice(-10000);d.cognition.lexicon=d.cognition.lexicon.filter(l=>l.id!==a.id);}
     else if (a.section === 'tasks') { const t = d.tasks.find(t => t.id === a.id); if (!t || !['pending','blocked'].includes(t.state)) throw new Error('只能取消尚未执行的提醒'); t.state = 'cancelled'; }
     else if(a.section==='thoughts'){const t=d.autonomous.thoughts.find(t=>t.id===a.id);if(!t||!['pending','running'].includes(t.state))throw new Error('这条想法已经结束');t.state='dismissed';t.result='管理员取消，不再执行';}
     else if(a.section==='interests'){if(!d.autonomous.interests.some(i=>i.id===a.id))throw new Error('兴趣不存在');d.autonomous.interests=d.autonomous.interests.filter(i=>i.id!==a.id);}
@@ -90,7 +113,13 @@ export async function socialAdmin(input: unknown, store: SocialStore, media: Med
         `当前状态：${blocked?'已屏蔽':allowed?'可联系':'未在允许名单'}\n参与配置：${participation}${kind==='group'&&mode==='probability'?'\n参与概率：'+(override?profile.probability:s.social.responseProbability)+'%':''}\n会话人设：${profile?.persona?'使用会话独立副本':'沿用工作区人设'}\n会话后台活动：${profile?.proactive===false?'聊天与收藏已关闭':'沿用全局开关、安静时段与额度'}\n\n可在会话设置调整独立参与方式与人设。`);
     } break;
     case 'messages': for (const m of [...data.messages].reverse()) add(String(m.id), m.chat, m.name, m.text, m.recalled ? '已撤回' : m.self ? '自己发送' : '收到', m.at, `${m.name}（${m.user}）\n消息 #${m.id}\n${m.text}\n\n媒体：${m.segments.filter(s => s.type !== 'text').map(s => s.type).join('、')}`); break;
-    case 'memories': for (const m of [...data.memories].reverse()) if(a.op!=='list'||!a.id||m.id===a.id) add(m.id,m.chat,m.name,m.text,'长期记忆',m.at,`QQ ${m.user}\n${m.text}`,m.text); break;
+    case 'memories': for (const m of [...data.memories].reverse()) if(a.op!=='list'||!a.id||m.id===a.id) {
+      const meta=memoryMeta(data,m.id);add(m.id,m.chat,m.name,m.text,`${meta.locked?'已锁定':'可整理'} · ${{active:'有效',conflict:'存在冲突',expired:'已过期',revoked:'已撤销'}[meta.status]}`,m.at,
+        `QQ ${m.user}\n${m.text}\n\n来源：${{legacy:'历史记忆（无原消息依据）',admin:'管理员确认',tool:'对话工具记录',learned:'后台学习'}[meta.source]}\n依据消息：${meta.sources.join('、')||'无'}\n依据摘录：${meta.evidence.map(e=>`#${e.id} QQ ${e.user}：${e.quote}`).join('\n')||'无'}\n修订：${meta.revision} · ${meta.locked?'已锁定':'可整理'}\n\n历史版本：\n${meta.history.map(h=>`${date(h.at)} ${h.reason}\n${h.text}`).join('\n')||'无'}`,m.text);
+    } break;
+    case 'lexicon':for(const l of [...data.cognition.lexicon].reverse())add(l.id,l.chat,l.term,l.meaning,{candidate:'待确认',active:'有效',disabled:'已停用'}[l.status],l.at,
+      `类型：${l.kind==='term'?'群内用语':'表达参考'}\n${l.meaning}\n\n依据消息：${l.sources.join('、')}\n修订：${l.revision} · ${l.locked?'管理员锁定':'自动候选'}\n历史版本：\n${l.history.map(h=>`${date(h.at)} ${h.reason}\n${h.text}`).join('\n')||'无'}`,l.meaning);break;
+    case 'learning':for(const j of [...data.cognition.jobs].reverse())add(j.id,j.chat,'聊天资料整理',j.summary,{running:'分析中',completed:'完成',failed:'失败',unknown:'结果待核对',discarded:'未应用'}[j.state],j.at,`${j.summary}\n依据消息：${j.sources.join('、')}\n服务返回用量：${j.inputTokens===undefined?'未知':`${j.inputTokens} 输入 / ${j.outputTokens} 输出`}\n此记录统计一次无工具分析，不推算费用。`);break;
     case 'stickers': for (const t of data.stickers) {
       if(t.qq&&!t.qqPresent)continue;
       if (a.query && !(stickerSearchText(t) + ' ' + (t.analysis?.avoid.join(' ') ?? '').toLocaleLowerCase()).includes(a.query.toLocaleLowerCase())) continue;
@@ -105,11 +134,13 @@ export async function socialAdmin(input: unknown, store: SocialStore, media: Med
       const title = [...socialTools,...legacyTools].find(tool => tool.name === (alias[t.tool] ?? t.tool))?.title ?? t.tool;
       add(t.id,t.chat,title,t.summary,{ running:'执行中',success:'成功',failed:'失败',unknown:'结果待核对' }[t.state],t.at);
     } break;
-    case 'turns': for (const t of [...data.turns].reverse()) add(t.id,t.chat,`${Math.round(t.duration/1000)} 秒`,t.output || t.error,t.error ? '失败' : '完成',t.at,`输入：\n${t.input}\n\n输出：\n${t.output}\n\n工具：${t.tools.join('、')}\n${t.error}\n\n用量：${t.inputTokens === null ? 'DSH 未提供' : t.inputTokens + ' 输入 / ' + t.outputTokens + ' 输出'}`); break;
+    case 'turns': for (const t of [...data.turns].reverse()) add(t.id,t.chat,`${Math.round(t.duration/1000)} 秒`,t.output || t.error,t.error ? '失败' : '完成',t.at,`输入：\n${t.input}\n\n输出：\n${t.output}\n\n工具：${t.tools.join('、')}\n${t.error}\n\n用量：${t.inputTokens === null ? 'DSH 未提供计费用量' : t.inputTokens + ' 输入 / ' + t.outputTokens + ' 输出'}\n上下文：${t.contextSize?`${t.contextUsed}/${t.contextSize}（DSH 上报占用，非计费累计）`:'DSH 未上报'}\n会话代数：${t.generation??1}`); break;
     case 'capabilities': {
       const names: Record<string,string> = { images:'图片理解',transcription:'语音识别',speech:'语音合成',video:'视频理解',search:'联网搜索',qzone:'空间动态' };
       for (const [name,value] of Object.entries(media.capabilities())) add(name,'',names[name] ?? name,value,value.includes('未配置') ? '未配置' : '可检查',0);
-      for (const tool of [...socialTools,...legacyTools]) add(tool.name,'',tool.title,tool.description,'已注册',0);
+      const analysis=learningModel().available();add('learning-model','','后台分析模型',analysis||'可使用无工具分析通道',analysis?'未配置':'可检查',0);
+      add('managed-web','','本项目联网',s.features.browsing.enabled?`${s.web.provider}；DSH 外部工具独立管理`:'本项目联网已关闭',s.features.browsing.enabled?'可检查':'已关闭',0);
+      for (const tool of [...socialTools,...legacyTools]) add(tool.name,'',tool.title,tool.description,toolAvailable(tool.name,s)?'已注册':'已关闭或缺少依赖',0);
       break;
     }
   }
@@ -123,6 +154,7 @@ export async function socialAdmin(input: unknown, store: SocialStore, media: Med
     {key:'likes',label:'名片点赞',limit:s.budgets.likesPerDay},
     {key:'qzone',label:'空间发布',limit:s.features.qzone.dailyLimit},
     {key:'autonomous-decisions',label:'后台判断',limit:s.social.autonomousDecisionsPerDay},
+    {key:'learning',label:'后台学习',limit:s.learning.dailyCalls},
     ...data.contacts.filter(c=>c.chat.startsWith('group:')).map(c=>({key:c.chat,label:c.name+' 主动消息与提醒',limit:s.chat.group.proactive.perGroupPerDay})),
   ]);
   return { op: a.op, section: a.section, rows: rows.slice(0,200), total: rows.length, profiles: data.profiles, socialSettings: s.social, settingsPath:getSettingsPath(), quotas:quotas?{...quotas,live:!!live}:null, note, usage: { turns: data.turns.length, tokensKnown: data.turns.filter(t => t.inputTokens !== null).length } };

@@ -10,7 +10,9 @@ function result(value: unknown): { content: any[] } {
   if (value && typeof value === 'object' && Array.isArray((value as { content?: unknown }).content)) return value as { content: any[] };
   return { content: [{ type: 'text', text: typeof value === 'string' ? value : JSON.stringify(value, null, 2) }] };
 }
-for (const tool of [...socialTools, ...legacyTools]) {
+const selected:unknown=process.env.BOT_QQ_TOOLS?JSON.parse(process.env.BOT_QQ_TOOLS):null;
+if(selected!==null&&(!Array.isArray(selected)||selected.some(name=>typeof name!=='string')))throw new Error('QQ 工具清单无效');
+for (const tool of [...socialTools, ...legacyTools].filter(tool=>selected===null||(selected as string[]).includes(tool.name))) {
   server.registerTool(tool.name, { title: tool.title, description: tool.description, inputSchema: tool.schema as z.ZodRawShape }, async (args, extra) => {
     try {
       if (tool.name === 'qq_send_message') return result(await requestQqAction({ action: 'send_message', ...args } as never, extra.signal));
