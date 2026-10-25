@@ -2,10 +2,14 @@ import { readFile, writeFile, rename, mkdir, rm } from 'node:fs/promises';
 import { resolve, dirname } from 'node:path';
 import { loadEnvFile } from 'node:process';
 import { parseEnv } from 'node:util';
+import { existsSync } from 'node:fs';
+import { setup } from '../scripts/setup.mjs';
+import { detectEnvironment, checkSetup } from './onboarding.mjs';
 import { runtimeFields, chatRuntimeKeys, initialDefaultKeys, mergeRuntimeEnv, validateRuntimeEnv } from './runtime-fields.mjs';
 import { readChatModelConfig, listChatModels, testChatModel } from '../dist/agent/chat-model.js';
 import { knowledge } from './knowledge.mjs';
 import { mediaKeys, settingsFileFor, validateMediaService, mergeSettingsDraft } from './settings-config.mjs';
+if (existsSync('.env.example') && existsSync('templates/bot-persona.md')) await setup(process.cwd());
 try { loadEnvFile('.env'); } catch (e) { if (e.code !== 'ENOENT') throw e; }
 const settings = await import('../dist/core/settings.js');
 const read = async (p) => readFile(p, 'utf8').catch(e => { if (e.code === 'ENOENT') return ''; throw e; });
@@ -19,7 +23,14 @@ process.once('message', async ({ action, data }) => {
       const env = await read('.env') || await read('.env.example');
       const persona = await read(personaPath);
       const library = await knowledge(dirname(personaPath)).catch(error => ({ workspace: dirname(personaPath), global: persona, globalRevision: null, libraryRevision: null, presets: [], files: [], error: /^管理操作失败：/.test(error.message) ? error.message : '无法读取人设与记忆，请检查文件权限后刷新。' }));
-      result = { settings: await settings.loadSettings(), settingsPath: settings.getSettingsPath(), env, runtimeFields: describeEnv(env), persona, personaPath, knowledge: library };
+      const values = parseEnv(env);
+      result = { settings: await settings.loadSettings(), settingsPath: settings.getSettingsPath(), env, runtimeFields: describeEnv(env), persona, personaPath, knowledge: library, needsSetup: !values.BOT_DSH_BIN || values.BOT_DSH_BIN === 'dsh.cmd' };
+    }
+    else if (action === 'onboarding') {
+      if (!['detect','check'].includes(data?.operation)) throw new Error('连接配置格式无效：未知快速配置操作');
+      const env = mergeRuntimeEnv(await read('.env'), data.runtime || {});
+      if (data.operation === 'check') validateRuntimeEnv(env);
+      result = data.operation === 'detect' ? await detectEnvironment(process.cwd(), { ...process.env, ...parseEnv(env) }) : await checkSetup(process.cwd(), parseEnv(env));
     }
     else if (action === 'settings') {
       if (data?.settingsPath && resolve(data.settingsPath) !== settings.getSettingsPath()) throw new Error('配置格式无效：动态配置文件已切换，当前输入已保留，请重新打开工作台核对');

@@ -26,6 +26,8 @@ partial class App
     };
     static readonly Dictionary<string,string> runtimeHelp = new Dictionary<string,string> {
         {"BOT_DSH_BIN","选择 dsh.cmd 或 DSH 可执行文件。"},
+        {"BOT_ONEBOT_MODE","本机启动需要 QQ 和 NapCat 组件；连接已有服务只需地址与令牌，不在本机启动 QQ。"},
+        {"ONEBOT_TOKEN","填写 NapCat 的 access_token；未设置令牌的服务可留空。"},
         {"BOT_DSH_PROFILE","提供基础工具与运行环境；上方可为本项目单独选择对话模型。"},
         {"BOT_CHAT_MODE","沿用已有设置，或为本项目使用独立的 API Key；账号模式复用 DSH 的登录态。"},
         {"BOT_CHAT_MODEL","可获取模型列表后选择，也可直接填写服务支持的模型 ID。"},
@@ -49,10 +51,15 @@ partial class App
     static Dictionary<string,TextBlock> runtimeErrors = new Dictionary<string,TextBlock>();
     static Dictionary<string,string> savedRuntimeValues = new Dictionary<string,string>();
     static Dictionary<FrameworkElement,int> runtimeCards = new Dictionary<FrameworkElement,int>();
+    static Dictionary<FrameworkElement,string> runtimeRows = new Dictionary<FrameworkElement,string>();
+    static Dictionary<FrameworkElement,string[]> runtimeCardKeys = new Dictionary<FrameworkElement,string[]>();
+    static List<UIElement> runtimeCardOrder = new List<UIElement>();
+    static List<TextBlock> runtimeSaveBadges = new List<TextBlock>();
     static Dictionary<string,Control> mediaInputs = new Dictionary<string,Control>();
     static Dictionary<string,TextBlock> mediaErrors = new Dictionary<string,TextBlock>();
     static TextBlock mediaSummary;
     static TextBlock chatModelSummary, chatModelResult;
+    static StackPanel chatModelActions;
     static Button chatModelTest, chatModelList;
     static bool chatModelBusy;
     static bool runtimeBusy, connectionRestartPending;
@@ -66,6 +73,7 @@ partial class App
         Find<Button>("SaveRuntime").IsEnabled=!envDirty&&!chatModelBusy;
         Find<Button>("SaveRuntimeRestart").IsEnabled=!envDirty&&!runtimeBusy&&!chatModelBusy;
         if(envDirty)Find<TextBlock>("RuntimeHint").Text="正在编辑高级文本，请先保存高级文本。";
+        RefreshQuickSetup();
     }
     static string RuntimeValue(string key) {
         var control=runtimeInputs[key];var combo=control as ComboBox;
@@ -84,8 +92,9 @@ partial class App
         foreach(var card in runtimeCards)card.Key.Visibility=card.Value==category?Visibility.Visible:Visibility.Collapsed;
         Find<TextBlock>("RuntimeTitle").Text=runtimeCategories[category];Find<TextBlock>("RuntimeSubtitle").Text=runtimeDescriptions[category];
         Find<Expander>("AdvancedEnv").Visibility=category==5?Visibility.Visible:Visibility.Collapsed;
+        FilterQuickSetup();
     }
-    static void NavigateRuntime(int category) {Find<TabControl>("Tabs").SelectedIndex=3;Find<ListBox>("RuntimeNav").SelectedIndex=category;Find<ScrollViewer>("RuntimeScroll").ScrollToTop();}
+    static void NavigateRuntime(int category) {quickSetupMode=false;Find<TabControl>("Tabs").SelectedIndex=3;Find<ListBox>("RuntimeNav").SelectedIndex=category;FilterRuntime();Find<ScrollViewer>("RuntimeScroll").ScrollToTop();}
     static Border RuntimeCard(string title,string help,Panel body,int category) {
         var content=new StackPanel();content.Children.Add(new TextBlock {Text=title,FontSize=14,FontWeight=FontWeights.SemiBold});
         if(help.Length>0)content.Children.Add(new TextBlock {Text=help,FontSize=11,Foreground=Ink("Muted"),TextWrapping=TextWrapping.Wrap,LineHeight=18,Margin=new Thickness(0,7,0,0)});
@@ -94,7 +103,7 @@ partial class App
         runtimeCards[card]=category;return card;
     }
     static void BuildRuntimeFields(object value) {
-        var panel=Find<StackPanel>("RuntimeFields");panel.Children.Clear();runtimeInputs.Clear();runtimeErrors.Clear();runtimeCards.Clear();mediaInputs.Clear();mediaErrors.Clear();
+        var panel=Find<StackPanel>("RuntimeFields");panel.Children.Clear();runtimeInputs.Clear();runtimeErrors.Clear();runtimeCards.Clear();runtimeRows.Clear();runtimeCardKeys.Clear();runtimeCardOrder.Clear();runtimeSaveBadges.Clear();mediaInputs.Clear();mediaErrors.Clear();
         var all=((IEnumerable)value).Cast<Dictionary<string,object>>().ToList();
         savedRuntimeValues=all.ToDictionary(field=>(string)field["key"],field=>(string)field["value"]);
         foreach(var group in all.Where(f=>!f.ContainsKey("initialDefault")||!(bool)f["initialDefault"]).GroupBy(f=>(string)f["group"]).OrderBy(g=>RuntimeCategory(g.Key))) {
@@ -104,11 +113,16 @@ partial class App
                 var row=new Grid {Margin=new Thickness(0,0,0,16)};row.ColumnDefinitions.Add(new ColumnDefinition {Width=new GridLength(1,GridUnitType.Star)});row.ColumnDefinitions.Add(new ColumnDefinition {Width=new GridLength(1.35,GridUnitType.Star)});
                 var copy=new StackPanel {Margin=new Thickness(0,3,24,0)};copy.Children.Add(new TextBlock {Text=label,FontSize=12,TextWrapping=TextWrapping.Wrap});
                 if(runtimeHelp.ContainsKey(key))copy.Children.Add(new TextBlock {Text=runtimeHelp[key],FontSize=10,Foreground=Ink("Muted"),LineHeight=17,TextWrapping=TextWrapping.Wrap,Margin=new Thickness(0,5,0,0)});
-                copy.Children.Add(new TextBlock{Text="保存后需重启",FontSize=10,Foreground=Ink("Accent"),Margin=new Thickness(0,5,0,0)});
+                var saveBadge=new TextBlock{Text="保存后需重启",FontSize=10,Foreground=Ink("Accent"),Margin=new Thickness(0,5,0,0)};copy.Children.Add(saveBadge);runtimeSaveBadges.Add(saveBadge);
                 row.Children.Add(copy);Control input;
-                if(kind=="chat-mode") {
+                if(kind=="onebot-mode") {
                     var combo=new ComboBox {SelectedValuePath="Tag"};
-                    combo.Items.Add(new ComboBoxItem {Content="沿用 DSH Profile",Tag="profile"});combo.Items.Add(new ComboBoxItem {Content="本项目 API Key",Tag="project"});combo.Items.Add(new ComboBoxItem {Content="DeepSeek 账号登录",Tag="account"});
+                    combo.Items.Add(new ComboBoxItem {Content="自动连接（已有服务优先）",Tag="auto"});combo.Items.Add(new ComboBoxItem {Content="工作台启动本机 NapCat",Tag="managed"});combo.Items.Add(new ComboBoxItem {Content="连接已运行的 QQ 服务",Tag="external"});
+                    combo.SelectedValue=(string)field["value"];combo.SelectionChanged+=(s,e)=>RuntimeChanged();input=combo;
+                }
+                else if(kind=="chat-mode") {
+                    var combo=new ComboBox {SelectedValuePath="Tag"};
+                    combo.Items.Add(new ComboBoxItem {Content="沿用已配置的 DSH",Tag="profile"});combo.Items.Add(new ComboBoxItem {Content="本项目 API Key（新用户推荐）",Tag="project"});combo.Items.Add(new ComboBoxItem {Content="使用 DSH 已登录的 DeepSeek 账号",Tag="account"});
                     combo.SelectedValue=(string)field["value"];combo.SelectionChanged+=(s,e)=>RuntimeChanged();input=combo;
                 }
                 else if(kind=="chat-model") {
@@ -127,18 +141,19 @@ partial class App
                 }
                 holder.Children.Add(input);editor.Children.Add(holder);
                 var error=new TextBlock {Foreground=Ink("Danger"),FontSize=10,Margin=new Thickness(0,5,0,0),TextWrapping=TextWrapping.Wrap,Visibility=Visibility.Collapsed};runtimeErrors[key]=error;editor.Children.Add(error);
-                Grid.SetColumn(editor,1);row.Children.Add(editor);content.Children.Add(row);
+                Grid.SetColumn(editor,1);row.Children.Add(editor);content.Children.Add(row);runtimeRows[row]=key;
             }
             if(group.Key=="模型选择")BuildChatModelActions(content);
             string help=group.Key=="模型选择"?"配置只作用于本项目。模型切换后保留会话上下文；保存后重连模型即可应用。":group.Key.StartsWith("模型")?"DSH 启动文件、Profile 与模型运行目录。":group.Key.StartsWith("媒体")?"独立视觉、语音转写与语音合成使用同一媒体服务。填写下方需要的模型名称即可。":"";
-            panel.Children.Add(RuntimeCard(group.Key,help,content,RuntimeCategory(group.Key)));
+            var runtimeCard=RuntimeCard(group.Key,help,content,RuntimeCategory(group.Key));runtimeCardKeys[runtimeCard]=group.Select(f=>(string)f["key"]).ToArray();panel.Children.Add(runtimeCard);
         }
         var shortcuts=new StackPanel();shortcuts.Children.Add(new TextBlock{Text="管理员 QQ、触发前缀、回复节奏和命令确认统一在机器人设置编辑。高级环境文件中的同名项仅补齐缺失默认值。",FontSize=11,TextWrapping=TextWrapping.Wrap,Foreground=Ink("Muted"),LineHeight=18});
         var openSettings=new Button{Content="前往机器人设置",Style=(Style)window.FindResource("Quiet"),HorizontalAlignment=HorizontalAlignment.Left,Margin=new Thickness(0,10,0,10)};openSettings.Click+=(s,e)=>NavigateSetting("approval.adminQq");shortcuts.Children.Add(openSettings);panel.Children.Add(RuntimeCard("行为设置入口","",shortcuts,5));
-        BuildMediaEditors(panel);RefreshMediaEditors();RefreshChatModelEditor();FilterRuntime();
+        BuildMediaEditors(panel);runtimeCardOrder=panel.Children.Cast<UIElement>().ToList();RefreshMediaEditors();RefreshChatModelEditor();FilterRuntime();
     }
     static void BuildChatModelActions(StackPanel content) {
         chatModelSummary=new TextBlock {FontSize=11,Foreground=Ink("Muted"),TextWrapping=TextWrapping.Wrap,Margin=new Thickness(0,0,0,12)};content.Children.Add(chatModelSummary);
+        chatModelActions=new StackPanel();content.Children.Add(chatModelActions);content=chatModelActions;
         var actions=new WrapPanel {Margin=new Thickness(0,0,0,10)};
         chatModelList=new Button {Content="获取模型",Style=(Style)window.FindResource("Quiet"),Margin=new Thickness(0,0,10,0)};
         chatModelTest=new Button {Content="测试连接",Style=(Style)window.FindResource("Quiet")};
@@ -191,7 +206,7 @@ partial class App
         }
         panel.Children.Add(RuntimeCard("模型与声音","媒体模型、声音和抽帧参数仅在这里编辑；媒体总开关在机器人设置的功能开关中管理。",body,2));
     }
-    static void RuntimeChanged() {MarkDirty("runtime");if(!loading){Find<TextBlock>("RuntimeHint").Text="有尚未保存的连接配置；仅修改对话模型时会保留 QQ 登录。";if(chatModelResult!=null&&!chatModelBusy){chatModelResult.Text="配置有修改，可测试当前输入后保存。";chatModelResult.Foreground=Ink("Muted");}}RefreshMediaEditors();RefreshChatModelEditor();}
+    static void RuntimeChanged() {MarkDirty("runtime");if(!loading){InvalidateQuickCheck();Find<TextBlock>("RuntimeHint").Text="有尚未保存的连接配置；仅修改对话模型时会保留 QQ 登录。";if(chatModelResult!=null&&!chatModelBusy){chatModelResult.Text="配置有修改，可测试当前输入后保存。";chatModelResult.Foreground=Ink("Muted");}}RefreshMediaEditors();RefreshChatModelEditor();if(quickSetupMode)FilterRuntime();}
     static void RefreshMediaEditors() {
         if(mediaInputs.Count!=mediaKeys.Length)return;
         bool enabled=SavedMediaEnabled();
@@ -217,6 +232,7 @@ partial class App
             var range=runtimeRanges[key];if(!long.TryParse(value,out number)||value.Length==0||!value.All(c=>c>='0'&&c<='9')||number<range[0]||number>range[1])error="请输入 "+range[0]+"–"+range[1]+" 之间的整数。";
         }
         else if(key=="BOT_CHAT_MODE"&&!new[]{"profile","project","account"}.Contains(value))error="请选择有效的模型使用方式。";
+        else if(key=="BOT_ONEBOT_MODE"&&!new[]{"auto","managed","external"}.Contains(value))error="请选择有效的 QQ 接入方式。";
         else if(key=="BOT_CHAT_MODEL"&&RuntimeValue("BOT_CHAT_MODE")!="profile"&&(value.Length==0||value.Length>128||value.Any(c=>char.IsWhiteSpace(c)||char.IsControl(c))))error="请输入 1–128 个字符的模型 ID，不可包含空白。";
         else if(key=="QQ_BOT_DEEPSEEK_API_KEY"&&RuntimeValue("BOT_CHAT_MODE")=="project"&&(value.Length==0||value.Length>512||value.Any(c=>char.IsWhiteSpace(c)||char.IsControl(c))))error="请填写本项目的 API Key，不可包含空白。";
         else if(key=="BOT_CHAT_BASE_URL"&&RuntimeValue("BOT_CHAT_MODE")=="project"&&(!Uri.TryCreate(value,UriKind.Absolute,out uri)||(uri.Scheme!="http"&&uri.Scheme!="https")||uri.UserInfo.Length>0||uri.Query.Length>0||uri.Fragment.Length>0))error="请输入 HTTP(S) 接口地址，不可包含账号或查询参数。";
@@ -237,6 +253,7 @@ partial class App
     }
     static int RuntimeCategoryForKey(string key) {var card=runtimeInputs[key] as DependencyObject;while(card!=null){var element=card as FrameworkElement;if(element!=null&&runtimeCards.ContainsKey(element))return runtimeCards[element];card=System.Windows.Media.VisualTreeHelper.GetParent(card);}return 5;}
     static void SaveConnection(bool restart) {
+        if(restart&&quickSetupMode&&!quickReady){Feedback("请先检查当前配置，再保存并启动。");return;}
         if(chatModelBusy)return;
         if(dirtySections.Contains("env")) {Find<ListBox>("RuntimeNav").SelectedIndex=5;Find<Expander>("AdvancedEnv").IsExpanded=true;Feedback("请先保存高级环境文件，再保存连接与媒体表单。");return;}
         if(RuntimeValue("BOT_SETTINGS_FILE")!=savedRuntimeValues["BOT_SETTINGS_FILE"]&&dirtySettingPaths.Any(path=>!IsMediaSetting(path))) {Feedback("请先保存机器人设置中的其他修改，再切换动态配置文件；媒体模型修改会保存到目标文件。");return;}

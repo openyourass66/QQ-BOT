@@ -76,8 +76,14 @@ async function config(action, data) {
     worker.send({ action, data });
   });
 }
-async function check() { const result = await diagnose(root, { externalOnebot: children.has('napcat') || await onebotOnline(root) }); emit({ type: 'diagnostics', ...result }); return result; }
+async function check() {
+  const env = await environment(root);
+  const external = env.BOT_ONEBOT_MODE === 'external' || env.BOT_ONEBOT_MODE !== 'managed' && await onebotOnline(root);
+  const result = await diagnose(root, { externalOnebot: children.has('napcat') || external });
+  emit({ type: 'diagnostics', ...result }); return result;
+}
 async function command({ action, data }) {
+  if (action === 'onboarding') { const result = await config(action, data); emit({ type: 'onboarding', ...result }); return; }
   if (action === 'model') { const result = await config(action, data); emit({ type: 'model', ...result }); return; }
   if (action === 'knowledge') { const result = await config(action, data); emit({ type: 'knowledge', ...result }); return; }
   if (action === 'social' || action === 'memory' || action === 'settings-status') {
@@ -113,8 +119,9 @@ async function command({ action, data }) {
       if (action === 'restart') await stop();
       if (action === 'restartBridge') await stopOne('bridge');
       if (!children.has('napcat')) {
-        externalNapcat = await onebotOnline(root);
-        if (externalNapcat) emit({ type: 'log', text: '[desktop] 复用已运行的 OneBot，不结束外部 NapCat 进程。' });
+        const env = await environment(root);
+        externalNapcat = env.BOT_ONEBOT_MODE === 'external' || env.BOT_ONEBOT_MODE !== 'managed' && await onebotOnline(root);
+        if (externalNapcat) emit({ type: 'log', text: env.BOT_ONEBOT_MODE === 'external' ? '[desktop] 连接指定的外部 OneBot；服务离线时等待重连，不启动或结束外部 NapCat。' : '[desktop] 复用已运行的 OneBot，不结束外部 NapCat 进程。' });
         else launch('napcat', 'scripts/napcat-node.mjs');
       }
       if (!children.has('bridge')) launch('bridge', 'dist/bridge.js');

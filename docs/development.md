@@ -13,6 +13,8 @@
 
 MCP 工具通过内部动作接口交由桥接执行；权限、会话范围、额度与轮次状态在执行处再次核验。桌面 Node 辅助模块使用 `dist/` 内对应目录的编译模块。改动路径时需同步测试、动态导入和桌面引用。
 
+桌面首次配置由 `QuickSetupView.cs` 与 `onboarding.mjs` 提供，复用 `RuntimeView.cs` 的输入控件、校验和连接保存逻辑。检测仅提供路径建议；检查使用当前草稿，不调用模型。HTTP 与 WebSocket 分开探测，修改输入会使检查结果失效。`tests/onboarding.test.mjs` 覆盖初始化保留、路径检测、外部连接与鉴权边界，原生窗口测试覆盖步骤切换、失效状态、安装指引和紧凑布局。
+
 网页只需要静态 DOM 与正文提取，使用 [LinkeDOM](https://github.com/WebReflection/linkedom) 和 [Readability](https://github.com/mozilla/readability)。未包含完整浏览器模拟器；网页脚本与外部资源不执行、不加载。
 
 ## 构建与测试

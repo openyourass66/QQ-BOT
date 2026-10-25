@@ -120,7 +120,9 @@ partial class App
     }
     static void Capture(string path, int page) {
         Find<TabControl>("Tabs").SelectedIndex = page; window.UpdateLayout();
-        var content = (FrameworkElement)window.Content;
+        CaptureContent((FrameworkElement)window.Content,path);
+    }
+    static void CaptureContent(FrameworkElement content,string path) {
         var bitmap = new System.Windows.Media.Imaging.RenderTargetBitmap((int)content.ActualWidth, (int)content.ActualHeight, 96, 96, PixelFormats.Pbgra32); bitmap.Render(content);
         var encoder = new System.Windows.Media.Imaging.PngBitmapEncoder(); encoder.Frames.Add(System.Windows.Media.Imaging.BitmapFrame.Create(bitmap));
         using (var output = File.Create(path)) encoder.Save(output);
@@ -152,6 +154,8 @@ partial class App
     static void Event(string line) {
         var message = json.Deserialize<Dictionary<string, object>>(line);
         string type = (string)message["type"];
+        if(type=="onboarding"){RenderOnboarding(message);return;}
+        if(type=="error"&&message.ContainsKey("action")&&(string)message["action"]=="onboarding"){onboardingBusy=false;quickReady=false;Find<TextBlock>("QuickNotice").Text=(string)message["text"];UpdateConnectionEditing();}
         if(type=="error"&&message.ContainsKey("action")&&(string)message["action"]=="model")ChatModelError((string)message["text"]);
         if(type=="model"){RenderChatModel(message);return;}
         if(type=="settings-status"){RenderSettingsStatus(message);Feedback("设置状态与今日额度已刷新。");return;}
@@ -181,6 +185,7 @@ partial class App
         else if (type == "memory") { RenderKnowledgeMemories(message); }
         else if (type == "control" && connectionRestartPending && new[]{"restart","restartBridge"}.Contains(message["action"] as string)) {
             Find<TextBlock>("RuntimeHint").Text=(bool)message["ok"]?"机器人已重新启动，等待连接就绪。":"配置已保存，重新启动未完成，请查看启动诊断。";connectionRestartPending=false;
+            if(quickSetupMode&&(bool)message["ok"])Find<TabControl>("Tabs").SelectedIndex=0;
         }
         else if (type == "config") {
             loading = true;
@@ -195,13 +200,11 @@ partial class App
             else RenderKnowledge(new Dictionary<string,object> {{"workspace",Path.GetDirectoryName(personaPath)},{"global",message["persona"]},{"globalRevision",null},{"libraryRevision",null},{"presets",new object[0]},{"files",new object[0]}});
             loading = false; dirty = false; Find<Button>("SaveSettings").IsEnabled = true;
             Feedback("配置已加载，小鲸准备好了。");
+            if(message.ContainsKey("needsSetup")&&(bool)message["needsSetup"]) {OpenQuickSetup();if(hostInput!=null&&!Environment.GetCommandLineArgs().Contains("--smoke"))RequestOnboarding("detect");}
         } else if (type == "diagnostics") {
             var panel = Find<StackPanel>("Diagnostics"); panel.Children.Clear();
             foreach (Dictionary<string, object> row in (System.Collections.IEnumerable)message["rows"]) {
-                bool ok = (bool)row["ok"];
-                var block = new StackPanel(); block.Children.Add(new TextBlock { Text = (ok ? "通过  ·  " : "需处理  ·  ") + row["name"], FontWeight = FontWeights.Bold, Foreground = (Brush)new BrushConverter().ConvertFromString(ok ? "#26745A" : "#A02F44") });
-                block.Children.Add(new TextBlock { Text = (string)row["detail"], TextWrapping = TextWrapping.Wrap, Foreground = Brushes.SlateGray, Margin = new Thickness(0, 7, 0, 0) });
-                panel.Children.Add(new Border { Child = block, Background = (Brush)new BrushConverter().ConvertFromString(ok ? "#F0F8F4" : "#FFF0F1"), Padding = new Thickness(16), CornerRadius = new CornerRadius(12), Margin = new Thickness(0, 0, 8, 10) });
+                panel.Children.Add(DiagnosticCard(row,false));
             }
             Find<TextBlock>("HealthSummary").Text = (bool)message["ok"] ? "启动依赖检查通过，小鲸已经准备好。" : "发现需要处理的项目，请到「启动诊断」查看详情。";
             Find<TextBlock>("DiagnosticSummary").Text = (bool)message["ok"] ? "启动检查通过" : "有项目需要处理";
@@ -258,7 +261,7 @@ partial class App
         var application = new Application();
         application.Resources.MergedDictionaries.Add((ResourceDictionary)XamlReader.Parse(File.ReadAllText(Path.Combine(root,"desktop/theme.xaml"),Encoding.UTF8)));
         window = (Window)XamlReader.Parse(File.ReadAllText(Path.Combine(root, "desktop/window.xaml"), Encoding.UTF8));
-        InitSettingsView(); InitRuntimeView(); InitActivityView(); InitKnowledgeView();
+        InitSettingsView(); InitRuntimeView(); InitQuickSetup(); InitActivityView(); InitKnowledgeView();
         window.Width = Math.Min(window.Width, SystemParameters.WorkArea.Width - 24);
         window.Height = Math.Min(window.Height, SystemParameters.WorkArea.Height - 24);
         var iconStream = typeof(App).Assembly.GetManifestResourceStream("whale.ico");
@@ -342,7 +345,7 @@ partial class App
             if (smoke && !exiting) {
                 if (DateTime.UtcNow > smokeDeadline) { Environment.ExitCode = 1; File.WriteAllText(Path.Combine(root, "smoke-result.txt"), "FAIL: lifecycle timeout at step "+smokeStep+", socialBusy="+socialBusy+", knowledgeBusy="+knowledgeBusy+", rows="+Find<ListView>("SocialList").Items.Count+", feedback="+Find<TextBlock>("Feedback").Text); exiting = true; Send("quit"); return; }
                 if (smokeStep == 0 && settings != null) {
-                    try { VerifySettingsInteraction(); VerifyRuntimeInteraction(); VerifyKnowledgeInteraction(); } catch(Exception error) { Environment.ExitCode=1;File.WriteAllText(Path.Combine(root,"smoke-result.txt"),"FAIL: "+error.Message);exiting=true;Send("quit");return; }
+                    try { VerifySettingsInteraction(); VerifyRuntimeInteraction(); VerifyQuickSetupInteraction(); VerifyKnowledgeInteraction(); } catch(Exception error) { Environment.ExitCode=1;File.WriteAllText(Path.Combine(root,"smoke-result.txt"),"FAIL: "+error.Message);exiting=true;Send("quit");return; }
                     if (fields.Count < 53 || runtimeInputs.Count < 20 || Find<TextBox>("Persona").Text != "测试小鲸人设" || !tray.Registered) { Environment.ExitCode = 1; File.WriteAllText(Path.Combine(root, "smoke-result.txt"), "FAIL: config=" + fields.Count + ", runtime=" + runtimeInputs.Count + ", tray=" + tray.Registered + ", personaLength=" + Find<TextBox>("Persona").Text.Length); exiting = true; Send("quit"); return; }
                     foreach (int page in new[] {0,1,2,3,4,5,6}) Capture(Path.Combine(root,"page-" + page + ".png"), page);
                     ((TextBox)fields["chat.group.prefix"]).Text="native-scope";((TextBox)fields["social.speechVoice"]).Text="native-voice";Find<Button>("SaveSettings").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
@@ -425,6 +428,10 @@ partial class App
                     Find<Button>("RestoreMemory").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));smokeStep=34;
                 } else if(smokeStep==34&&!knowledgeBusy) {
                     if(knowledgeSelection.Text!="Finish the game")throw new Exception("Lexicon previous version was not restored");
+                    OpenQuickSetup();ShowQuickStep(3);SaveConnection(false);smokeStep=35;
+                } else if(smokeStep==35&&Find<TabControl>("Tabs").IsEnabled) {
+                    if(Find<StackPanel>("RuntimeFields").Children.Count!=runtimeCardOrder.Count)throw new Exception("快速配置保存后重复生成了表单");
+                    Capture(Path.Combine(root,"quick-saved.png"),3);NavigateRuntime(0);
                     Find<TabControl>("Tabs").SelectedIndex = 0;
                     window.Close();
                     if (window.IsVisible) throw new Exception("Close did not hide window");

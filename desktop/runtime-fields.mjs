@@ -5,6 +5,7 @@ export const chatRuntimeKeys = new Set(['BOT_CHAT_MODE', 'BOT_CHAT_MODEL', 'BOT_
 export const initialDefaultKeys = new Set(['ADMIN_QQ','GROUP_PREFIX','GROUP_COOLDOWN_MS','GROUP_CONTEXT_LINES','REPLY_CHUNK_SIZE','MIN_DELAY_MS','MAX_DELAY_MS','ALLOW_EXEC']);
 
 export const runtimeFields = [
+  ['账号接入方式', 'BOT_ONEBOT_MODE', 'QQ 接入方式', 'auto', 'onebot-mode'],
   ['后台分析服务', 'BOT_LEARNING_BASE_URL', '独立分析地址（Messages，留空复用项目地址）', ''],
   ['后台分析服务', 'BOT_LEARNING_API_KEY', '独立分析密钥（留空复用项目 Key）', '', 'secret'],
   ['后台分析服务', 'BOT_LEARNING_MODEL', '分析模型（留空复用对话模型名称）', ''],
@@ -17,7 +18,7 @@ export const runtimeFields = [
   ['搜索适配服务', 'BOT_SEARCH_URL', 'QQ 搜索适配服务地址', ''], ['搜索适配服务', 'BOT_SEARCH_API_KEY', '搜索服务密钥', '', 'secret'], ['空间浏览与评论', 'BOT_QZONE_ADAPTER_URL', '空间浏览与评论服务地址', ''], ['空间浏览与评论', 'BOT_QZONE_ADAPTER_TOKEN', '空间适配服务令牌', '', 'secret'],
   ['社交数据', 'BOT_SOCIAL_STORE', '社交数据文件（留空自动选择）', ''], ['社交数据', 'BOT_MEDIA_DIR', '媒体库目录（留空自动选择）', '', 'folder'], ['社交数据', 'BOT_MEDIA_IMPORT_DIRS', '允许导入的媒体目录（多个用 | 分隔）', ''],
   ['OneBot 连接', 'ONEBOT_HTTP_URL', 'HTTP 地址', 'http://127.0.0.1:3000'], ['OneBot 连接', 'ONEBOT_WS_URL', 'WebSocket 地址', 'ws://127.0.0.1:3001'], ['OneBot 连接', 'ONEBOT_TOKEN', '连接令牌', '', 'secret'],
-  ['账号与 NapCat', 'BOT_SELF_ID', '机器人 QQ', '0'], ['账号与 NapCat', 'BOT_QQ_DIR', 'QQ 安装目录', '', 'folder'], ['账号与 NapCat', 'BOT_NAPCAT_DIR', 'NapCat Shell 目录', 'napcat/shell', 'folder'],
+  ['账号与 NapCat', 'BOT_SELF_ID', '机器人 QQ（0 为自动识别）', '0'], ['账号与 NapCat', 'BOT_QQ_DIR', 'QQ 安装目录', '', 'folder'], ['账号与 NapCat', 'BOT_NAPCAT_DIR', 'NapCat Shell 目录', 'napcat/shell', 'folder'],
   ['模型运行环境', 'BOT_DSH_BIN', 'DSH 启动文件', '', 'file'], ['模型运行环境', 'BOT_DSH_PROFILE', 'DSH Profile', 'acp'], ['模型运行环境', 'BOT_DSH_HOME', 'DSH 数据目录（留空使用默认值）', '', 'folder'], ['数据存储', 'BOT_WORKSPACE', '机器人工作区', 'bot-workspace', 'folder'],
   ['消息与并发', 'TURN_TIMEOUT_MS', '模型超时（毫秒）', '180000'], ['消息与并发', 'QUEUE_PER_CONVERSATION', '每会话队列容量', '5'], ['消息与并发', 'QUEUE_TOTAL', '总队列容量', '50'], ['消息与并发', 'MAX_CONCURRENT_TURNS', '模型并发数', '4'],
   ['数据存储', 'BOT_SETTINGS_FILE', '动态配置文件', 'bot.config.json'], ['数据存储', 'SESSION_STORE', '会话记录', 'data/sessions.json'], ['数据存储', 'BOT_USAGE_STORE', '额度记录（留空使用默认值）', ''], ['数据存储', 'BOT_GROUP_CONTEXT_STORE', '群上下文（留空使用默认值）', ''],
@@ -45,6 +46,7 @@ export function mergeRuntimeEnv(original, data) {
 export function validateRuntimeEnv(data) {
   if (typeof data !== 'string' || data.includes('\0')) throw new Error('连接配置格式无效');
   const parsed = parseEnv(data);
+  if (parsed.BOT_ONEBOT_MODE && !['auto','managed','external'].includes(parsed.BOT_ONEBOT_MODE)) throw new Error('连接配置格式无效：QQ 接入方式无效');
   readChatModelConfig(parsed);
   for (const key of runtimeFields.map(field => field[1]).filter(key => key.endsWith('_URL'))) if (parsed[key] && (key !== 'BOT_CHAT_BASE_URL' || parsed.BOT_CHAT_MODE === 'project')) {
     let url;
