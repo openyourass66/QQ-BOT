@@ -83,6 +83,13 @@ export class OneBotHttp {
     private readonly token: string,
   ) {}
 
+  get hasLocalMedia(): boolean {
+    try {
+      const url = new URL(this.baseUrl);
+      return ['http:', 'https:'].includes(url.protocol) && (url.hostname === 'localhost' || url.hostname === '[::1]' || /^127(?:\.\d{1,3}){3}$/.test(url.hostname));
+    } catch { return false; }
+  }
+
   async call<T = unknown>(action: string, params: Record<string, unknown> = {}, signal?: AbortSignal): Promise<T> {
     const headers: Record<string, string> = { 'content-type': 'application/json' };
     if (this.token) headers.authorization = `Bearer ${this.token}`;

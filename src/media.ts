@@ -2,7 +2,7 @@ import http from 'node:http';
 import https from 'node:https';
 import { lookup } from 'node:dns/promises';
 import { isIP } from 'node:net';
-import { readFile, writeFile, mkdir, stat, realpath, readdir, rename, rm } from 'node:fs/promises';
+import { writeFile, mkdir, stat, realpath, readdir, rename, rm, open } from 'node:fs/promises';
 import { resolve, dirname, relative, isAbsolute } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHash, randomUUID } from 'node:crypto';
@@ -52,6 +52,25 @@ export function imageMime(buffer: Buffer): string {
   throw new Error('不是受支持的 PNG/JPEG/GIF/WebP 图片');
 }
 
+async function readMediaFile(file: string, signal: AbortSignal, max: number): Promise<Buffer> {
+  signal.throwIfAborted();
+  const handle = await open(file, 'r');
+  try {
+    const info = await handle.stat();
+    if (!info.isFile() || info.size > max) throw new Error('媒体文件无效或过大');
+    const buffer = Buffer.alloc(info.size + 1); let offset = 0;
+    while (offset < buffer.length) {
+      signal.throwIfAborted();
+      const { bytesRead } = await handle.read(buffer, offset, buffer.length - offset, offset);
+      if (!bytesRead) break;
+      offset += bytesRead;
+    }
+    if (offset > info.size) throw new Error('媒体文件在读取期间变化，请重试');
+    signal.throwIfAborted();
+    return buffer.subarray(0, offset);
+  } finally { await handle.close(); }
+}
+
 export class MediaService {
   readonly root: string;
   private saves: Promise<void> = Promise.resolve();
@@ -87,11 +106,39 @@ export class MediaService {
       if (rel && !rel.startsWith('..') && !isAbsolute(rel)) { allowed = true; break; }
     }
     if (!allowed) throw new Error('文件不在机器人媒体库或已配置的媒体导入目录中');
-    const info = await stat(file); if (!info.isFile() || info.size > max) throw new Error('媒体文件无效或过大');
-    return { buffer: await readFile(file), mime: 'application/octet-stream' };
+    return { buffer: await readMediaFile(file, signal, max), mime: 'application/octet-stream' };
   }
   async image(source: string, signal: AbortSignal): Promise<{ type: 'image'; data: string; mimeType: string }> {
     const { buffer } = await this.bytes(source, signal);
+    return { type: 'image', data: buffer.toString('base64'), mimeType: imageMime(buffer) };
+  }
+  /** Only pass a get_image response for an opaque reference from a recorded QQ message. */
+  async onebotImage(result: { file?: unknown; url?: unknown; base64?: unknown }, signal: AbortSignal, localCache = false): Promise<{ type: 'image'; data: string; mimeType: string }> {
+    signal.throwIfAborted();
+    if (!result || typeof result !== 'object') throw new Error('协议端未返回有效的图片信息');
+    const max = 12_000_000;
+    let buffer: Buffer | undefined, failure: unknown;
+    if (typeof result.base64 === 'string' && result.base64) {
+      const encoded = result.base64.replace(/^data:image\/(?:png|jpeg|gif|webp);base64,/i, '');
+      if (encoded.length > Math.ceil(max / 3) * 4) throw new Error('协议端返回的图片数据过大');
+      if (!/^[A-Za-z0-9+/]+={0,2}$/.test(encoded) || encoded.length % 4 === 1) throw new Error('协议端返回的图片数据无效');
+      buffer = Buffer.from(encoded, 'base64');
+      if (buffer.toString('base64').replace(/=+$/, '') !== encoded.replace(/=+$/, '')) throw new Error('协议端返回的图片数据无效');
+    } else if (localCache && typeof result.file === 'string') {
+      try {
+        const path = result.file.startsWith('file:') ? fileURLToPath(result.file) : result.file;
+        if (isAbsolute(path) && !/^[\\/]{2}/.test(path)) buffer = await readMediaFile(await realpath(path), signal, max);
+      } catch (error) { signal.throwIfAborted(); failure = error; }
+    }
+    if (!buffer) {
+      for (const source of [result.url, result.file]) {
+        if (typeof source !== 'string' || !source) continue;
+        try { buffer = (await this.bytes(source, signal, max)).buffer; break; }
+        catch (error) { signal.throwIfAborted(); failure ??= error; }
+      }
+    }
+    if (!buffer) throw failure ?? new Error('协议端未返回可读取的图片缓存或图片数据');
+    if (buffer.length > max) throw new Error('协议端返回的图片数据过大');
     return { type: 'image', data: buffer.toString('base64'), mimeType: imageMime(buffer) };
   }
   private endpoint(path: string): URL {

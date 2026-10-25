@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { randomUUID } from 'node:crypto';
 import { extname } from 'node:path';
 import { SocialStore, type ScheduledTask } from './social-store.js';
-import { MediaService, imageMime } from './media.js';
+import { MediaService } from './media.js';
 import { socialTools, SocialCallSchema, type ToolContext } from './social-tools.js';
 import { allowedChat } from './social-settings.js';
 import type { BotSettings } from './settings.js';
@@ -208,7 +208,7 @@ export class SocialEngine {
         const sources = entry.segments.filter(s => s.type === 'image').slice(0, 4);
         if (!sources.length) throw new Error('该消息没有图片');
         const images = [];
-        for (const s of sources) images.push(await this.media.image(await this.source(s, ctx), ctx.signal));
+        for (const s of sources) images.push(await this.messageImage(s, ctx));
         return this.media.vision(images, a.question, ctx.signal);
       }
       case 'qq_send_image': {
@@ -222,7 +222,7 @@ export class SocialEngine {
       case 'qq_collect_sticker': {
         this.feature('stickersEnabled'); const entry = this.message(ctx, a.message_id);
         const segment = entry.segments.find(s => s.type === 'image'); if (!segment) throw new Error('该消息没有图片');
-        const { buffer } = await this.media.bytes(await this.source(segment, ctx), ctx.signal); const mime = imageMime(buffer);
+        const image = await this.messageImage(segment, ctx), buffer = Buffer.from(image.data, 'base64'), mime = image.mimeType;
         const file = await this.media.save(buffer, '.' + mime.split('/')[1]);
         return this.store.update(d => {
           const existing = d.stickers.find(s => s.file === file);
@@ -354,6 +354,25 @@ export class SocialEngine {
     const message = this.store.message(ctx.chat, id);
     if (this.settings().social.blockedUsers.includes(String(message.user))) throw new Error('该消息的发送者已屏蔽，不能读取或引用');
     return message;
+  }
+  private async messageImage(segment: Segment, ctx: ToolContext): Promise<{ type: 'image'; data: string; mimeType: string }> {
+    let failure: unknown;
+    for (const source of [segment.data.url, segment.data.file]) {
+      if (typeof source !== 'string' || !/^(?:https?:|file:|[A-Za-z]:[\\/]|\/)/i.test(source)) continue;
+      try { return await this.media.image(source, ctx.signal); }
+      catch (error) { ctx.signal.throwIfAborted(); failure = error; }
+    }
+    const reference = segment.data.file_id ?? segment.data.file;
+    if (typeof reference !== 'string' || !reference || reference.length > 8192 || /^(?:[a-z][\w+.-]*:|[\\/])/i.test(reference)) {
+      throw failure ?? new Error('该图片缺少有效的协议文件编号');
+    }
+    let result: { file?: unknown; url?: unknown; base64?: unknown };
+    try { result = await this.api.call('get_image', { file: reference }, ctx.signal); }
+    catch (error) {
+      ctx.signal.throwIfAborted();
+      throw new Error(`图片直链不可用，协议端缓存获取失败：${error instanceof Error ? error.message : String(error)}。若 NapCat 已重启或图片已过期，请重新发送图片。`);
+    }
+    return this.media.onebotImage(result, ctx.signal, this.api.hasLocalMedia === true);
   }
   private async source(s: Segment, ctx: ToolContext): Promise<string> {
     const reference = s.data.file_id ?? s.data.file;
