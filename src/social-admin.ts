@@ -4,6 +4,7 @@ import { MediaService } from './media.js';
 import { socialTools } from './social-tools.js';
 import { legacyTools } from './legacy-tools.js';
 import { getSettings, saveSettings } from './settings.js';
+import { stickerSearchText } from './sticker-review.js';
 
 const requestSchema = z.object({
   op: z.enum(['list', 'edit_memory', 'delete', 'block', 'allow', 'refresh_contacts', 'reset_session', 'profile']),
@@ -49,7 +50,7 @@ export async function socialAdmin(input: unknown, store: SocialStore, media: Med
   const rows: Row[] = [];
   const add = (id: string, chat: string, name: string, summary: string, status: string, at: number, detail = summary, text = '') => {
     if (a.op === 'list' && a.chat && chat !== a.chat) return;
-    if (a.query && !`${name} ${summary} ${chat} ${a.section === 'memories' ? detail : ''}`.toLowerCase().includes(a.query.toLowerCase())) return;
+    if (a.query && !`${name} ${summary} ${chat} ${['memories','stickers'].includes(a.section) ? detail : ''}`.toLowerCase().includes(a.query.toLowerCase())) return;
     rows.push({ id, chat, name, summary: summary.slice(0,160), status, time: date(at), detail, text });
   };
   switch (a.section) {
@@ -60,7 +61,12 @@ export async function socialAdmin(input: unknown, store: SocialStore, media: Med
     } break;
     case 'messages': for (const m of [...data.messages].reverse()) add(String(m.id), m.chat, m.name, m.text, m.recalled ? '已撤回' : m.self ? '自己发送' : '收到', m.at, `${m.name}（${m.user}）\n消息 #${m.id}\n${m.text}\n\n媒体：${m.segments.filter(s => s.type !== 'text').map(s => s.type).join('、')}`); break;
     case 'memories': for (const m of [...data.memories].reverse()) add(m.id,m.chat,m.name,m.text,'长期记忆',m.at,`QQ ${m.user}\n${m.text}`,m.text); break;
-    case 'stickers': for (const t of data.stickers) add(t.id,'',t.note,t.tags.join('、'),`已用 ${t.uses} 次`,t.at,`${t.note}\n标签：${t.tags.join('、')}\n${t.file}`); break;
+    case 'stickers': for (const t of data.stickers) {
+      if (a.query && !(stickerSearchText(t) + ' ' + (t.analysis?.avoid.join(' ') ?? '').toLocaleLowerCase()).includes(a.query.toLocaleLowerCase())) continue;
+      const understanding = t.analysis, confidence = understanding?.confidence === 'high' ? '高' : understanding?.confidence === 'medium' ? '中' : '低';
+      const detail = `${t.note}\n标签：${t.tags.join('、')}\n` + (understanding ? `\n画面：${understanding.description}\n图片文字：${understanding.image_text || '无或看不清'}\n含义：${understanding.meaning}\n情绪：${understanding.emotions.join('、')}\n适用：${understanding.usage.join('；')}\n不适用：${understanding.avoid.join('；') || '未列出'}\n理解置信度：${confidence}\n` : '\n尚未完成看图理解，使用前需要补充分析。\n') + t.file;
+      add(t.id,'',t.note,[t.tags.join('、'),understanding?.meaning,...(understanding?.emotions ?? []),...(understanding?.usage ?? [])].filter(Boolean).join(' · '),`${!understanding ? '待理解' : understanding.confidence === 'low' ? '含义待确认' : '已理解'} · 已用 ${t.uses} 次`,t.at,detail);
+    } break;
     case 'tasks': for (const t of [...data.tasks].reverse()) add(t.id,t.chat,t.text,t.error || t.text,{ pending:'等待执行',running:'执行中',sent:'已发送',failed:'失败',unknown:'结果待核对',cancelled:'已取消' }[t.state],t.due,`${t.text}\n${t.error || ''}\n${t.interval ? `每 ${t.interval/60000} 分钟` : '一次性'}`); break;
     case 'events': for (const e of [...data.events].reverse()) add(e.id,e.chat,e.type,String(e.data.comment ?? e.data.sub_type ?? ''),e.handled ? '已处理' : '已记录',e.at,JSON.stringify(e.data,null,2)); break;
     case 'actions': for (const t of [...data.actions].reverse()) {

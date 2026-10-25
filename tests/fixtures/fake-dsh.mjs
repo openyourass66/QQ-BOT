@@ -2,6 +2,7 @@ import { createInterface } from 'node:readline';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { appendFileSync } from 'node:fs';
+import { mockStickerAnalysis } from '../helpers/sticker-review.mjs';
 
 let nextSession = 0;
 let nextGroupTurn = 0;
@@ -55,7 +56,7 @@ lines.on('line', async (line) => {
     }
     if (text.includes('测试超时')) return;
     if (text.includes('测试崩溃')) { process.exit(3); }
-    if (text.includes('SOCIAL_REPLY') || text.includes('SOCIAL_SILENT') || text.includes('SOCIAL_MEMORY')) {
+    if (text.includes('SOCIAL_REPLY') || text.includes('SOCIAL_SILENT') || text.includes('SOCIAL_MEMORY') || text.includes('SOCIAL_STICKER')) {
       const server = sessionServers.get(params.sessionId).find(entry => entry.name === 'qq');
       const client = new Client({ name:'social-agent',version:'1' });
       try {
@@ -64,9 +65,21 @@ lines.on('line', async (line) => {
         if(text.includes('SOCIAL_REPLY')) tool={name:'qq_reply',arguments:{text:'工具回复已送出',reply_to:Number(text.match(/当前消息编号 #(-?\d+)/)[1])}};
         if(text.includes('SOCIAL_SILENT')) tool={name:'qq_finish',arguments:{reason:'这段无需回应'}};
         if(text.includes('SOCIAL_MEMORY')) tool={name:'qq_memory_append',arguments:{user_id:20001,name:'测试群友',text:'喜欢咖啡'}};
-        const result=await client.callTool(tool); if(result.isError) throw new Error(result.content[0].text);
+        if(text.includes('SOCIAL_STICKER')) {
+          const message_id=Number(text.match(/当前消息编号 #(-?\d+)/)[1]);
+          const preview=await client.callTool({name:'qq_collect_sticker',arguments:{message_id}});
+          if(preview.isError)throw new Error(preview.content[0].text);
+          const prepared=JSON.parse(preview.content[0].text);
+          if(prepared.status!=='needs_analysis'||prepared.collected!==false||!preview.content.some(c=>c.type==='image'))throw new Error('收藏没有先返回未入库的原图分析阶段');
+          if(!text.includes('SOCIAL_STICKER_PENDING')) {
+            const completed=await client.callTool({name:'qq_collect_sticker',arguments:{message_id,analysis_token:prepared.analysis_token,analysis:structuredClone(mockStickerAnalysis)}});
+            if(completed.isError)throw new Error(completed.content[0].text);
+            const sticker=JSON.parse(completed.content[0].text);
+            const sent=await client.callTool({name:'qq_send_sticker',arguments:{sticker_id:sticker.id}});if(sent.isError)throw new Error(sent.content[0].text);
+          }
+        } else {const result=await client.callTool(tool); if(result.isError) throw new Error(result.content[0].text);}
       } finally { await client.close(); }
-      notify('session/update',{sessionId:params.sessionId,update:{sessionUpdate:'agent_message_chunk',content:{type:'text',text:text.includes('SOCIAL_MEMORY')?'记住了':'重复文本不应发送'}}});
+      notify('session/update',{sessionId:params.sessionId,update:{sessionUpdate:'agent_message_chunk',content:{type:'text',text:text.includes('SOCIAL_STICKER_PENDING')?'收藏成功':text.includes('SOCIAL_MEMORY')?'记住了':'重复文本不应发送'}}});
       respond(id,{stopReason:'end_turn',usage:{inputTokens:120,outputTokens:30,totalTokens:150}});return;
     }
     if (text.includes('MCP点赞') || text.includes('MCP空间')) {

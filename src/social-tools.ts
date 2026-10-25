@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { StickerAnalysisSchema } from './sticker-review.js';
 
 const id = z.number().int().safe();
 const user = z.number().int().positive().safe();
@@ -16,11 +17,11 @@ export const socialTools = [
   { name: 'qq_poke', title: '戳一戳', description: '戳当前会话中的一位成员；私聊默认对方。受每日动作额度和冷却限制。', schema: { user_id: user.optional() } },
   { name: 'qq_images', title: '查看消息图片', description: '查看当前会话某条消息的图片。优先由 DSH 视觉能力理解，配置独立视觉模型后可代为分析。', schema: { message_id: id, question: short.default('请描述图片内容及与聊天相关的信息') } },
   { name: 'qq_send_image', title: '发送或预览图片', description: '预览或向当前聊天发送图片。source 填网络图片直链或媒体库路径；支持引用和 @。', schema: { source: z.string().min(1).max(4096), preview: z.boolean().default(false), note: z.string().max(2000).default(''), reply_to: id.optional(), at_user: user.optional() } },
-  { name: 'qq_stickers', title: '查找表情', description: '搜索本地表情库，返回可发送的表情 ID。', schema: { query: z.string().max(128).default(''), limit: z.number().int().min(1).max(100).default(24) } },
-  { name: 'qq_collect_sticker', title: '收藏表情', description: '将当前聊天消息中的图片保存到本地表情库，不修改 QQ 客户端收藏。', schema: { message_id: id, note: short, tags: z.array(z.string().max(32)).max(20).default([]) } },
-  { name: 'qq_sticker_note', title: '理解和备注表情', description: '给已收藏表情记录含义和适用场景。', schema: { sticker_id: z.string(), note: short, tags: z.array(z.string().max(32)).max(20).default([]) } },
-  { name: 'qq_sticker_image', title: '查看表情图片', description: '查看表情的实际图片，再决定怎么使用。', schema: { sticker_id: z.string() } },
-  { name: 'qq_send_sticker', title: '发送表情', description: '向当前会话发送一张已收藏表情，可引用或 @。', schema: { sticker_id: z.string(), reply_to: id.optional(), at_user: user.optional() } },
+  { name: 'qq_stickers', title: '查找表情', description: '按备注、画面、含义、情绪和使用场景查找本地表情。优先选择已理解且适合当前语境的记录，勿仅看名称。', schema: { query: z.string().max(128).default(''), limit: z.number().int().min(1).max(100).default(24) } },
+  { name: 'qq_collect_sticker', title: '看图理解后收藏', description: '两步收藏：首次返回原图/视觉材料和 analysis_token，尚未收藏；实际分析后带同一 message_id、token 和完整 analysis 再调用才入库。已理解的同图复用原记录。无法看图不得猜测。', schema: { message_id: id, note: short.optional(), tags: z.array(z.string().max(32)).max(20).optional(), analysis_token: z.string().max(64).optional(), analysis: StickerAnalysisSchema.optional() } },
+  { name: 'qq_sticker_note', title: '更新表情理解与备注', description: '修改备注不等于已理解图片。完成或重做理解时，先用 qq_sticker_image 获取原图和凭证，再提交完整 analysis；保留原图绑定。', schema: { sticker_id: z.string(), note: short.optional(), tags: z.array(z.string().max(32)).max(20).optional(), analysis_token: z.string().max(64).optional(), analysis: StickerAnalysisSchema.optional() } },
+  { name: 'qq_sticker_image', title: '查看和理解表情图片', description: '获取表情原图及分析凭证；根据实际画面与聊天语境理解后，用 qq_sticker_note 提交分析。', schema: { sticker_id: z.string() } },
+  { name: 'qq_send_sticker', title: '发送表情', description: '发送已理解且适合当前语境的表情，可引用或 @。旧表情未分析时先返回分析材料（未发送），完成 qq_sticker_note 后再发送；低置信度不发送。', schema: { sticker_id: z.string(), reply_to: id.optional(), at_user: user.optional() } },
   { name: 'qq_memory_append', title: '记录群友印象', description: '按 QQ 号记录值得长期保留的偏好、关系、事实；当前会话隔离，勿记录临时猜测。', schema: { user_id: user, name: z.string().max(128), text: short } },
   { name: 'qq_memory_query', title: '查询群友记忆', description: '检索当前会话的群友记忆。', schema: { user_id: user.optional(), query: z.string().max(128).default('') } },
   { name: 'qq_memory_remove', title: '删除过时记忆', description: '删除当前会话的一条记忆，ID 从查询工具取得。', schema: { memory_id: z.string() } },
@@ -48,5 +49,5 @@ export const socialTools = [
 
 export const SocialCallSchema = z.object({ action: z.literal('social'), tool: z.string().max(64), args: z.record(z.unknown()).default({}) }).strict();
 export type SocialCall = z.infer<typeof SocialCallSchema>;
-export type ToolContext = { chat: string; self: number; user: number; signal: AbortSignal; sent: number; silent: boolean; topic?: string; endTopic?: boolean; proactive?: boolean };
+export type ToolContext = { chat: string; self: number; user: number; signal: AbortSignal; sent: number; silent: boolean; topic?: string; endTopic?: boolean; proactive?: boolean; pendingStickerCollections?: Set<string>; pendingStickerSends?: Set<string> };
 export const ChatSchema = chat;

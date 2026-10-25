@@ -8,6 +8,7 @@ import { allowedChat } from './social-settings.js';
 import type { BotSettings } from './settings.js';
 import { OneBotHttp, parseMessageEvent, parseCqMessage, segmentsToText, type Segment } from './onebot.js';
 import type { DailyUsageStore, Quota } from './usage.js';
+import { StickerReviews, imageHash, stickerReviewPrompt, stickerSearchText, stickerInfo, type StickerAnalysis } from './sticker-review.js';
 
 export class SocialEngine {
   private sending = new Map<string, Promise<unknown>>();
@@ -19,6 +20,7 @@ export class SocialEngine {
   private groupFiles = new Map<string, Map<string, Record<string, unknown>>>();
   private tickRunning = false;
   private proactiveAt = new Map<string, number>();
+  private stickerReviews = new StickerReviews();
   constructor(readonly store: SocialStore, readonly media: MediaService, private readonly api: OneBotHttp,
     private readonly usage: DailyUsageStore, private readonly settings: () => BotSettings,
     private readonly confirm: (title: string, signal: AbortSignal) => Promise<boolean>,
@@ -129,7 +131,11 @@ export class SocialEngine {
     if (!tool) throw new Error('未知 QQ 工具');
     const args = z.object(tool.schema as z.ZodRawShape).strict().parse(call.args) as Record<string, any>;
     const reads = new Set(['qq_capabilities', 'qq_recent_messages', 'qq_message', 'qq_read_forward', 'qq_active_members', 'qq_chats', 'qq_images', 'qq_stickers', 'qq_sticker_image', 'qq_memory_query', 'qq_reminders', 'qq_events', 'qq_transcribe', 'qq_video', 'qq_file', 'qq_event_file', 'qq_group_files', 'qq_search', 'qq_qzone_feed', 'qq_finish', 'qq_report']);
-    const mutates = !reads.has(call.tool) && !['qq_group_file','qq_actions'].includes(call.tool) && !(call.tool === 'qq_send_image' && args.preview);
+    const collectPreview = call.tool === 'qq_collect_sticker' && !args.analysis_token;
+    const sendSticker = call.tool === 'qq_send_sticker' ? this.store.snapshot().stickers.find(s => s.id === args.sticker_id) : undefined;
+    if (sendSticker?.analysis?.confidence === 'low') throw new Error('这张表情含义尚不确定，请结合上下文重新看图分析，或选择其他已理解的表情');
+    const sendPreview = call.tool === 'qq_send_sticker' && !sendSticker?.analysis;
+    const mutates = !reads.has(call.tool) && !['qq_group_file','qq_actions'].includes(call.tool) && !(call.tool === 'qq_send_image' && args.preview) && !collectPreview && !sendPreview;
     const actionId = mutates ? await this.store.beginAction(ctx.chat, call.tool) : undefined;
     try {
       if (mutates) await this.approve(ctx, call.tool, ['qq_handle_request', 'qq_qzone_comment'].includes(call.tool));
@@ -218,25 +224,70 @@ export class SocialEngine {
         const file = await this.media.save(Buffer.from(image.data, 'base64'), '.' + image.mimeType.split('/')[1]);
         return this.send(ctx, [...await this.decorators(ctx, a), ...(a.note ? [{ type: 'text', data: { text: a.note } }] : []), { type: 'image', data: { file: toFile(file) } }]);
       }
-      case 'qq_stickers': this.feature('stickersEnabled'); return state().stickers.filter(s => `${s.note} ${s.tags.join(' ')}`.includes(a.query)).slice(0, a.limit).map(({ file, ...rest }) => rest);
+      case 'qq_stickers': {
+        this.feature('stickersEnabled');
+        const terms = a.query.toLocaleLowerCase().trim().split(/\s+/).filter(Boolean);
+        const score = (s: ReturnType<typeof state>['stickers'][number]) => s.analysis ? { high:3,medium:2,low:1 }[s.analysis.confidence] : 0;
+        return state().stickers.filter(s => terms.every((term: string) => stickerSearchText(s).includes(term)))
+          .sort((x,y) => score(y) - score(x)).slice(0, a.limit)
+          .map(stickerInfo);
+      }
       case 'qq_collect_sticker': {
         this.feature('stickersEnabled'); const entry = this.message(ctx, a.message_id);
         const segment = entry.segments.find(s => s.type === 'image'); if (!segment) throw new Error('该消息没有图片');
-        const image = await this.messageImage(segment, ctx), buffer = Buffer.from(image.data, 'base64'), mime = image.mimeType;
-        const file = await this.media.save(buffer, '.' + mime.split('/')[1]);
-        return this.store.update(d => {
-          const existing = d.stickers.find(s => s.file === file);
-          if (existing) { existing.note = a.note; existing.tags = a.tags; return existing; }
-          if (d.stickers.length >= 2000) throw new Error('表情库已满，请在控制台删除不再需要的表情');
-          const sticker = { id: randomUUID(), file, note: a.note, tags: a.tags, uses: 0, at: Date.now() }; d.stickers.push(sticker); return sticker;
+        if (Boolean(a.analysis_token) !== Boolean(a.analysis)) throw new Error('收藏必须先取得原图分析凭证，再提交完整 analysis，不能只提交备注');
+        if (!a.analysis_token) {
+          const image = await this.messageImage(segment, ctx), hash = imageHash(Buffer.from(image.data, 'base64'));
+          const existing = state().stickers.find(s => s.analysis?.imageHash === hash && s.analysis.confidence !== 'low');
+          if (existing) { ctx.pendingStickerCollections?.delete(hash); return { ...stickerInfo(existing), collected: true, reused: true }; }
+          return this.prepareStickerReview(ctx, { messageId: a.message_id }, image, a.note, 'collect');
+        }
+        return this.serial('sticker-review:' + a.analysis_token, async () => {
+          const review = await this.checkedStickerReview(ctx, a.analysis_token, { messageId: a.message_id });
+          const analysis: StickerAnalysis = { ...a.analysis, imageHash: review.hash, at: Date.now() };
+          const result = await this.store.update(d => {
+            const existing = d.stickers.find(s => s.file === review.file);
+            const note = a.note ?? analysis.meaning, tags = [...new Set<string>([...analysis.tags, ...(a.tags ?? [])])].slice(0,20);
+            if (existing) { existing.note = note; existing.tags = tags; existing.analysis = analysis; return existing; }
+            if (d.stickers.length >= 2000) throw new Error('表情库已满，请在控制台删除不再需要的表情');
+            const sticker = { id: randomUUID(), file: review.file, note, tags, analysis, uses: 0, at: Date.now() };
+            d.stickers.push(sticker); return sticker;
+          });
+          this.stickerReviews.complete(a.analysis_token);
+          ctx.pendingStickerCollections?.delete(review.hash);
+          return { ...stickerInfo(result), collected: true };
         });
       }
-      case 'qq_sticker_note': this.feature('stickersEnabled'); return this.store.update(d => { const s = d.stickers.find(s => s.id === a.sticker_id); if (!s) throw new Error('表情不存在'); s.note = a.note; s.tags = a.tags; return s; });
+      case 'qq_sticker_note': {
+        this.feature('stickersEnabled');
+        if (Boolean(a.analysis_token) !== Boolean(a.analysis)) throw new Error('更新理解必须先调用 qq_sticker_image 看原图，再提交分析凭证与 analysis');
+        if (!a.analysis_token && a.note === undefined && a.tags === undefined) throw new Error('请填写备注、标签或完整的图片分析');
+        return this.serial('sticker-review:' + (a.analysis_token ?? a.sticker_id), async () => {
+          const review = a.analysis_token ? await this.checkedStickerReview(ctx, a.analysis_token, { stickerId: a.sticker_id }) : undefined;
+          const result = await this.store.update(d => {
+            const s = d.stickers.find(s => s.id === a.sticker_id); if (!s) throw new Error('表情不存在');
+            if (review) {
+              if (s.file !== review.file) throw new Error('表情图片已变更，请重新看图分析');
+              const analysis: StickerAnalysis = { ...a.analysis, imageHash: review.hash, at: Date.now() };
+              s.analysis = analysis;
+              s.note = a.note ?? (s.note || analysis.meaning);
+              s.tags = [...new Set<string>([...analysis.tags, ...(a.tags ?? s.tags)])].slice(0,20);
+            } else { if (a.note !== undefined) s.note = a.note; if (a.tags !== undefined) s.tags = a.tags; }
+            return s;
+          });
+          if (a.analysis_token) this.stickerReviews.complete(a.analysis_token);
+          return stickerInfo(result);
+        });
+      }
       case 'qq_sticker_image':
       case 'qq_send_sticker': {
         this.feature('stickersEnabled'); const s = state().stickers.find(s => s.id === a.sticker_id); if (!s) throw new Error('表情不存在');
-        if (tool === 'qq_sticker_image') return { content: [await this.media.image(s.file, ctx.signal)] };
+        const image = await this.media.image(s.file, ctx.signal);
+        if (tool === 'qq_sticker_image' || !s.analysis) return this.prepareStickerReview(ctx, { stickerId: s.id }, image, s.note, tool === 'qq_send_sticker' ? 'send' : 'view');
+        if (imageHash(Buffer.from(image.data, 'base64')) !== s.analysis.imageHash) throw new Error('表情图片与理解记录不一致，请先用 qq_sticker_image 重新分析');
+        if (s.analysis.confidence === 'low') throw new Error('这张表情含义尚不确定，请结合上下文重新看图分析，或选择其他已理解的表情');
         const result = await this.send(ctx, [...await this.decorators(ctx, a), { type: 'image', data: { file: toFile(s.file) } }]);
+        ctx.pendingStickerSends?.delete(s.id);
         await this.store.update(d => { const s = d.stickers.find(s => s.id === a.sticker_id); if (s) s.uses++; }); return result;
       }
       case 'qq_memory_append': {
@@ -354,6 +405,30 @@ export class SocialEngine {
     const message = this.store.message(ctx.chat, id);
     if (this.settings().social.blockedUsers.includes(String(message.user))) throw new Error('该消息的发送者已屏蔽，不能读取或引用');
     return message;
+  }
+  private async prepareStickerReview(ctx: ToolContext, target: { messageId?: number; stickerId?: string }, image: { type: 'image'; data: string; mimeType: string }, oldNote?: string, intent: 'collect' | 'send' | 'view' = 'view') {
+    const buffer = Buffer.from(image.data, 'base64'), hash = imageHash(buffer);
+    const existing = target.stickerId ? this.store.snapshot().stickers.find(s => s.id === target.stickerId) : undefined;
+    const file = existing?.file ?? await this.media.save(buffer, '.' + image.mimeType.split('/')[1]);
+    const visual = await this.media.vision([image], stickerReviewPrompt, ctx.signal) as { content?: any[]; text?: string };
+    if (!visual || (!visual.content?.some(c => c.type === 'image' && c.data) && !(typeof visual.text === 'string' && visual.text.trim()))) throw new Error('未取得可用的原图或视觉分析，尚未完成收藏');
+    this.check(ctx); this.feature('stickersEnabled');
+    if (target.messageId !== undefined) this.message(ctx, target.messageId);
+    const token = this.stickerReviews.issue({ chat: ctx.chat, user: ctx.user, ...target }, file, hash);
+    if (intent === 'collect') ctx.pendingStickerCollections?.add(hash);
+    if (intent === 'send' && target.stickerId) ctx.pendingStickerSends?.add(target.stickerId);
+    const status = { status: 'needs_analysis', collected: target.stickerId !== undefined, sent: false, analysis_token: token, ...(target.messageId !== undefined ? { message_id: target.messageId } : { sticker_id: target.stickerId }), next_tool: target.messageId !== undefined ? 'qq_collect_sticker' : 'qq_sticker_note', expires_in_seconds: 300,
+      instruction: stickerReviewPrompt + ' 当前仅提供分析材料，尚未完成理解，也没有发送。新收藏将在完成分析后入库。请提交与本次原图对应的完整 analysis 及 analysis_token；不能用旧备注代替看图。', ...(oldNote ? { old_note_as_reference_only: oldNote } : {}) };
+    return { ...status, content: [{ type: 'text', text: JSON.stringify(status) }, ...(visual.content ?? [{ type: 'text', text: '独立视觉服务提供的分析材料：\n' + visual.text }])] };
+  }
+  private async checkedStickerReview(ctx: ToolContext, token: string, target: { messageId?: number; stickerId?: string }) {
+    this.check(ctx); this.feature('stickersEnabled');
+    const review = this.stickerReviews.require(token, { chat: ctx.chat, user: ctx.user, ...target });
+    const { buffer } = await this.media.bytes(review.file, ctx.signal);
+    if (imageHash(buffer) !== review.hash) throw new Error('分析原图已变更，请重新获取图片并分析');
+    this.check(ctx);
+    if (target.messageId !== undefined) this.message(ctx, target.messageId);
+    return review;
   }
   private async messageImage(segment: Segment, ctx: ToolContext): Promise<{ type: 'image'; data: string; mimeType: string }> {
     let failure: unknown;

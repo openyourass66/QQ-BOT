@@ -12,6 +12,7 @@ import { SocialStore } from '../dist/social-store.js';
 import { DailyUsageStore } from '../dist/usage.js';
 import { MediaService, downloadPublic } from '../dist/media.js';
 import { DEFAULT_SETTINGS } from '../dist/settings.js';
+import { completeCollection } from './helpers/sticker-review.mjs';
 
 const png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jP1kAAAAASUVORK5CYII=','base64');
 const signal=()=>new AbortController().signal;
@@ -39,10 +40,11 @@ test('QQ 图片解析到 Fake-IP 时，通过本机 OneBot 缓存完成看图、
     const media=new MediaService(join(root,'media'),()=>settings.social);
     const engine=new SocialEngine(store,media,api,usage,()=>settings,async()=>true,()=>{},()=>{});
     const context=()=>({chat:'group:30001',self:10000,user:20001,sent:0,silent:false,signal:signal()});
-    const call=(tool,args={})=>engine.execute({action:'social',tool,args},context());
+    const call=async(tool,args={})=>{const invoke=args=>engine.execute({action:'social',tool,args},context()),result=await invoke(args);return tool==='qq_collect_sticker'?completeCollection(result,args,invoke):result;};
     const image=await call('qq_images',{message_id:1});assert.equal(image.content.at(-1).type,'image');assert.deepEqual(Buffer.from(image.content.at(-1).data,'base64'),png);
     const sticker=await call('qq_collect_sticker',{message_id:1,note:'开心',tags:['笑']});
-    assert.deepEqual(await readFile(sticker.file),png);assert.notEqual(sticker.file,file);
+    const savedFile=store.snapshot().stickers.find(s=>s.id===sticker.id).file;
+    assert.deepEqual(await readFile(savedFile),png);assert.notEqual(savedFile,file);assert.equal(sticker.file,undefined);
     assert.equal((await call('qq_collect_sticker',{message_id:1,note:'开心'})).id,sticker.id);
     const restored=new SocialStore(join(root,'social.json'));await restored.load();assert.equal(restored.snapshot().stickers.length,1);
     await call('qq_send_sticker',{sticker_id:sticker.id});assert.equal(store.snapshot().stickers[0].uses,1);

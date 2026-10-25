@@ -4,12 +4,13 @@ import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import type { MessageEvent, Segment } from './onebot.js';
 import { segmentsToText } from './onebot.js';
+import { StoredStickerAnalysisSchema } from './sticker-review.js';
 
 const segment = z.object({ type: z.string(), data: z.record(z.unknown()) });
 const message = z.object({ chat: z.string(), id: z.number().int().safe(), user: z.number().int().safe(), name: z.string(), at: z.number(), text: z.string(), segments: z.array(segment), self: z.boolean(), recalled: z.boolean().default(false) });
 const contact = z.object({ chat: z.string(), name: z.string(), at: z.number() });
 const memory = z.object({ id: z.string(), chat: z.string(), user: z.string(), name: z.string(), text: z.string(), at: z.number() });
-const sticker = z.object({ id: z.string(), file: z.string(), note: z.string(), tags: z.array(z.string()), uses: z.number(), at: z.number() });
+const sticker = z.object({ id: z.string(), file: z.string(), note: z.string(), tags: z.array(z.string()), uses: z.number(), at: z.number(), analysis: StoredStickerAnalysisSchema.optional() });
 const task = z.object({ id: z.string(), chat: z.string(), creator: z.string(), text: z.string(), due: z.number(), interval: z.number().default(0), state: z.enum(['pending', 'running', 'sent', 'failed', 'unknown', 'cancelled']), error: z.string().default('') });
 const event = z.object({ id: z.string(), chat: z.string(), type: z.string(), at: z.number(), data: z.record(z.unknown()), handled: z.boolean().default(false) });
 const action = z.object({ id: z.string(), chat: z.string(), tool: z.string(), at: z.number(), state: z.enum(['running', 'success', 'failed', 'unknown']), summary: z.string() });

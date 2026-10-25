@@ -10,6 +10,7 @@ import { DailyUsageStore } from '../dist/usage.js';
 import { DEFAULT_SETTINGS } from '../dist/settings.js';
 import { allowedChat } from '../dist/social-settings.js';
 import { socialAdmin } from '../dist/social-admin.js';
+import { completeCollection } from './helpers/sticker-review.mjs';
 
 async function fixture(run) {
   const dir = await mkdtemp(join(tmpdir(), 'qq-social-'));
@@ -29,7 +30,10 @@ async function fixture(run) {
   const media = new MediaService(join(dir,'media'), () => settings.social);
   const engine = new SocialEngine(store,media,api,usage,() => settings,async () => true,() => {},() => {});
   const ctx = () => ({ chat:'group:30001',self:10000,user:20001,sent:0,silent:false,signal:new AbortController().signal });
-  const call = (tool,args={}, context=ctx()) => engine.execute({ action:'social',tool,args },context);
+  const call = async (tool,args={}, context=ctx()) => {
+    const invoke=args=>engine.execute({action:'social',tool,args},context),result=await invoke(args);
+    return tool==='qq_collect_sticker'?completeCollection(result,args,invoke):result;
+  };
   try { await run({ dir,store,usage,settings,calls,api,media,engine,ctx,call }); }
   finally { await rm(dir,{recursive:true,force:true,maxRetries:10,retryDelay:100}); }
 }
@@ -115,7 +119,7 @@ test('表情收藏转存、备注、查看和发送闭环；不读取库外文�
   const sticker=await call('qq_collect_sticker',{message_id:1,note:'开心',tags:['笑']});
   await call('qq_sticker_note',{sticker_id:sticker.id,note:'赞同',tags:['好']});
   assert.equal((await call('qq_stickers',{query:'赞同'})).length,1);
-  assert.equal((await call('qq_sticker_image',{sticker_id:sticker.id})).content[0].type,'image');
+  assert.ok((await call('qq_sticker_image',{sticker_id:sticker.id})).content.some(c=>c.type==='image'));
   await call('qq_send_sticker',{sticker_id:sticker.id}); assert.equal(store.snapshot().stickers[0].uses,1);
   assert.ok(calls.some(c=>Array.isArray(c.params.message)&&c.params.message[0].type==='image'));
   await assert.rejects(media.bytes(join(dir,'social.json'),new AbortController().signal),/媒体库/);

@@ -17,6 +17,7 @@ import { DEFAULT_SETTINGS } from '../dist/settings.js';
 import { socialTools } from '../dist/social-tools.js';
 import { legacyTools } from '../dist/legacy-tools.js';
 import { startActionServer } from '../dist/action-server.js';
+import { mockStickerAnalysis } from './helpers/sticker-review.mjs';
 
 test('功能审计：49 个 MCP 工具逐项经过真实传输、参数校验和受控协议/服务适配', { timeout: 30000 }, async t => {
   const dir = await mkdtemp(join(tmpdir(), 'qq-tool-audit-'));
@@ -93,7 +94,11 @@ test('功能审计：49 个 MCP 工具逐项经过真实传输、参数校验和
     const call=async(name,args={},error)=>{
       let value;
       await t.test(name,async()=>{
-        const result=await client.callTool({name,arguments:args});exercised.add(name);
+        let result=await client.callTool({name,arguments:args});exercised.add(name);
+        if(name==='qq_collect_sticker'&&!result.isError) {
+          const preview=JSON.parse(result.content[0].text);
+          if(preview.status==='needs_analysis')result=await client.callTool({name,arguments:{...args,analysis_token:preview.analysis_token,analysis:structuredClone(mockStickerAnalysis)}});
+        }
         if(error){assert.equal(result.isError,true);assert.match(result.content[0].text,error);return;}
         assert.notEqual(result.isError,true,result.content?.[0]?.text);
         assert.ok(result.content.length);value=result.content[0].type==='text'?JSON.parse(result.content[0].text):result;
@@ -120,7 +125,7 @@ test('功能审计：49 个 MCP 工具逐项经过真实传输、参数校验和
     await call('qq_get_friend_list');await call('qq_get_group_list');await call('qq_get_group_member_list',{group_id:30001});
     await call('qq_set_profile',{nickname:'小鲸',signature:'测试签名'});await call('qq_set_group_card',{group_id:30001,card:'小鲸'});
     await call('qq_set_avatar',{file:png});await call('qq_recall',{message_id:7});await call('qq_self_info',{group_id:30001});
-    assert.equal(exercised.size,49);assert.equal(requests.length,6);
+    assert.equal(exercised.size,49);assert.equal(requests.length,8);
     for(const endpoint of ['send_group_msg','send_private_msg','send_like','send_qzone_msg','upload_group_file','set_qq_profile','set_self_longnick','set_group_card','set_qq_avatar','delete_msg','group_poke','set_group_add_request'])assert.ok(calls.some(c=>c.action===endpoint),endpoint);
     assert.equal(store.message('group:30001',7).recalled,true);
   } finally {

@@ -153,7 +153,7 @@ export class MediaService {
     if (!model) return { content: [{ type: 'text', text: '以下图片交给当前 Agent 的视觉能力处理；若当前模型不支持图片，请明确说明。' }, ...images.map(i => ({ type: 'image', ...i }))] };
     const response = await fetch(this.endpoint('chat/completions'), { method: 'POST', headers: { ...this.headers(), 'content-type': 'application/json' }, signal: AbortSignal.any([signal, AbortSignal.timeout(60_000)]), body: JSON.stringify({ model, messages: [{ role: 'user', content: [{ type: 'text', text: question }, ...images.map(i => ({ type: 'image_url', image_url: { url: `data:${i.mimeType};base64,${i.data}` } }))] }] }) });
     const result = await response.json() as { choices?: Array<{ message: { content: string } }> };
-    if (!response.ok || !result.choices?.[0]) throw new Error(`视觉服务调用失败 (${response.status})`);
+    if (!response.ok || typeof result.choices?.[0]?.message?.content !== 'string' || !result.choices[0].message.content.trim()) throw new Error(`视觉服务调用失败或返回空内容 (${response.status})`);
     return { text: result.choices[0].message.content };
   }
   async transcribe(source: string, signal: AbortSignal): Promise<unknown> {
