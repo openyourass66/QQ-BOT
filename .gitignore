@@ -4,6 +4,8 @@
 /release/
 /desktop/bin/
 /desktop/obj/
+# 可选便携 Node 运行库，由本机部署，不纳入源码
+/runtime/
 /QQ-BOT*.exe
 /QQ-BOT*.pdb
 *.tsbuildinfo
@@ -35,6 +37,12 @@
 /settings-*.png
 /model-*.png
 /knowledge-*.png
+/quick-*.png
+/qq-favorites-*.png
+/autonomy-*.png
+/activity-*.png
+/memory-*.png
+/dropdown.png
 /smoke-result.txt
 *.desktop.tmp
 

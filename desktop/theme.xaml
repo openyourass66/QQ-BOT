@@ -11,13 +11,14 @@
   <SolidColorBrush x:Key="AccentSoft" Color="#EEF1FF"/>
   <SolidColorBrush x:Key="Success" Color="#297C66"/>
   <SolidColorBrush x:Key="Danger" Color="#B04C5D"/>
+  <Style x:Key="KeyboardFocus" TargetType="Control"><Setter Property="Template"><Setter.Value><ControlTemplate><Rectangle Margin="-3" Stroke="#25324B" StrokeThickness="2" StrokeDashArray="2,2" IsHitTestVisible="False"/></ControlTemplate></Setter.Value></Setter></Style>
   <Style x:Key="Surface" TargetType="Border">
    <Setter Property="Background" Value="White"/><Setter Property="CornerRadius" Value="16"/>
    <Setter Property="BorderBrush" Value="{StaticResource Line}"/><Setter Property="BorderThickness" Value="1"/><Setter Property="Padding" Value="22"/>
   </Style>
   <Style TargetType="Button">
    <Setter Property="MinHeight" Value="36"/><Setter Property="FontSize" Value="12"/>
-   <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
+   <Setter Property="FocusVisualStyle" Value="{StaticResource KeyboardFocus}"/>
    <Setter Property="Background" Value="White"/><Setter Property="Foreground" Value="#405170"/>
    <Setter Property="BorderBrush" Value="#DEE5F1"/><Setter Property="BorderThickness" Value="1"/>
    <Setter Property="Padding" Value="14,8"/><Setter Property="Cursor" Value="Hand"/>
