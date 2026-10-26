@@ -17,7 +17,7 @@ async function fixture(run) {
   const dir = await mkdtemp(join(tmpdir(), 'qq-social-'));
   const store = new SocialStore(join(dir,'social.json')); await store.load(); await store.account(10000);
   const usage = new DailyUsageStore(join(dir,'usage.json')); await usage.load();
-  const settings = structuredClone(DEFAULT_SETTINGS); settings.social.messagesPerMinute = 100;
+  const settings = structuredClone(DEFAULT_SETTINGS); settings.social.messagesPerMinute = 100; settings.approval.adminQq = 20001;
   const calls = []; let nextId = 100;
   const favorites=fakeQqFavorites();
   const api = { hasLocalMedia:true,call: async (action, params) => {
@@ -32,7 +32,7 @@ async function fixture(run) {
   } };
   const media = new MediaService(join(dir,'media'), () => settings.social);
   const engine = new SocialEngine(store,media,api,usage,() => settings,async () => true,() => {},() => {});
-  const ctx = () => ({ chat:'group:30001',self:10000,user:20001,sent:0,silent:false,signal:new AbortController().signal });
+  const ctx = () => ({ chat:'group:30001',self:10000,user:20001,origin:'message',sent:0,silent:false,signal:new AbortController().signal });
   const call = async (tool,args={}, context=ctx()) => {
     const invoke=args=>engine.execute({action:'social',tool,args},context),result=await invoke(args);
     return tool==='qq_collect_sticker'?completeCollection(result,args,invoke):result;
@@ -219,6 +219,49 @@ test('真实申请事件只能处理一次，失败不自动重试未知结果',
   await call('qq_handle_request',{event_id:id,approve:true});
   await assert.rejects(call('qq_handle_request',{event_id:id,approve:true}),/已经处理/);
   assert.equal(calls.filter(c=>c.action==='set_group_add_request').length,1);
+}));
+
+test('账号管理只允许真实主人消息，普通群友与后台任务不随自主模式获得权限', () => fixture(async ({engine,call,ctx,calls,settings,store}) => {
+  const id = await store.addEvent('group:30001','request:group',{flag:'real-owner-flag',sub_type:'invite'});
+  for (const mode of ['autonomous','sensitive','confirm']) {
+    settings.social.autonomy = mode;
+    for (const context of [{...ctx(),user:20002}, {...ctx(),origin:'notice'}, {...ctx(),origin:'background'}, {...ctx(),origin:undefined}, {...ctx(),proactive:true}, {...ctx(),reminder:true}]) {
+      for (const tool of ['qq_set_profile','qq_set_avatar','qq_set_group_card']) await assert.rejects(engine.legacy(tool,{nickname:'冒充',file:'https://example.com/x.png',group_id:30001},context), /仅机器人主人/);
+      await assert.rejects(call('qq_handle_request',{event_id:id,approve:true},context), /仅机器人主人/);
+    }
+  }
+  settings.approval.adminQq = 0;
+  await assert.rejects(engine.legacy('qq_set_profile',{nickname:'未设置主人'},ctx()), /仅机器人主人/);
+  assert.equal(calls.length, 0); assert.equal(store.snapshot().events[0].handled, false);
+  assert.equal(store.snapshot().actions.length, 0);
+  settings.approval.adminQq = 20001; settings.social.autonomy = 'autonomous';
+  await call('qq_reply',{text:'普通群友仍可正常对话'},{...ctx(),user:20002});
+  assert.equal(calls.filter(c=>c.action==='send_group_msg').length, 1);
+}));
+
+test('主人在私聊查看并处理真实申请，跨群读取不向普通群友公开', () => fixture(async ({store,call,ctx,calls,settings}) => {
+  const id = await store.addEvent('group:30002','request:group',{flag:'pending-real',sub_type:'invite'});
+  const owner = {...ctx(),chat:'private:20001'};
+  assert.equal((await call('qq_events',{},owner)).length, 1);
+  assert.equal((await call('qq_events',{},ctx())).length, 0);
+  assert.equal((await call('qq_events',{}, {...ctx(),chat:'private:20002',user:20002})).length, 0);
+  settings.social.blockedGroups.push('30002');
+  assert.equal((await call('qq_events',{},owner)).length, 0);
+  await assert.rejects(call('qq_handle_request',{event_id:id,approve:true},owner), /屏蔽/);
+  settings.social.blockedGroups = [];
+  await call('qq_handle_request',{event_id:id,approve:true},owner);
+  assert.equal(calls.filter(c=>c.action==='set_group_add_request').length, 1);
+}));
+
+test('确认期间切换主人后再次核验身份，旧主人的待执行动作失效', () => fixture(async ({store,media,api,usage,ctx,settings,calls}) => {
+  settings.social.autonomy = 'confirm';
+  const engine = new SocialEngine(store,media,api,usage,()=>settings,async()=>{settings.approval.adminQq=20002;return true;},()=>{},()=>{});
+  await assert.rejects(engine.legacy('qq_set_profile',{nickname:'旧主人请求'},ctx()), /仅机器人主人/);
+  assert.equal(calls.length,0);
+  settings.approval.adminQq=20001; settings.social.autonomy='autonomous';
+  const success = new SocialEngine(store,media,api,usage,()=>settings,async()=>true,()=>{},()=>{});
+  await success.legacy('qq_set_profile',{nickname:'主人请求',signature:'主人签名'},ctx());
+  assert.deepEqual(calls.map(c=>c.action),['set_qq_profile','set_self_longnick']);
 }));
 test('媒体缺少服务时明确不可用；下载拒绝内网与非 HTTP；决定潜水不发送', () => fixture(async ({call,ctx,media}) => {
   const signal=ctx().signal;

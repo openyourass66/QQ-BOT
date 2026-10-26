@@ -39,7 +39,7 @@ test('功能审计：全部 MCP 工具逐项经过真实传输、参数校验和
   delete process.env.BOT_FFMPEG_BIN;
   let client,actions;
   try {
-    const settings=structuredClone(DEFAULT_SETTINGS);
+    const settings=structuredClone(DEFAULT_SETTINGS);settings.approval.adminQq=20001;
     Object.assign(settings.social,{messagesPerMinute:100,actionsPerDay:1000,visionModel:'test-vision',transcriptionModel:'test-asr',speechModel:'test-tts'});
     settings.chat.group.proactive.enabled=true;settings.chat.group.proactive.perGroupPerDay=20;
     settings.budgets.proactiveMessagesPerDay=100;Object.assign(settings.features.qzone,{enabled:true,requireConfirm:false,dailyLimit:10,browseEnabled:true,commentsEnabled:true,commentRequireConfirm:false});
@@ -69,7 +69,7 @@ test('功能审计：全部 MCP 工具逐项经过真实传输、参数校验和
     const qzone=new QzoneService(api,{fetch:async(url,options)=>{assert.ok(['user.qzone.qq.com','h5.qzone.qq.com'].includes(url.hostname));assert.equal(options.redirect,'error');requests.push({path:'native-qzone',raw:String(options.body??'')});return new Response(JSON.stringify(options.method==='POST'?{code:0,commentid:'comment-real'}:{code:0,total:1,msglist:[{tid:'post-real',uin:10000,content:'动态'}]}));}});
     const engine=new SocialEngine(store,media,api,usage,()=>settings,async()=>true,()=>{},()=>{},qzone);
     const policy=new QqActionPolicy(api,usage,()=>settings,async()=>true);
-    const ctx=signal=>({chat:'group:30001',self:10000,user:20001,sent:0,silent:false,signal});
+    const ctx=signal=>({chat:'group:30001',self:10000,user:20001,origin:'message',sent:0,silent:false,signal});
     const segment=(type,data)=>[{type,data}];
     const seed=async(id,segments,self=false)=>store.add({chat:'group:30001',id,user:self?10000:20001,name:'甲',at:Date.now(),text:'测试消息',segments,self,recalled:false});
     await seed(1,segment('text',{text:'测试消息'}));await seed(2,segment('image',{file:png}));

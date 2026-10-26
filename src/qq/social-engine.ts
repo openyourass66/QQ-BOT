@@ -4,6 +4,7 @@ import { extname } from 'node:path';
 import { SocialStore, type ScheduledTask } from './social-store.js';
 import { MediaService } from '../services/media.js';
 import { socialTools, SocialCallSchema, type ToolContext } from './social-tools.js';
+import { assertAccountTool, isAccountOwner } from '../core/permissions.js';
 import { allowedChat } from './social-settings.js';
 import type { BotSettings } from '../core/settings.js';
 import { OneBotHttp, parseMessageEvent, parseCqMessage, segmentsToText, type Segment } from './onebot.js';
@@ -83,9 +84,11 @@ export class SocialEngine {
     if(!this.friendIds.has(String(user)))throw new Error('空间目标已不是当前 QQ 好友');
   }
   async approve(ctx: ToolContext, tool: string, sensitive = false): Promise<void> {
+    assertAccountTool(ctx, this.settings().approval.adminQq, tool);
     const mode = this.settings().social.autonomy;
     if ((mode === 'confirm' || (mode === 'sensitive' && sensitive)) && !await this.confirm(`QQ 操作：${tool}\n来源：${ctx.chat}`, ctx.signal)) throw new Error('操作未获确认');
     this.check(ctx);
+    assertAccountTool(ctx, this.settings().approval.adminQq, tool);
   }
   actionQuotas(ctx: ToolContext, key = ctx.chat): Quota[] {
     this.check(ctx);
@@ -164,6 +167,7 @@ export class SocialEngine {
     const call = SocialCallSchema.parse(input);
     this.guardTool(ctx,call.tool);
     this.autonomy.authorize(ctx,call.tool);
+    assertAccountTool(ctx, this.settings().approval.adminQq, call.tool);
     const tool = socialTools.find(t => t.name === call.tool);
     if (!tool) throw new Error('未知 QQ 工具');
     const args = z.object(tool.schema as z.ZodRawShape).strict().parse(call.args) as Record<string, any>;
@@ -368,13 +372,23 @@ export class SocialEngine {
       }
       case 'qq_reminders': return state().tasks.filter(t => t.chat === ctx.chat && !['sent', 'cancelled'].includes(t.state));
       case 'qq_cancel_reminder': return this.store.update(d => { const task = d.tasks.find(t => t.id === a.reminder_id && t.chat === ctx.chat); if (!task || !['pending','blocked'].includes(task.state)) throw new Error('该提醒不存在或已开始执行'); task.state = 'cancelled'; return task; });
-      case 'qq_events': return state().events.filter(e => e.chat === ctx.chat && (!a.pending_only || !e.handled)).slice(-50);
+      case 'qq_events': {
+        const ownerInbox = isAccountOwner(ctx, this.settings().approval.adminQq) && ctx.chat === `private:${ctx.user}`;
+        return state().events.filter(e =>
+          (e.chat === ctx.chat || ownerInbox && e.type.startsWith('request:') && allowedChat(this.settings().social, e.chat)) &&
+          (!a.pending_only || !e.handled)).slice(-50);
+      }
       case 'qq_actions': return state().actions.filter(action => action.chat === ctx.chat).slice(-30);
       case 'qq_handle_request': {
-        this.feature('requestsEnabled'); const event = state().events.find(e => e.id === a.event_id && e.chat === ctx.chat && e.type.startsWith('request:'));
+        this.feature('requestsEnabled');
+        const ownerInbox = isAccountOwner(ctx, this.settings().approval.adminQq) && ctx.chat === `private:${ctx.user}`;
+        const event = state().events.find(e => e.id === a.event_id && (e.chat === ctx.chat || ownerInbox) && e.type.startsWith('request:'));
         if (!event || event.handled || typeof event.data.flag !== 'string') throw new Error('申请不存在或已经处理');
+        this.check(ctx, event.chat);
         await this.quota(ctx, ctx.chat);
         await this.store.update(d => { const e = d.events.find(e => e.id === event.id); if (!e || e.handled) throw new Error('申请已由其他操作处理'); e.handled = true; });
+        assertAccountTool(ctx, this.settings().approval.adminQq, tool);
+        this.check(ctx, event.chat);
         return this.api.call(event.type === 'request:friend' ? 'set_friend_add_request' : 'set_group_add_request', { flag: event.data.flag, approve: a.approve, ...(event.type === 'request:friend' ? { remark: a.remark } : { sub_type: event.data.sub_type, reason: a.remark }) }, ctx.signal);
       }
       case 'qq_transcribe': this.feature('mediaEnabled'); return this.media.transcribe(await this.messageSource(ctx, a.message_id, 'record'), ctx.signal);
@@ -544,6 +558,7 @@ export class SocialEngine {
     this.autonomy.authorize(ctx,tool);
     this.check(ctx);
     if (tool === 'qq_set_profile' && Object.keys(args).length === 0) throw new Error('请至少填写一项要修改的资料');
+    assertAccountTool(ctx, this.settings().approval.adminQq, tool);
     if (tool === 'qq_self_info') {
       if (args.group_id) { await this.target(ctx, `group:${args.group_id}`); return this.api.call('get_group_member_info', { group_id: args.group_id, user_id: ctx.self, no_cache: true }, ctx.signal); }
       return this.api.call('get_login_info', {}, ctx.signal);
@@ -564,14 +579,16 @@ export class SocialEngine {
       if (tool === 'qq_set_profile') {
         const { signature, ...profile } = args;
         result = {};
-        if (Object.keys(profile).length) result = await this.api.call('set_qq_profile', profile, ctx.signal);
-        if (signature !== undefined) result = await this.api.call('set_self_longnick', { longNick: signature }, ctx.signal);
+        if (Object.keys(profile).length) { assertAccountTool(ctx, this.settings().approval.adminQq, tool); result = await this.api.call('set_qq_profile', profile, ctx.signal); }
+        if (signature !== undefined) { assertAccountTool(ctx, this.settings().approval.adminQq, tool); result = await this.api.call('set_self_longnick', { longNick: signature }, ctx.signal); }
       } else if (tool === 'qq_set_group_card') {
         await this.target(ctx, `group:${args.group_id}`);
+        assertAccountTool(ctx, this.settings().approval.adminQq, tool);
         result = await this.api.call('set_group_card', { ...args, user_id: ctx.self }, ctx.signal);
       } else if (tool === 'qq_set_avatar') {
         const image = await this.media.image(args.file, ctx.signal);
         const file = await this.media.save(Buffer.from(image.data, 'base64'), '.' + image.mimeType.split('/')[1]);
+        assertAccountTool(ctx, this.settings().approval.adminQq, tool);
         result = await this.api.call('set_qq_avatar', { file: toFile(file) }, ctx.signal);
       } else if (tool === 'qq_recall') {
         const message = this.message(ctx, args.message_id);
