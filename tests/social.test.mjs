@@ -225,7 +225,7 @@ test('媒体缺少服务时明确不可用；下载拒绝内网与非 HTTP；决
   await assert.rejects(downloadPublic('http://127.0.0.1/secret',signal),/内网/);
   await assert.rejects(downloadPublic('file:///secret',signal),/无效/);
   await assert.rejects(media.speech('hello',signal),/未配置/);
-  await assert.rejects(call('qq_qzone_feed'),/未配置/);
+  await assert.rejects(call('qq_qzone_feed'),/空间浏览已关闭/);
   const context=ctx(); await call('qq_finish',{reason:'这段与我无关',active_topic:'咖啡'},context);
   assert.equal(context.silent,true); assert.equal(context.topic,'咖啡'); assert.equal(context.sent,0);
 }));

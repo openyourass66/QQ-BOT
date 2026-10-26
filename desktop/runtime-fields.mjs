@@ -14,7 +14,6 @@ export const runtimeFields = [
   ['模型选择', 'QQ_BOT_DEEPSEEK_API_KEY', '本项目 API Key', '', 'secret'],
   ['模型选择', 'BOT_CHAT_BASE_URL', 'API 地址', defaultChatBaseUrl],
   ['媒体服务连接', 'BOT_MEDIA_BASE_URL', '媒体服务地址（兼容 API 的 /v1/）', ''], ['媒体服务连接', 'BOT_MEDIA_API_KEY', '媒体服务密钥', '', 'secret'], ['媒体服务连接', 'BOT_FFMPEG_BIN', 'FFmpeg 文件（视频抽帧）', '', 'file'],
-  ['空间浏览与评论', 'BOT_QZONE_ADAPTER_URL', '空间浏览与评论服务地址', ''], ['空间浏览与评论', 'BOT_QZONE_ADAPTER_TOKEN', '空间适配服务令牌', '', 'secret'],
   ['社交数据', 'BOT_SOCIAL_STORE', '社交数据文件（留空自动选择）', ''], ['社交数据', 'BOT_MEDIA_DIR', '媒体库目录（留空自动选择）', '', 'folder'], ['社交数据', 'BOT_MEDIA_IMPORT_DIRS', '允许导入的媒体目录（多个用 | 分隔）', ''],
   ['OneBot 连接', 'ONEBOT_HTTP_URL', 'HTTP 地址', 'http://127.0.0.1:3000'], ['OneBot 连接', 'ONEBOT_WS_URL', 'WebSocket 地址', 'ws://127.0.0.1:3001'], ['OneBot 连接', 'ONEBOT_TOKEN', '连接令牌', '', 'secret'],
   ['账号与 NapCat', 'BOT_SELF_ID', '机器人 QQ（0 为自动识别）', '0'], ['账号与 NapCat', 'BOT_QQ_DIR', 'QQ 安装目录', '', 'folder'], ['账号与 NapCat', 'BOT_NAPCAT_DIR', 'NapCat Shell 目录', 'napcat/shell', 'folder'],

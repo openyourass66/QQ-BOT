@@ -152,6 +152,7 @@ export async function socialAdmin(input: unknown, store: SocialStore, media: Med
     {key:'reminders',label:'定时提醒',limit:s.budgets.remindersPerDay},
     {key:'likes',label:'名片点赞',limit:s.budgets.likesPerDay},
     {key:'qzone',label:'空间发布',limit:s.features.qzone.dailyLimit},
+    {key:'qzone-comments',label:'空间评论',limit:s.features.qzone.commentDailyLimit},
     {key:'autonomous-decisions',label:'后台判断',limit:s.social.autonomousDecisionsPerDay},
     {key:'learning',label:'后台学习',limit:s.learning.dailyCalls},
     ...data.contacts.filter(c=>c.chat.startsWith('group:')).map(c=>({key:c.chat,label:c.name+' 主动消息与提醒',limit:s.chat.group.proactive.perGroupPerDay})),

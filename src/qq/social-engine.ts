@@ -16,6 +16,7 @@ import { Cognition, forgetMemory, memoryMeta, fingerprint } from '../agent/cogni
 import { MemoryMetaSchema } from '../agent/cognition-state.js';
 import { learningModel } from '../agent/learning-model.js';
 import { turnBudget, toolAvailable } from '../agent/context-policy.js';
+import { QzoneService } from '../services/qzone.js';
 
 export class SocialEngine {
   private sending = new Map<string, Promise<unknown>>();
@@ -23,20 +24,21 @@ export class SocialEngine {
   private contactsAt = 0;
   private friendIds = new Set<string>();
   private groupIds = new Set<string>();
-  private posts = new Set<string>();
   private groupFiles = new Map<string, Map<string, Record<string, unknown>>>();
   private tickRunning = false;
   private stickerReviews = new StickerReviews();
   readonly qqStickers: QqStickers;
   readonly autonomy:Autonomy;
   readonly cognition:Cognition;
+  readonly qzone:QzoneService;
   constructor(readonly store: SocialStore, readonly media: MediaService, private readonly api: OneBotHttp,
     private readonly usage: DailyUsageStore, private readonly settings: () => BotSettings,
     private readonly confirm: (title: string, signal: AbortSignal) => Promise<boolean>,
     private readonly onSent: (chat: string, id: number, segments: Segment[], source?: string) => void,
-    private readonly log: (text: string) => void) {
+    private readonly log: (text: string) => void, qzone?:QzoneService) {
       this.qqStickers=new QqStickers(store,media,api);this.autonomy=new Autonomy(store,settings,usage,undefined,media);
       const model=learningModel();this.cognition=new Cognition(store,settings,usage,model.analyze,model.available);
+      this.qzone=qzone??new QzoneService(api,{blocked:user=>settings().social.blockedUsers.includes(String(user))});
     }
   guardTool(ctx:ToolContext,name:string):void {
     ctx.budget??=turnBudget();
@@ -167,7 +169,7 @@ export class SocialEngine {
     const mutates = !reads.has(call.tool) && !['qq_group_file','qq_actions'].includes(call.tool) && !(call.tool === 'qq_send_image' && args.preview) && !collectPreview && !sendPreview;
     const actionId = mutates ? await this.store.beginAction(ctx.chat, call.tool) : undefined;
     try {
-      if (mutates) await this.approve(ctx, call.tool, ['qq_handle_request', 'qq_qzone_comment'].includes(call.tool));
+      if (mutates&&call.tool!=='qq_qzone_comment') await this.approve(ctx, call.tool, call.tool==='qq_handle_request');
       const result = await this.perform(call.tool, args, ctx);
       if (actionId) await this.store.endAction(actionId, 'success', `${tool.title}：${String(args.text ?? args.name ?? args.note ?? '已完成')}`);
       return result;
@@ -423,19 +425,31 @@ export class SocialEngine {
         });
       }
       case 'qq_qzone_feed': {
-        if (!process.env.BOT_QZONE_ADAPTER_URL) throw new Error('空间浏览适配服务未配置');
-        if (a.user_id && this.settings().social.blockedUsers.includes(String(a.user_id))) throw new Error('目标用户已屏蔽');
-        const result = await adapter(process.env.BOT_QZONE_ADAPTER_URL, process.env.BOT_QZONE_ADAPTER_TOKEN, { action: 'feed', ...a }, ctx.signal) as { posts?: Array<{ id: string }> };
-        for (const post of result.posts ?? []) this.posts.add(String(post.id));
-        if (this.posts.size > 1000) this.posts = new Set([...this.posts].slice(-1000));
+        if(!this.settings().features.qzone.browseEnabled)throw new Error('空间浏览已关闭，请在机器人设置的功能开关开启');
+        const user=a.user_id??ctx.self;if(user!==ctx.self)await this.target(ctx,`private:${user}`);
+        const result=await this.qzone.feed(ctx.chat,ctx.self,user,a.limit,a.offset,ctx.signal);this.check(ctx);
+        if(!this.settings().features.qzone.browseEnabled)throw new Error('空间浏览已关闭');
+        if(user!==ctx.self)this.check(ctx,`private:${user}`);
         return result;
       }
       case 'qq_qzone_comment': {
-        if (!process.env.BOT_QZONE_ADAPTER_URL) throw new Error('空间评论适配服务未配置');
-        if (!this.settings().features.qzone.enabled) throw new Error('QQ 空间功能已关闭');
-        if (!this.posts.has(a.post_id)) throw new Error('请先浏览空间，选择真实返回的动态 ID');
-        await this.quota(ctx, ctx.chat, [{ key: 'qzone-comments', amount: 1, limit: this.settings().features.qzone.dailyLimit, label: '空间评论' }]);
-        return adapter(process.env.BOT_QZONE_ADAPTER_URL, process.env.BOT_QZONE_ADAPTER_TOKEN, { action: 'comment', ...a }, ctx.signal);
+        let confirmed=false;
+        const validate=()=>{
+          this.check(ctx);const qzone=this.settings().features.qzone;
+          if(!qzone.browseEnabled||!qzone.commentsEnabled)throw new Error('空间浏览或评论已关闭，请在机器人设置的功能开关开启');
+          const target=this.qzone.target(ctx.chat,ctx.self,a.post_id,a.reply_id);
+          if(target.post.user_id!==ctx.self)this.check(ctx,`private:${target.post.user_id}`);
+          return {qzone,target};
+        };
+        const {qzone,target}=validate();if(target.post.user_id!==ctx.self)await this.target(ctx,`private:${target.post.user_id}`);
+        if(qzone.commentRequireConfirm||this.settings().social.autonomy!=='autonomous') {
+          confirmed=await this.confirm(`要${target.reply?'回复空间评论':'评论 QQ 空间说说'}：\n目标：${target.post.name||target.post.user_id}（QQ ${target.post.user_id}）\n动态：${target.post.text.slice(0,800)}\n${target.reply?'回复 '+(target.reply.name||target.reply.user_id)+'：'+target.reply.text+'\n':''}评论正文：\n${a.text}`,ctx.signal);
+          if(!confirmed)throw new Error('空间评论未获管理员确认');
+        }
+        return this.qzone.comment(ctx.chat,ctx.self,{post_id:a.post_id,text:a.text,reply_id:a.reply_id},ctx.signal,async()=>{
+          const check=()=>{const {qzone}=validate();if((qzone.commentRequireConfirm||this.settings().social.autonomy!=='autonomous')&&!confirmed)throw new Error('空间评论现在需要管理员确认，请重新发起');return qzone;};
+          check();await this.quota(ctx,ctx.chat,()=>[{key:'qzone-comments',amount:1,limit:check().commentDailyLimit,label:'空间评论'}]);check();
+        });
       }
       case 'qq_report': this.log(`[report] ${ctx.chat} ${a.text}`); return { recorded: true };
       default: throw new Error('工具尚未实现');
@@ -530,7 +544,7 @@ export class SocialEngine {
       if (Array.isArray(result)) return result.filter(item => !this.settings().social.blockedUsers.includes(String(item.user_id ?? '')) && !this.settings().social.blockedGroups.includes(String(item.group_id ?? '')));
       return result;
     }
-    if (tool === 'qq_get_cookies') throw new Error('登录凭据不提供给会话模型；空间操作请使用专用适配服务');
+    if (tool === 'qq_get_cookies') throw new Error('登录凭据不提供给会话模型；空间操作请使用空间浏览与评论工具');
     await this.approve(ctx, tool, true);
     const id = await this.store.beginAction(ctx.chat, tool);
     try {
@@ -607,9 +621,3 @@ export function parseShanghaiTime(text: string): number {
   return value;
 }
 function toFile(file: string): string { return new URL('file:///' + file.replace(/\\/g, '/').replace(/^\//, '').split('/').map((p,i) => i === 0 && p.endsWith(':') ? p : encodeURIComponent(p)).join('/')).href; }
-async function adapter(url: string, token: string | undefined, data: unknown, signal: AbortSignal): Promise<unknown> {
-  const endpoint = new URL(url); if (!['http:', 'https:'].includes(endpoint.protocol)) throw new Error('适配服务地址必须为 HTTP(S)');
-  const response = await fetch(endpoint, { method: 'POST', headers: { 'content-type': 'application/json', ...(token ? { authorization: `Bearer ${token}` } : {}) }, body: JSON.stringify(data), signal: AbortSignal.any([signal, AbortSignal.timeout(30000)]) });
-  if (!response.ok) throw new Error(`适配服务失败 (${response.status})`);
-  return response.json();
-}

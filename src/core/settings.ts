@@ -59,6 +59,10 @@ const SettingsSchema = z
             enabled: z.boolean().default(false),
             dailyLimit: z.number().int().min(0).max(10).default(1),
             requireConfirm: z.boolean().default(true),
+            browseEnabled: z.boolean().default(false),
+            commentsEnabled: z.boolean().default(false),
+            commentDailyLimit: z.number().int().min(0).max(50).default(5),
+            commentRequireConfirm: z.boolean().default(true),
           })
           .default({}),
       })

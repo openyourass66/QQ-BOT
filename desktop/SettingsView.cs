@@ -72,6 +72,9 @@ partial class App
         new FieldSpec("social.filesEnabled", "功能开关", "日常能力", "文件收发", "允许制作文本、接收文件和发送媒体库文件。"),
         new FieldSpec("social.requestsEnabled", "功能开关", "日常能力", "好友与群申请", "允许理解并处理真实收到的申请和邀请。"),
         new FieldSpec("features.qzone.enabled", "功能开关", "日常能力", "QQ 空间发布", "依赖协议端的空间接口支持；发布确认规则在身份与审批管理。"),
+        new FieldSpec("features.qzone.browseEnabled", "功能开关", "QQ 空间互动", "空间浏览", "读取自己或指定好友的说说；直接复用 NapCat 登录，可在扩展服务检查连接。"),
+        new FieldSpec("features.qzone.commentsEnabled", "功能开关", "QQ 空间互动", "空间评论与回复", "需先开启空间浏览，只能评论当前会话实际读到的动态；好友空间受联系范围限制。"),
+        new FieldSpec("features.qzone.commentRequireConfirm", "身份与审批", "QQ 动作确认", "空间评论前确认", "确认时显示动态作者、动态内容及评论正文；敏感或全部确认模式仍要求审批。"),
         new FieldSpec("features.qzone.requireConfirm", "身份与审批", "QQ 动作确认", "空间发布前确认", "即使选择自主执行，开启此项后，空间发布仍需确认实际正文与图片。"),
         new FieldSpec("social.visionModel", "媒体服务", "模型与声音", "独立视觉模型", "留空沿用对话模型；填写时使用本页上方的媒体服务。"),
         new FieldSpec("social.transcriptionModel", "媒体服务", "模型与声音", "语音转写模型", "使用本页上方的媒体服务；留空表示未配置语音识别。"),
@@ -100,6 +103,7 @@ partial class App
         new FieldSpec("chat.group.proactive.perGroupPerDay", "额度与节奏", "每日额度", "每群主动消息与提醒", "群内主动消息和提醒共用此额度，各自再受对应全局额度约束。", "条/天", 0, 20),
         new FieldSpec("budgets.likesPerDay", "额度与节奏", "每日额度", "名片点赞", "按实际点赞次数扣除。", "次/天", 0, 200, 5),
         new FieldSpec("features.qzone.dailyLimit", "额度与节奏", "每日额度", "空间发布总额", "对话中的发布与后台自主发布共用；后台另受自主空间上限约束。", "次/天", 0, 10),
+        new FieldSpec("features.qzone.commentDailyLimit", "额度与节奏", "每日额度", "空间评论总额", "评论与回复共用；发送失败或结果未知保留次数，上海零点重置。", "次/天", 0, 50),
         new FieldSpec("social.messagesPerMinute", "额度与节奏", "回复节奏", "会话操作频率", "限制同一会话一分钟内的动作次数。", "次/分", 1, 100),
         new FieldSpec("chat.delay.minMs", "额度与节奏", "回复节奏", "最短回复延迟", "最短延迟不能大于最长延迟。", "毫秒", 0, 10000, 100),
         new FieldSpec("chat.delay.maxMs", "额度与节奏", "回复节奏", "最长回复延迟", "在范围内选择自然的发送间隔。", "毫秒", 0, 20000, 100),
@@ -146,7 +150,7 @@ partial class App
         Find<ListBox>("SettingsNav").ItemsSource=categoryNames.Select((name,i)=>new SettingsCategory { Name=name, Description=categoryDescriptions[i], Count=specs.Count(s=>s.Category==name).ToString() }).ToList();
         Find<ListBox>("SettingsNav").SelectedItem=((IEnumerable<SettingsCategory>)Find<ListBox>("SettingsNav").ItemsSource).First(c=>c.Name==selectedCategory);
         AddSettingsLink(panel,"功能开关","记忆内容与收藏","记忆 人设 收藏 表情","长期记忆在人设与记忆中编辑，收藏表情在 QQ 活动中管理。","管理长期记忆",()=>OpenFriendMemory(null));
-        AddSettingsLink(panel,"功能开关","空间与扩展服务","空间 适配 后台 分析","后台分析和空间接口在扩展服务中配置；对应能力是否可用仍取决于模型、协议与服务支持。","查看扩展服务",()=>NavigateRuntime(4));
+        AddSettingsLink(panel,"功能开关","空间连接与后台分析","空间 连接 NapCat 后台 分析","空间直接复用 NapCat 登录；扩展服务中可检查空间连接，也可配置后台分析模型。","检查空间连接",()=>NavigateRuntime(4));
         AddSettingsLink(panel,"功能开关","联网搜索","联网 搜索 网页 DeepSeek DSH","联网搜索与网页读取由 DSH / DeepSeek 原生工具提供，使用当前 Profile 与凭据。","查看模型与运行环境",()=>NavigateRuntime(1));
         AddSettingsLink(panel,"联系范围","动作确认规则","确认 审批 权限 管理员","允许联系哪些对象在本页管理；QQ 动作是否需要确认由身份与审批管理。","设置动作确认",()=>NavigateSetting("social.autonomy"));
         AddSettingsLink(panel,"主动与提醒","后台任务额度","额度 判断 收藏 空间 每天 上限","主动聊天、提醒和后台任务的每日额度统一在额度与节奏设置。","设置每日额度",()=>NavigateSetting("social.autonomousDecisionsPerDay"));
@@ -257,6 +261,9 @@ partial class App
         if(fields.ContainsKey("social.proactiveEnabled")) {bool on=((CheckBox)fields["social.proactiveEnabled"]).IsChecked==true;foreach(string key in new[]{"social.proactiveIntervalMinutes","social.quietStartHour","social.quietEndHour"})enabled(key,on);}
         if(fields.ContainsKey("social.autoQzoneEnabled"))enabled("social.qzoneIntervalHours",((CheckBox)fields["social.autoQzoneEnabled"]).IsChecked==true);
         enabled("context.rolloverPercent",SettingOn("context.rollover"));
+        enabled("features.qzone.commentsEnabled",SettingOn("features.qzone.browseEnabled"));
+        SettingStatus("features.qzone.browseEnabled",SettingOn("features.qzone.browseEnabled")?"使用 NapCat 当前 QQ 账号，只读取该账号有权访问的自己或好友说说。":"空间浏览已关闭；发布自己的说说使用独立开关。");
+        SettingStatus("features.qzone.commentsEnabled",!SettingOn("features.qzone.browseEnabled")?"请先开启空间浏览。":!SettingOn("features.qzone.commentsEnabled")?"评论与回复已关闭。":SettingNumber("features.qzone.commentDailyLimit")==0?"每日评论上限为 0，不会发送评论。":SettingOn("features.qzone.commentRequireConfirm")&&SettingNumber("approval.adminQq")==0?"评论前需确认，请先设置管理员 QQ。":"评论已开启，受独立额度、联系范围和确认规则约束。");
         SettingStatus("learning.memory",SettingOn("learning.memory")?"需要明确会话、分析模型和学习额度；在 QQ 活动查看学习记录。":"自动整理已关闭；手动记忆和相关性召回仍可使用。");
         int hour=TimeZoneInfo.ConvertTimeBySystemTimeZoneId(DateTime.UtcNow,"China Standard Time").Hour;long start=SettingNumber("social.quietStartHour"),end=SettingNumber("social.quietEndHour");bool quiet=start>=0&&end>=0&&start!=end&&(start<end?hour>=start&&hour<end:hour>=start||hour<end);
         string background=!SettingOn("social.proactiveEnabled")?"等待开启后台自主活动":!SettingOn("social.autonomousEnabled")?"等待开启持续兴趣与想法":SettingNumber("social.autonomousDecisionsPerDay")==0?"每日后台判断上限为 0，后台不会唤醒模型":SettingNumber("social.actionsPerDay")==0?"QQ 动作总额为 0，后台动作暂停":quiet?"当前为上海时间安静时段，后台暂停":"基础条件已满足，等待候选话题、联系间隔与可用额度";
@@ -368,6 +375,10 @@ partial class App
             if(settingsCards.Any(card=>card.Rows.Any(view=>IsMediaSetting(view.Spec.Path))))throw new Exception("媒体模型仍出现在机器人设置中");
             foreach(string key in mediaKeys)if(!object.ReferenceEquals(mediaInputs[key],fields["social."+key])||!Find<StackPanel>("RuntimeFields").IsAncestorOf(fieldViews["social."+key].Row))throw new Exception("媒体模型不是单一编辑入口");
             if(fields.Keys.Any(key=>key.StartsWith("web.")||key.StartsWith("features.browsing.")))throw new Exception("已移除的搜索适配设置仍出现在表单中");
+            ((CheckBox)fields["features.qzone.browseEnabled"]).IsChecked=false;
+            if(fields["features.qzone.commentsEnabled"].IsEnabled)throw new Exception("关闭空间浏览后评论开关仍可编辑");
+            ((CheckBox)fields["features.qzone.browseEnabled"]).IsChecked=true;
+            if(!fields["features.qzone.commentsEnabled"].IsEnabled)throw new Exception("开启空间浏览后无法设置评论");
         } finally {
             savedRuntimeValues["BOT_MEDIA_BASE_URL"]=originalService;ApplySavedSettings(original,paths);socialProfiles=profiles;
             foreach(var view in fieldViews.Values)view.Error.Visibility=Visibility.Collapsed;

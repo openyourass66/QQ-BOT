@@ -166,6 +166,8 @@ partial class App
         if(type=="error"&&message.ContainsKey("action")&&(string)message["action"]=="onboarding"){onboardingBusy=false;quickReady=false;Find<TextBlock>("QuickNotice").Text=(string)message["text"];UpdateConnectionEditing();}
         if(type=="error"&&message.ContainsKey("action")&&(string)message["action"]=="model")ChatModelError((string)message["text"]);
         if(type=="model"){RenderChatModel(message);return;}
+        if(type=="qzone-check"){RenderQzoneCheck((string)message["message"],false);return;}
+        if(type=="error"&&message.ContainsKey("action")&&(string)message["action"]=="qzone-check")RenderQzoneCheck((string)message["text"],true);
         if(type=="settings-status"){RenderSettingsStatus(message);Feedback("设置状态与今日额度已刷新。");return;}
         if(type=="error"&&message.ContainsKey("action")&&(string)message["action"]=="settings-status"){settingsStatusBusy=false;Find<Button>("SettingsRefresh").Content="刷新额度";}
         if (type == "error" && profileDialog != null) { profileDialog.IsEnabled = true; MessageBox.Show(profileDialog, (string)message["text"], "会话设置未保存"); }

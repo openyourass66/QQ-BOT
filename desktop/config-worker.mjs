@@ -62,6 +62,17 @@ process.once('message', async ({ action, data }) => {
         ? { operation: 'list', models: await listChatModels(config), message: '模型列表已获取，选择后可测试连接。' }
         : { operation: 'test', ...await testChatModel(config) };
     }
+    else if(action==='qzone-check') {
+      const runtime=data?.runtime??{};
+      if(!runtime||typeof runtime!=='object'||Array.isArray(runtime)||Object.keys(runtime).some(key=>!['ONEBOT_HTTP_URL','ONEBOT_TOKEN'].includes(key)))throw new Error('连接配置格式无效：空间检查只接受 QQ HTTP 地址和连接令牌');
+      const env={...process.env,...parseEnv(mergeRuntimeEnv(await read('.env'),runtime))};
+      const url=new URL(env.ONEBOT_HTTP_URL||'http://127.0.0.1:3000');
+      if(!['http:','https:'].includes(url.protocol)||url.username||url.password||url.search||url.hash)throw new Error('连接配置格式无效：QQ HTTP 地址无效');
+      const {OneBotHttp}=await import('../dist/qq/onebot.js');const {QzoneService}=await import('../dist/services/qzone.js');
+      const signal=AbortSignal.timeout(25000);
+      try {result=await new QzoneService(new OneBotHttp(url.href.replace(/\/+$/,''),env.ONEBOT_TOKEN??'')).inspect(signal);}
+      catch(error){throw new Error('空间连接检查失败：'+(signal.aborted?'检查超时，请确认 QQ 在线并检查网络。':error.message));}
+    }
     else if (action === 'connection') {
       if (data?.sourceSettingsPath && resolve(data.sourceSettingsPath) !== settings.getSettingsPath()) throw new Error('配置格式无效：动态配置文件已被其他操作切换，请重新打开工作台核对');
       const allowed = new Set(mediaKeys);
@@ -105,7 +116,7 @@ process.once('message', async ({ action, data }) => {
     process.send({ ok: true, result }, () => process.disconnect());
   } catch (e) {
     const error = e.issues ? e.issues.map(issue => `${issue.path.join('.')}: ${issue.message}`).join('；')
-      : /工作区已变更|协议无效|配置格式无效|^管理操作失败：/.test(e.message) ? e.message : '配置操作失败，请检查文件格式与访问权限；原有文件保留。';
+      : /工作区已变更|协议无效|配置格式无效|^管理操作失败：|^空间连接检查失败：/.test(e.message) ? e.message : '配置操作失败，请检查文件格式与访问权限；原有文件保留。';
     process.send({ ok: false, error }, () => process.disconnect());
   }
 });

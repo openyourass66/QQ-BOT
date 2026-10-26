@@ -11,6 +11,7 @@ import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 import { SocialStore } from '../dist/qq/social-store.js';
 import { SocialEngine } from '../dist/qq/social-engine.js';
 import { MediaService } from '../dist/services/media.js';
+import { QzoneService } from '../dist/services/qzone.js';
 import { DailyUsageStore } from '../dist/core/usage.js';
 import { QqActionPolicy } from '../dist/qq/qq-actions.js';
 import { DEFAULT_SETTINGS } from '../dist/core/settings.js';
@@ -21,7 +22,7 @@ import { mockStickerAnalysis, fakeQqFavorites } from './helpers/sticker-review.m
 
 test('功能审计：全部 MCP 工具逐项经过真实传输、参数校验和受控协议/服务适配', { timeout: 30000 }, async t => {
   const dir = await mkdtemp(join(tmpdir(), 'qq-tool-audit-'));
-  const keys = ['BOT_MEDIA_BASE_URL','BOT_MEDIA_API_KEY','BOT_QZONE_ADAPTER_URL','BOT_FFMPEG_BIN'];
+  const keys = ['BOT_MEDIA_BASE_URL','BOT_MEDIA_API_KEY','BOT_FFMPEG_BIN'];
   const saved = Object.fromEntries(keys.map(k => [k,process.env[k]]));
   const requests = [], calls = [], exercised = new Set();
   const http = createServer(async (req,res) => {
@@ -30,19 +31,18 @@ test('功能审计：全部 MCP 工具逐项经过真实传输、参数校验和
     if(req.url==='/audio/speech') { res.setHeader('content-type','audio/mpeg'); res.end(Buffer.from('test-mp3')); }
     else if(req.url==='/audio/transcriptions') res.end(JSON.stringify({text:'测试语音正文'}));
     else if(req.url==='/chat/completions') res.end(JSON.stringify({choices:[{message:{content:'图片中有测试图案'}}]}));
-    else if(req.url==='/qzone') res.end(JSON.stringify(JSON.parse(raw).action==='feed'?{posts:[{id:'post-real',text:'动态'}]}:{commented:true}));
     else { res.statusCode=404;res.end('{}'); }
   });
   http.listen(0,'127.0.0.1');await once(http,'listening');
   const base=`http://127.0.0.1:${http.address().port}`;
-  Object.assign(process.env,{BOT_MEDIA_BASE_URL:base+'/',BOT_MEDIA_API_KEY:'local-fixture',BOT_QZONE_ADAPTER_URL:base+'/qzone'});
+  Object.assign(process.env,{BOT_MEDIA_BASE_URL:base+'/',BOT_MEDIA_API_KEY:'local-fixture'});
   delete process.env.BOT_FFMPEG_BIN;
   let client,actions;
   try {
     const settings=structuredClone(DEFAULT_SETTINGS);
     Object.assign(settings.social,{messagesPerMinute:100,actionsPerDay:1000,visionModel:'test-vision',transcriptionModel:'test-asr',speechModel:'test-tts'});
     settings.chat.group.proactive.enabled=true;settings.chat.group.proactive.perGroupPerDay=20;
-    settings.budgets.proactiveMessagesPerDay=100;Object.assign(settings.features.qzone,{enabled:true,requireConfirm:false,dailyLimit:10});
+    settings.budgets.proactiveMessagesPerDay=100;Object.assign(settings.features.qzone,{enabled:true,requireConfirm:false,dailyLimit:10,browseEnabled:true,commentsEnabled:true,commentRequireConfirm:false});
     const store=new SocialStore(join(dir,'social.json'));await store.load();await store.account(10000);
     const usage=new DailyUsageStore(join(dir,'usage.json'));await usage.load();
     const media=new MediaService(join(dir,'media'),()=>settings.social);
@@ -57,6 +57,7 @@ test('功能审计：全部 MCP 工具逐项经过真实传输、参数校验和
       if(action==='get_group_list')return [{group_id:30001,group_name:'测试群'}];
       if(action==='get_group_member_list')return [{user_id:20001,nickname:'甲'}];
       if(action==='get_login_info'||action==='get_group_member_info')return {user_id:10000,nickname:'小鲸'};
+      if(action==='get_cookies')return {cookies:'uin=o10000; p_uin=o10000; p_skey=space-fixture-key'};
       if(action==='get_group_msg_history')return {messages:[{message_id:40,user_id:20001,time:1,message:'历史消息',sender:{nickname:'甲'}}]};
       if(action==='get_forward_msg')return {messages:[{content:'转发正文'}]};
       if(action==='get_group_root_files'||action==='get_group_files_by_folder')return {files:[{file_id:'file-real',file_name:'笔记.txt',busid:102}]};
@@ -65,7 +66,8 @@ test('功能审计：全部 MCP 工具逐项经过真实传输、参数校验和
       if(action.startsWith('send_'))return {message_id:1000+calls.length};
       return {};
     }};
-    const engine=new SocialEngine(store,media,api,usage,()=>settings,async()=>true,()=>{},()=>{});
+    const qzone=new QzoneService(api,{fetch:async(url,options)=>{assert.ok(['user.qzone.qq.com','h5.qzone.qq.com'].includes(url.hostname));assert.equal(options.redirect,'error');requests.push({path:'native-qzone',raw:String(options.body??'')});return new Response(JSON.stringify(options.method==='POST'?{code:0,commentid:'comment-real'}:{code:0,total:1,msglist:[{tid:'post-real',uin:10000,content:'动态'}]}));}});
+    const engine=new SocialEngine(store,media,api,usage,()=>settings,async()=>true,()=>{},()=>{},qzone);
     const policy=new QqActionPolicy(api,usage,()=>settings,async()=>true);
     const ctx=signal=>({chat:'group:30001',self:10000,user:20001,sent:0,silent:false,signal});
     const segment=(type,data)=>[{type,data}];
@@ -122,7 +124,7 @@ test('功能审计：全部 MCP 工具逐项经过真实传输、参数校验和
     await call('qq_file',{message_id:6});await call('qq_event_file',{event_id:upload});
     await call('qq_group_files');await call('qq_group_file',{file_id:'file-real'});
     const file=await call('qq_create_file',{name:'摘要.md',text:'# 摘要'});await call('qq_send_file',{source:file.file,name:file.name});
-    await call('qq_qzone_feed');await call('qq_qzone_comment',{post_id:'post-real',text:'收到'});await call('qq_report',{text:'审计记录'});
+    const space=await call('qq_qzone_feed');await call('qq_qzone_comment',{post_id:space.posts[0].id,text:'收到'});await call('qq_report',{text:'审计记录'});
     await call('qq_send_message',{target_type:'private',target_id:20001,text:'跨会话'});await call('qq_like',{user_id:20001});await call('qq_qzone_post',{text:'测试动态'});
     await call('qq_get_friend_list');await call('qq_get_group_list');await call('qq_get_group_member_list',{group_id:30001});
     await call('qq_set_profile',{nickname:'小鲸',signature:'测试签名'});await call('qq_set_group_card',{group_id:30001,card:'小鲸'});

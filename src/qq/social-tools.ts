@@ -46,8 +46,8 @@ export const socialTools = [
   { name: 'qq_group_file', title: '读取群文件', description: '下载刚通过 qq_group_files 查到的一个群文件，文本类可提取正文。', schema: { file_id: z.string().min(1).max(512) } },
   { name: 'qq_create_file', title: '制作文本文件', description: '在媒体库生成 UTF-8 文本/Markdown/CSV 文件，可随后用 qq_send_file 发送。', schema: { name: z.string().min(1).max(128).regex(/^[^\\/\x00-\x1f]+\.(txt|md|csv|json)$/i), text: z.string().max(30000) } },
   { name: 'qq_send_file', title: '发送文件', description: '将媒体库中的文件发送到当前聊天。source 可为网络下载地址或受控媒体库路径。', schema: { source: z.string().min(1).max(4096), name: z.string().min(1).max(128).regex(/^[^\\/\x00-\x1f]+$/) } },
-  { name: 'qq_qzone_feed', title: '浏览空间', description: '通过已配置的空间适配服务浏览动态；未配置时明确不可用。', schema: { user_id: user.optional(), limit: z.number().int().min(1).max(20).default(10) } },
-  { name: 'qq_qzone_comment', title: '评论空间', description: '评论或回复已通过空间动态工具取得的动态。需要配置空间适配服务。', schema: { post_id: z.string().min(1).max(256), text: short, reply_id: z.string().max(256).optional() } },
+  { name: 'qq_qzone_feed', title: '浏览空间', description: '复用 NapCat 当前 QQ 登录读取自己或指定好友的说说，包含正文、图片链接与可回复的评论。留空 user_id 查看自己的空间；好友 QQ 从联系人取得。offset 用于继续读取。', schema: { user_id: user.optional(), limit: z.number().int().min(1).max(20).default(10), offset:z.number().int().min(0).max(2000).default(0) } },
+  { name: 'qq_qzone_comment', title: '评论空间', description: '评论当前会话实际读到的说说，或回复返回列表里的评论。post_id、reply_id 必须取自 qq_qzone_feed；编号 30 分钟有效。请求结果不明时先核对，不重复发送。', schema: { post_id: z.string().uuid(), text: z.string().trim().min(1).max(2000), reply_id: z.string().uuid().optional() } },
   { name: 'qq_report', title: '反馈运行问题', description: '将问题记录到管理端，不发送到聊天。', schema: { text: short } },
 ] satisfies Array<{ name: string; title: string; description: string; schema: z.ZodRawShape }>;
 

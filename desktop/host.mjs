@@ -68,7 +68,7 @@ async function stop() { await stopOne('bridge'); await stopOne('napcat'); extern
 async function config(action, data) {
   return new Promise((done, reject) => {
     const worker = fork(resolve(root, 'desktop/config-worker.mjs'), [], { cwd: root, silent: true, execArgv: [], windowsHide: true });
-    const timeout = setTimeout(() => { worker.kill(); reject(new Error('配置操作超时，请重试')); }, action === 'model' ? 25000 : 10000);
+    const timeout = setTimeout(() => { worker.kill(); reject(new Error('配置操作超时，请重试')); }, action === 'qzone-check' ? 30000 : action === 'model' ? 25000 : 10000);
     let replied = false;
     worker.once('message', result => { replied = true; clearTimeout(timeout); result.ok ? done(result.result) : reject(new Error(result.error)); });
     worker.once('error', error => { clearTimeout(timeout); reject(error); });
@@ -85,6 +85,7 @@ async function check() {
 async function command({ action, data }) {
   if (action === 'onboarding') { const result = await config(action, data); emit({ type: 'onboarding', ...result }); return; }
   if (action === 'model') { const result = await config(action, data); emit({ type: 'model', ...result }); return; }
+  if (action === 'qzone-check') { const result = await config(action,data);emit({type:'qzone-check',...result});return; }
   if (action === 'knowledge') { const result = await config(action, data); emit({ type: 'knowledge', ...result }); return; }
   if (action === 'social' || action === 'memory' || action === 'settings-status') {
     if (action === 'memory') data = { ...data, section: data?.section==='lexicon'?'lexicon':'memories' };

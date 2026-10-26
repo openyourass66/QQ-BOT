@@ -24,7 +24,8 @@ export function toolAvailable(name:string,s:BotSettings,env:Record<string,string
   if(name==='qq_speak'&&(!s.social.speechModel||!env.BOT_MEDIA_BASE_URL))return false;
   if(name==='qq_transcribe'&&(!s.social.transcriptionModel||!env.BOT_MEDIA_BASE_URL))return false;
   if(name==='qq_video'&&!env.BOT_FFMPEG_BIN)return false;
-  if(['qq_qzone_feed','qq_qzone_comment'].includes(name)&&!env.BOT_QZONE_ADAPTER_URL)return false;
+  if(['qq_qzone_feed','qq_qzone_comment'].includes(name)&&!s.features.qzone.browseEnabled)return false;
+  if(name==='qq_qzone_comment'&&!s.features.qzone.commentsEnabled)return false;
   if(name==='qq_qzone_post'&&!s.features.qzone.enabled)return false;
   return true;
 }
