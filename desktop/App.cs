@@ -178,12 +178,14 @@ partial class App
             Find<TabControl>("Tabs").IsEnabled = true;
             string section = (string)message["section"];
             if (section == "env" || section == "runtime" || section == "connection") {
+                bool finishedSetup=quickSetupMode&&quickStep==3&&quickReady;
                 var result = (Dictionary<string,object>)message["result"]; loading = true; Find<TextBox>("Env").Text = (string)result["env"]; RuntimeFields(result["runtimeFields"]); loading = false;
                 dirtySections.Remove("env"); dirtySections.Remove("runtime");
                 if(result.ContainsKey("settingsPath")) {if(settingsPath!=(string)result["settingsPath"]){Find<TextBlock>("SettingsQuota").Text="已切换配置，请重新启动机器人并刷新额度。";Find<System.Windows.Controls.Primitives.UniformGrid>("SettingsQuotaCards").Children.Clear();Find<Expander>("SettingsGroupQuotas").Visibility=Visibility.Collapsed;}settingsPath=(string)result["settingsPath"];}
                 if(result.ContainsKey("settings"))ApplySavedSettings((Dictionary<string,object>)result["settings"],section=="connection"?mediaKeys.Select(key=>"social."+key):new string[0]);
                 connectionRestartPending=message.ContainsKey("restartRequested")&&(bool)message["restartRequested"];
                 Find<TextBlock>("RuntimeHint").Text=message.ContainsKey("restartRequested")&&(bool)message["restartRequested"]?"配置已保存，正在重新启动机器人…":"配置已保存；连接参数重启后生效。";
+                if(finishedSetup)CompleteSetup();
             }
             if(section=="settings")ApplySavedSettings((Dictionary<string,object>)message["result"],savedSettingValues.Keys.Where(path=>!IsMediaSetting(path)).ToArray());
             dirtySections.Remove(section); dirty = dirtySections.Count > 0;
@@ -210,7 +212,8 @@ partial class App
             else RenderKnowledge(new Dictionary<string,object> {{"workspace",Path.GetDirectoryName(personaPath)},{"global",message["persona"]},{"globalRevision",null},{"libraryRevision",null},{"presets",new object[0]},{"files",new object[0]}});
             loading = false; dirty = false; Find<Button>("SaveSettings").IsEnabled = true;
             Feedback("配置已加载，小鲸准备好了。");
-            if(message.ContainsKey("needsSetup")&&(bool)message["needsSetup"]) {OpenQuickSetup();if(hostInput!=null&&!Environment.GetCommandLineArgs().Contains("--smoke"))RequestOnboarding("detect");}
+            bool needsSetup=message.ContainsKey("needsSetup")&&(bool)message["needsSetup"];RefreshSetupPrompt(needsSetup);
+            if(needsSetup&&!setupComplete) {OpenQuickSetup();if(hostInput!=null&&!Environment.GetCommandLineArgs().Contains("--smoke"))RequestOnboarding("detect");}
         } else if (type == "diagnostics") {
             var panel = Find<StackPanel>("Diagnostics"); panel.Children.Clear();
             foreach (Dictionary<string, object> row in (System.Collections.IEnumerable)message["rows"]) {
@@ -234,6 +237,7 @@ partial class App
             }
         } else if (type == "status") {
             bool online = (bool)message["qqOnline"] && (bool)message["wsConnected"] && (bool)message["acpConnected"];
+            if(online)CompleteSetup();
             Find<TextBlock>("State").Text = online ? "小鲸在线，正在认真陪伴" : "进程运行中，等待 QQ / 模型连接";
             Find<TextBlock>("Stats").Text = "QQ " + ((bool)message["qqOnline"] ? "在线" : "离线") + "  ·  模型 " + ((bool)message["acpConnected"] ? "已连接" : "未连接") + "  ·  收到 " + message["messagesIn"] + " / 发出 " + message["messagesOut"] + "  ·  排队 " + message["pendingMessages"];
             Find<TextBlock>("QqState").Text = (bool)message["qqOnline"] ? "已在线" : "连接中";

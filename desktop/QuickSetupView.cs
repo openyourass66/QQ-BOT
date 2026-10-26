@@ -8,7 +8,7 @@ using System.Diagnostics;
 
 partial class App
 {
-    static bool quickSetupMode, quickReady, onboardingBusy;
+    static bool quickSetupMode, quickReady, onboardingBusy, setupComplete;
     static int quickStep, quickRevision, checkedQuickRevision;
     static Dictionary<string,string> detectionBaseline = new Dictionary<string,string>();
     static readonly string[] quickTitles = { "1 检测环境", "2 选择模型", "3 连接 QQ", "4 检查并启动" };
@@ -46,6 +46,19 @@ partial class App
         Find<Button>("SetupGuide").Click+=(s,e)=>{
             ShowSetupGuide();
         };
+    }
+    static string SetupCompletionPath { get { return System.IO.Path.Combine(root,"data/desktop/setup-complete"); } }
+    static void CompleteSetup() {
+        Find<Border>("SetupPrompt").Visibility=Visibility.Collapsed;
+        if(setupComplete)return;
+        setupComplete=true;
+        try {System.IO.Directory.CreateDirectory(System.IO.Path.GetDirectoryName(SetupCompletionPath));System.IO.File.WriteAllText(SetupCompletionPath,"1");}
+        catch { /* Keep the prompt hidden for this session if preferences cannot be saved. */ }
+    }
+    static void RefreshSetupPrompt(bool needsSetup) {
+        setupComplete=setupComplete||System.IO.File.Exists(SetupCompletionPath);
+        if(!needsSetup)CompleteSetup();
+        Find<Border>("SetupPrompt").Visibility=needsSetup&&!setupComplete?Visibility.Visible:Visibility.Collapsed;
     }
     static void OpenQuickSetup() {quickSetupMode=true;SelectedPage=MainPage.Runtime;ShowQuickStep(quickStep);}
     static void ShowQuickStep(int step) {
@@ -167,7 +180,9 @@ partial class App
     }
     static void ShowSetupGuide() {CreateSetupGuide().ShowDialog();}
     static void VerifyQuickSetupInteraction() {
-        string original=RuntimeValue("BOT_DSH_BIN"),mode=RuntimeValue("BOT_CHAT_MODE"),key=RuntimeValue("QQ_BOT_DEEPSEEK_API_KEY");OpenQuickSetup();ShowQuickStep(0);Feedback("快速配置和全部设置共用草稿，切换页面不会丢失输入。");
+        if(Find<Border>("SetupPrompt").Visibility!=Visibility.Visible)throw new Exception("首次配置未显示首页引导");
+        Capture(System.IO.Path.Combine(root,"quick-first-use-overview.png"),MainPage.Overview);
+        string original=RuntimeValue("BOT_DSH_BIN"),mode=RuntimeValue("BOT_CHAT_MODE"),key=RuntimeValue("QQ_BOT_DEEPSEEK_API_KEY");OpenQuickSetup();ShowQuickStep(0);window.UpdateLayout();Feedback("快速配置和全部设置共用草稿，切换页面不会丢失输入。");
         if(Find<ListBox>("RuntimeNav").Visibility!=Visibility.Collapsed||runtimeInputs["BOT_DSH_BIN"].IsVisible==false)throw new Exception("快速配置未显示基础环境");
         Capture(System.IO.Path.Combine(root,"quick-environment.png"),MainPage.Runtime);
         ShowQuickStep(1);Capture(System.IO.Path.Combine(root,"quick-profile.png"),MainPage.Runtime);
@@ -193,5 +208,13 @@ partial class App
         NavigateSetting("approval.adminQq");window.UpdateLayout();
         if(SelectedPage!=MainPage.Settings||Find<TextBlock>("PageTitle").Text!="机器人设置"||Find<TextBlock>("SettingsTitle").Text!="身份与审批"||!fields["approval.adminQq"].IsVisible)throw new Exception("跨页设置入口未定位到身份与审批");
         NavigateRuntime(0);Find<ListBox>("SettingsNav").SelectedIndex=0;
+        var status=new Dictionary<string,object>{{"type","status"},{"qqOnline",true},{"wsConnected",true},{"acpConnected",true},{"messagesIn",0},{"messagesOut",0},{"sessions",0},{"pendingMessages",0},{"startedAt",DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()}};
+        Event(json.Serialize(status));
+        setupComplete=false;RefreshSetupPrompt(true);
+        if(Find<Border>("SetupPrompt").Visibility!=Visibility.Collapsed)throw new Exception("已配置状态没有在重新加载后保留");
+        status["qqOnline"]=false;Event(json.Serialize(status));
+        if(Find<Border>("SetupPrompt").Visibility!=Visibility.Collapsed)throw new Exception("暂时离线重新显示了首次配置引导");
+        OpenQuickSetup();if(Find<Border>("QuickSetupPanel").Visibility!=Visibility.Visible||Find<Border>("SetupPrompt").Visibility!=Visibility.Collapsed)throw new Exception("配置完成后无法手动打开快速配置");
+        NavigateRuntime(0);Capture(System.IO.Path.Combine(root,"quick-completed-overview.png"),MainPage.Overview);
     }
 }
