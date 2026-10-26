@@ -13,6 +13,10 @@ export const status = {
   messagesOut: 0,
   messagesDropped: 0,
   pendingMessages: 0,
+  pendingIngress: 0,
+  pendingIngressBytes: 0,
+  ingressDropped: 0,
+  noticesDropped: 0,
   turns: 0,
   lastError: '',
 };

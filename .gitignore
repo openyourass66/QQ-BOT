@@ -9,6 +9,8 @@
 /QQ-BOT*.exe
 /QQ-BOT*.pdb
 *.tsbuildinfo
+*.qqbot-lock.sqlite
+*.qqbot-lock.sqlite-journal
 
 # 本地环境与密钥；配置示例保留在仓库
 .env

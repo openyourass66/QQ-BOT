@@ -2,22 +2,24 @@
 
 面向普通 Windows 用户的发行、权限、存储、恢复与验收工作，见[产品化优化方案](product-readiness-plan.md)。该文档描述待实施范围与发布门槛，不代表相关改造已经完成。
 
+当前已实现范围及验证结果见[实施进展](implementation-status.md)。
+
 ## 模块边界
 
 `src/bridge.ts` 与 `src/mcp-qq.ts` 保留稳定入口。内部模块按职责划分：
 
 | 目录 | 主要模块 | 职责 |
 | --- | --- | --- |
-| `core/` | config、settings、runtime、store、usage、permissions | 配置、队列、会话映射、额度、审批及消息通用处理 |
+| `core/` | config、settings、runtime、ingress、data-paths、resource-lock、store、usage、permissions | 配置、队列、入站容量、数据路径与互斥、会话映射、额度和审批 |
 | `qq/` | onebot、group-context、qq-actions、social-engine、social-store、social-tools、social-admin | 协议、QQ 行为、存档、工具定义与管理操作 |
 | `agent/` | chat-model、cognition、learning-model、autonomy、context-policy | 模型连接、资料整理、群内用语、自主决策与上下文预算 |
-| `services/` | media、web-service、action-server、action-client | 媒体与静态网页处理、桥接与 MCP 的内部通信 |
+| `services/` | media、qzone、read-json、action-server、action-client | 媒体、空间、受限 JSON 响应与桥接/MCP 内部通信 |
 
 MCP 工具通过内部动作接口交由桥接执行；权限、会话范围、额度与轮次状态在执行处再次核验。桌面 Node 辅助模块使用 `dist/` 内对应目录的编译模块。改动路径时需同步测试、动态导入和桌面引用。
 
 桌面首次配置由 `QuickSetupView.cs` 与 `onboarding.mjs` 提供，复用 `RuntimeView.cs` 的输入控件、校验和连接保存逻辑。检测仅提供路径建议；检查使用当前草稿，不调用模型。HTTP 与 WebSocket 分开探测，修改输入会使检查结果失效。`tests/onboarding.test.mjs` 覆盖初始化保留、路径检测、外部连接与鉴权边界，原生窗口测试覆盖步骤切换、失效状态、安装指引和紧凑布局。
 
-网页只需要静态 DOM 与正文提取，使用 [LinkeDOM](https://github.com/WebReflection/linkedom) 和 [Readability](https://github.com/mozilla/readability)。未包含完整浏览器模拟器；网页脚本与外部资源不执行、不加载。
+联网由当前 DSH Profile 的原生搜索与网页工具提供。项目不再维护独立 QQ 搜索服务、静态 DOM 解析器或对应缓存；QQ 工具预算不等同于 DSH 原生工具预算。
 
 ## 构建与测试
 
@@ -28,9 +30,15 @@ npm run typecheck
 npm test
 ```
 
+工作台正在运行时，优先使用 `npm run test:isolated`，在临时目录编译与回归，避免改写本机正在使用的 `dist/`。它只复制允许的源码、测试和无密钥示例，并在结束后清理临时目录。可使用 `npm run test:isolated -- --test-name-pattern=资源锁` 进行定向验证。
+
+使用 `npm run benchmark:store -- --sizes 1000,10000,50000 --samples 10 --output report.json` 生成存储诊断报告。该命令会构建当前检出目录，运行中的工作台应使用独立检出目录执行；测量仅使用临时合成数据。
+
 `scripts/build.mjs` 使用项目锁定的 TypeScript 编译器。编译错误时不生成新输出；成功后仅清理没有对应源文件的 `.js`、`.js.map` 和空目录，保留其他文件。保留调试映射以便排障。构建和测试都不需要真实 QQ、模型或搜索凭据。
 
-自动测试覆盖队列、OneBot HTTP/WS、ACP/MCP 进程、权限与额度、群上下文、表情收藏、提醒、自主行为、媒体、记忆迁移与整理、用语确认、搜索与正文、桌面配置保存。测试使用临时目录和受控服务，不会向真实 QQ 发消息或调用付费模型。
+自动测试覆盖队列与入站预算、数据资源互斥、OneBot HTTP/WS、ACP/MCP 进程、权限与额度、群上下文、表情收藏、提醒、自主行为、媒体、记忆迁移与整理、用语确认、原生联网配置、空间互动和桌面配置保存。测试使用临时目录和受控服务，不会向真实 QQ 发消息或调用付费模型。
+
+GitHub Actions 配置 Windows/Linux、Node 22.13.0/24 的隔离回归，以及 Windows 工作台编译。原生托盘实际交互仍在具备交互桌面的机器单独验证；配置工作流不代表远端矩阵已经执行通过。
 
 Windows 原生窗口验证：
 

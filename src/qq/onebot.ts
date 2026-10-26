@@ -25,6 +25,8 @@ export interface MessageEvent {
   group_id?: number;
 }
 
+export const MESSAGE_LIMITS = { segments: 128, textBytes: 32 * 1024, eventBytes: 256 * 1024, noticeBytes: 16 * 1024 } as const;
+
 /** 兼容 OneBot 的 CQ 字符串格式；转义文本不能伪装成真正的 @ 消息段。 */
 export function parseCqMessage(message: string): Segment[] {
   const decode = (text: string): string => text.replace(/&#91;/g, '[').replace(/&#93;/g, ']').replace(/&#44;/g, ',').replace(/&amp;/g, '&');
@@ -64,7 +66,26 @@ const MessageSchema = z.object({
 });
 
 export function parseMessageEvent(input: unknown): MessageEvent | undefined {
-  const result = MessageSchema.safeParse(input);
+  if (!input || typeof input !== 'object' || Array.isArray(input)) return;
+  const candidate = input as Record<string, unknown>;
+  let message = candidate.message;
+  // Check collection bounds before schema validation visits every element.
+  if (Array.isArray(message) && message.length > MESSAGE_LIMITS.segments) return;
+  if (typeof message === 'string' && Buffer.byteLength(message) > MESSAGE_LIMITS.textBytes) return;
+  try { if (Buffer.byteLength(JSON.stringify(input)) > MESSAGE_LIMITS.eventBytes) return; }
+  catch { return; }
+  if (typeof message === 'string') message = parseCqMessage(message);
+  if (Array.isArray(message)) {
+    if (message.length > MESSAGE_LIMITS.segments) return;
+    let textBytes = 0;
+    for (const segment of message) {
+      if (segment?.type !== 'text') continue;
+      if (typeof segment.data?.text !== 'string') return;
+      textBytes += Buffer.byteLength(segment.data.text);
+      if (textBytes > MESSAGE_LIMITS.textBytes) return;
+    }
+  }
+  const result = MessageSchema.safeParse({ ...candidate, message });
   if (!result.success) return undefined;
   return { ...result.data, sender: { ...result.data.sender, user_id: result.data.sender.user_id ?? result.data.user_id } };
 }
