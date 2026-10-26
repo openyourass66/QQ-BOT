@@ -83,7 +83,7 @@ partial class App
         new FieldSpec("social.videoFrames", "媒体服务", "模型与声音", "视频抽帧数量", "需要本页配置的 FFmpeg 和可用视觉能力。", "帧", 1, 12),
         new FieldSpec("social.remindersEnabled", "主动与提醒", "定时提醒", "定时提醒", "允许设置、查询和取消持久化提醒。"),
         new FieldSpec("social.proactiveEnabled", "主动与提醒", "后台活动", "后台自主活动", "后台聊天、挑选表情和空间创作的总开关；定时提醒独立控制。"),
-        new FieldSpec("social.proactiveIntervalMinutes", "主动与提醒", "后台活动", "后台检查间隔", "按此间隔检查后台聊天、收藏与空间候选；没有内容时保持安静。", "分钟", 5, 1440, 5),
+        new FieldSpec("social.proactiveIntervalMinutes", "主动与提醒", "后台活动", "聊天静置时间", "会话安静多久后开始考虑主动联系；收藏、到期想法和空间任务独立调度，不受此等待时间拖延。", "分钟", 5, 1440, 5),
         new FieldSpec("social.autonomousEnabled", "主动与提醒", "兴趣与想法", "持续兴趣与想法", "结合实际互动积累兴趣和未完话题；关闭后暂停自主判断。"),
         new FieldSpec("social.personalInterests", "主动与提醒", "兴趣与想法", "全局创作兴趣", "空间独立创作可使用这些公开主题；多个主题用逗号分隔。聊天中的兴趣保留在原会话。"),
         new FieldSpec("social.autonomousDecisionsPerDay", "额度与节奏", "后台任务额度", "每日后台判断上限", "候选想法才会唤醒模型；没有内容时可以安静结束。", "次/天", 0, 200),
@@ -94,6 +94,9 @@ partial class App
         new FieldSpec("social.autoQzoneEnabled", "主动与提醒", "自主空间分享", "自主空间创作", "使用独立会话和公开兴趣创作，需开启 QQ 空间发布、后台自主活动和持续兴趣与想法。"),
         new FieldSpec("social.autoQzonePerDay", "额度与节奏", "后台任务额度", "每日自主空间上限", "同时受空间总额度约束；没有内容时可以一天不发。", "条/天", 0, 10),
         new FieldSpec("social.qzoneIntervalHours", "主动与提醒", "自主空间分享", "空间创作判断间隔", "每次判断后间隔至少这么久，避免反复生成相似内容。", "小时", 1, 168),
+        new FieldSpec("social.autoQzoneCommentEnabled", "主动与提醒", "自主空间互动", "自主浏览与评论好友空间", "定时查看允许好友近期的新说说，有具体想法时自行评论；仍受空间浏览、评论开关、额度和确认规则约束。"),
+        new FieldSpec("social.autoQzoneCommentUsers", "主动与提醒", "自主空间互动", "自主评论的好友 QQ", "多个 QQ 用逗号分隔；留空表示所有允许联系的好友。跳过禁止后台活动的好友，不引用私聊或群聊经历。"),
+        new FieldSpec("social.qzoneCommentIntervalMinutes", "主动与提醒", "自主空间互动", "好友空间检查间隔", "每次轮换一位好友，只判断近 24 小时的新动态；已评论或结果待核对的动态不会自主重复评论。", "分钟", 5, 1440, 5),
         new FieldSpec("chat.group.proactive.enabled", "主动与提醒", "群聊与安静时段", "允许群主动消息与提醒", "群内后台聊天、跨群发送和群提醒共同使用此权限。"),
         new FieldSpec("social.quietStartHour", "主动与提醒", "群聊与安静时段", "安静时段开始", "按上海时间暂停后台聊天、收藏与空间创作；约定提醒不受影响。", "时", 0, 23),
         new FieldSpec("social.quietEndHour", "主动与提醒", "群聊与安静时段", "安静时段结束", "开始与结束相同表示不设置安静时段。", "时", 0, 23),
@@ -260,6 +263,8 @@ partial class App
         if(fields.ContainsKey("social.responseMode")) {var choice=((ComboBox)fields["social.responseMode"]).SelectedItem as Choice;string mode=choice==null?"":choice.Value;enabled("chat.group.requireMention",mode=="legacy");enabled("social.responseProbability",mode=="probability");enabled("social.keywords",mode=="keywords"||mode=="probability");}
         if(fields.ContainsKey("social.proactiveEnabled")) {bool on=((CheckBox)fields["social.proactiveEnabled"]).IsChecked==true;foreach(string key in new[]{"social.proactiveIntervalMinutes","social.quietStartHour","social.quietEndHour"})enabled(key,on);}
         if(fields.ContainsKey("social.autoQzoneEnabled"))enabled("social.qzoneIntervalHours",((CheckBox)fields["social.autoQzoneEnabled"]).IsChecked==true);
+        enabled("social.qzoneCommentIntervalMinutes",SettingOn("social.autoQzoneCommentEnabled"));
+        enabled("social.autoQzoneCommentUsers",SettingOn("social.autoQzoneCommentEnabled"));
         enabled("context.rolloverPercent",SettingOn("context.rollover"));
         enabled("features.qzone.commentsEnabled",SettingOn("features.qzone.browseEnabled"));
         SettingStatus("features.qzone.browseEnabled",SettingOn("features.qzone.browseEnabled")?"使用 NapCat 当前 QQ 账号，只读取该账号有权访问的自己或好友说说。":"空间浏览已关闭；发布自己的说说使用独立开关。");
@@ -270,6 +275,7 @@ partial class App
         SettingStatus("social.proactiveEnabled",background);
         SettingStatus("social.autoCollectStickers",!SettingOn("social.autoCollectStickers")?"后台收藏已关闭":!SettingOn("social.stickersEnabled")?"等待开启 QQ 收藏表情":SettingNumber("social.autoCollectPerDay")==0?"每日后台新增收藏为 0":background);
         SettingStatus("social.autoQzoneEnabled",!SettingOn("social.autoQzoneEnabled")?"自主空间创作已关闭":!SettingOn("features.qzone.enabled")?"等待开启 QQ 空间发布":SettingNumber("social.autoQzonePerDay")==0||SettingNumber("features.qzone.dailyLimit")==0?"自主空间或空间总额度为 0":SettingOn("features.qzone.requireConfirm")&&SettingNumber("approval.adminQq")==0?"发布前需确认，请先设置管理员 QQ":background);
+        SettingStatus("social.autoQzoneCommentEnabled",!SettingOn("social.autoQzoneCommentEnabled")?"自主空间互动已关闭，仍可按对话要求浏览和评论。":!SettingOn("features.qzone.browseEnabled")||!SettingOn("features.qzone.commentsEnabled")?"请先在功能开关开启空间浏览和评论。":SettingNumber("features.qzone.commentDailyLimit")==0?"空间评论额度为 0。":SettingOn("features.qzone.commentRequireConfirm")&&SettingNumber("approval.adminQq")==0?"评论需确认，请先设置管理员 QQ。":background);
         SettingStatus("social.remindersEnabled",SettingOn("social.remindersEnabled")?"使用独立提醒额度；群提醒还需要群聊主动发言。受阻时等待恢复，结果未知时不自动重发。":"提醒暂停执行，已有任务保留");
         SettingStatus("social.autonomy","空间发布按实际正文合并确认；命令执行和文件修改使用独立的工作区审批。");
         SettingStatus("social.autoCollectPerDay",SettingOn("social.autoCollectStickers")?"后台收藏的独立上限，同时受 QQ 动作总额约束。":"后台收藏已关闭；可先设置额度，开关在主动与提醒管理。");

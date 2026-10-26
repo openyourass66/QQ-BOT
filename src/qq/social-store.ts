@@ -56,6 +56,7 @@ export class SocialStore {
       }
       d.autonomous.contacts=d.autonomous.contacts.slice(-5000);
       for (const item of d.autonomous.posts) if(item.state==='running')item.state='unknown';
+      for (const item of d.autonomous.spaceComments) if(item.state==='running')item.state='unknown';
     });
   }
   snapshot(): SocialData { return structuredClone(this.data); }

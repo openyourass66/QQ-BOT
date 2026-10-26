@@ -10,13 +10,13 @@ import { OneBotHttp, parseMessageEvent, parseCqMessage, segmentsToText, type Seg
 import type { DailyUsageStore, Quota } from '../core/usage.js';
 import { StickerReviews, imageHash, stickerReviewPrompt, stickerSearchText, stickerInfo, type StickerAnalysis } from './sticker-review.js';
 import { QqStickers } from './qq-stickers.js';
-import { Autonomy } from '../agent/autonomy.js';
+import { Autonomy, quietTime } from '../agent/autonomy.js';
 import type { AutonomousTurn } from '../agent/autonomous-state.js';
 import { Cognition, forgetMemory, memoryMeta, fingerprint } from '../agent/cognition.js';
 import { MemoryMetaSchema } from '../agent/cognition-state.js';
 import { learningModel } from '../agent/learning-model.js';
 import { turnBudget, toolAvailable } from '../agent/context-policy.js';
-import { QzoneService } from '../services/qzone.js';
+import { QzoneService, type SpacePost } from '../services/qzone.js';
 
 export class SocialEngine {
   private sending = new Map<string, Promise<unknown>>();
@@ -26,6 +26,7 @@ export class SocialEngine {
   private groupIds = new Set<string>();
   private groupFiles = new Map<string, Map<string, Record<string, unknown>>>();
   private tickRunning = false;
+  private spaceContactsAt=0;
   private stickerReviews = new StickerReviews();
   readonly qqStickers: QqStickers;
   readonly autonomy:Autonomy;
@@ -65,7 +66,7 @@ export class SocialEngine {
   }
   check(ctx: ToolContext, target = ctx.chat): void {
     ctx.signal.throwIfAborted();
-    if(ctx.autonomous?.kind==='qzone'&&target===ctx.chat&&ctx.chat===`private:${ctx.self}`)return;
+    if(['qzone','qzone-comment'].includes(ctx.autonomous?.kind??'')&&target===ctx.chat&&ctx.chat===`private:${ctx.self}`)return;
     if (!allowedChat(this.settings().social, target, target === ctx.chat ? ctx.user : undefined)) throw new Error('该用户或会话已屏蔽或不在允许名单中');
   }
   async target(ctx: ToolContext, target: string): Promise<void> {
@@ -75,6 +76,12 @@ export class SocialEngine {
     await this.contacts(ctx.signal);
     if (!(target.startsWith('group:') ? this.groupIds : this.friendIds).has(target.split(':')[1])) throw new Error('目标不是现有好友或已加入群，请先查询联系人');
   }
+  private async spaceTarget(ctx:ToolContext,user:number):Promise<void> {
+    this.autonomy.authorizeSpaceTarget(ctx,user);
+    if(ctx.autonomous?.kind!=='qzone-comment'){await this.target(ctx,`private:${user}`);return;}
+    this.check(ctx,`private:${user}`);await this.contacts(ctx.signal);
+    if(!this.friendIds.has(String(user)))throw new Error('空间目标已不是当前 QQ 好友');
+  }
   async approve(ctx: ToolContext, tool: string, sensitive = false): Promise<void> {
     const mode = this.settings().social.autonomy;
     if ((mode === 'confirm' || (mode === 'sensitive' && sensitive)) && !await this.confirm(`QQ 操作：${tool}\n来源：${ctx.chat}`, ctx.signal)) throw new Error('操作未获确认');
@@ -82,7 +89,7 @@ export class SocialEngine {
   }
   actionQuotas(ctx: ToolContext, key = ctx.chat): Quota[] {
     this.check(ctx);
-    if(ctx.autonomous)this.autonomy.authorize(ctx,ctx.autonomous.kind==='qzone'?'qzone_post':ctx.autonomous.kind==='collect'?'qq_collect_sticker':'qq_reply');
+    if(ctx.autonomous)this.autonomy.authorize(ctx,ctx.autonomous.kind==='qzone'?'qzone_post':ctx.autonomous.kind==='qzone-comment'?'qq_qzone_comment':ctx.autonomous.kind==='collect'?'qq_collect_sticker':'qq_reply');
     const now = Date.now();
     const times = (this.rates.get(key) ?? []).filter(t => now - t < 60000);
     if (times.length >= this.settings().social.messagesPerMinute) throw new Error('当前会话操作过于频繁，请稍后再试');
@@ -426,7 +433,7 @@ export class SocialEngine {
       }
       case 'qq_qzone_feed': {
         if(!this.settings().features.qzone.browseEnabled)throw new Error('空间浏览已关闭，请在机器人设置的功能开关开启');
-        const user=a.user_id??ctx.self;if(user!==ctx.self)await this.target(ctx,`private:${user}`);
+        const user=a.user_id??ctx.self;this.autonomy.authorizeSpaceTarget(ctx,user);if(user!==ctx.self)await this.spaceTarget(ctx,user);
         const result=await this.qzone.feed(ctx.chat,ctx.self,user,a.limit,a.offset,ctx.signal);this.check(ctx);
         if(!this.settings().features.qzone.browseEnabled)throw new Error('空间浏览已关闭');
         if(user!==ctx.self)this.check(ctx,`private:${user}`);
@@ -438,18 +445,22 @@ export class SocialEngine {
           this.check(ctx);const qzone=this.settings().features.qzone;
           if(!qzone.browseEnabled||!qzone.commentsEnabled)throw new Error('空间浏览或评论已关闭，请在机器人设置的功能开关开启');
           const target=this.qzone.target(ctx.chat,ctx.self,a.post_id,a.reply_id);
+          this.autonomy.authorizeSpaceTarget(ctx,target.post.user_id,a.post_id);
           if(target.post.user_id!==ctx.self)this.check(ctx,`private:${target.post.user_id}`);
           return {qzone,target};
         };
-        const {qzone,target}=validate();if(target.post.user_id!==ctx.self)await this.target(ctx,`private:${target.post.user_id}`);
+        const {qzone,target}=validate();if(target.post.user_id!==ctx.self)await this.spaceTarget(ctx,target.post.user_id);
         if(qzone.commentRequireConfirm||this.settings().social.autonomy!=='autonomous') {
           confirmed=await this.confirm(`要${target.reply?'回复空间评论':'评论 QQ 空间说说'}：\n目标：${target.post.name||target.post.user_id}（QQ ${target.post.user_id}）\n动态：${target.post.text.slice(0,800)}\n${target.reply?'回复 '+(target.reply.name||target.reply.user_id)+'：'+target.reply.text+'\n':''}评论正文：\n${a.text}`,ctx.signal);
           if(!confirmed)throw new Error('空间评论未获管理员确认');
         }
-        return this.qzone.comment(ctx.chat,ctx.self,{post_id:a.post_id,text:a.text,reply_id:a.reply_id},ctx.signal,async()=>{
+        let reserved=false;
+        try {const result=await this.qzone.comment(ctx.chat,ctx.self,{post_id:a.post_id,text:a.text,reply_id:a.reply_id},ctx.signal,async()=>{
           const check=()=>{const {qzone}=validate();if((qzone.commentRequireConfirm||this.settings().social.autonomy!=='autonomous')&&!confirmed)throw new Error('空间评论现在需要管理员确认，请重新发起');return qzone;};
           check();await this.quota(ctx,ctx.chat,()=>[{key:'qzone-comments',amount:1,limit:check().commentDailyLimit,label:'空间评论'}]);check();
-        });
+          await this.autonomy.reserveSpaceComment(ctx,target.post.url);reserved=true;check();
+        });await this.autonomy.finishSpaceComment(ctx,target.post.url,true);return result;}
+        catch(error){if(reserved)await this.autonomy.finishSpaceComment(ctx,target.post.url,false);throw error;}
       }
       case 'qq_report': this.log(`[report] ${ctx.chat} ${a.text}`); return { recorded: true };
       default: throw new Error('工具尚未实现');
@@ -571,7 +582,7 @@ export class SocialEngine {
       await this.store.endAction(id, 'success', '已完成'); return result;
     } catch (error) { await this.store.endAction(id, 'unknown', String(error)); throw error; }
   }
-  async tick(self: number, signal: AbortSignal, wake: (chat: string, reason: string,autonomous?:AutonomousTurn) => Promise<void|boolean>): Promise<void> {
+  async tick(self: number, signal: AbortSignal, wake: (chat: string, reason: string,autonomous?:AutonomousTurn) => Promise<void|boolean>,canWake?:(chat:string,kind:AutonomousTurn['kind'])=>boolean): Promise<void> {
     if (this.tickRunning || !self || signal.aborted) return;
     this.tickRunning = true;
     try {
@@ -581,7 +592,17 @@ export class SocialEngine {
           await this.fire(task, self, signal);
         }
       }
-      await this.autonomy.tick(signal,(t,a)=>wake(t.chat,`自主想法 #${t.id}（${t.kind}）：${t.summary}\n依据：${t.reason}\n${t.messageId!==undefined?'来源消息 #'+t.messageId:''}\n判断现在是否值得行动。没内容就 qq_finish；想以后再做用 qq_thought 推迟。只以实际工具结果算完成。`,a));
+      if(settings.social.proactiveEnabled&&settings.social.autonomousEnabled&&!quietTime(settings)&&settings.social.autoQzoneCommentEnabled&&settings.features.qzone.browseEnabled&&settings.features.qzone.commentsEnabled&&Date.now()-this.spaceContactsAt>=60000){this.spaceContactsAt=Date.now();try{await this.contacts(signal);}catch{this.log('[autonomy] 无法刷新好友，自主空间互动等待 QQ 连接恢复');}}
+      await this.autonomy.tick(signal,(t,a)=>wake(t.chat,`自主想法 #${t.id}（${t.kind}）：${t.summary}\n依据：${t.reason}\n${t.messageId!==undefined?'来源消息 #'+t.messageId:''}\n判断现在是否值得行动。没内容就 qq_finish；想以后再做用 qq_thought 推迟。只以实际工具结果算完成。`,a),t=>canWake?.(t.chat,t.kind)??true,async(t,a)=>{
+        if(t.kind!=='qzone-comment')return true;
+        const ctx:ToolContext={chat:`private:${self}`,self,user:self,signal,sent:0,silent:false,proactive:true,autonomous:a};
+        await this.spaceTarget(ctx,t.targetUser!);
+        const result=await this.qzone.feed(ctx.chat,self,t.targetUser!,3,0,signal) as {posts:SpacePost[]};
+        this.autonomy.authorizeSpaceTarget(ctx,t.targetUser!);
+        const post=result.posts.find(p=>p.created_at>Date.now()-24*3600000&&!p.comments.some(comment=>comment.user_id===self)&&!this.autonomy.spaceCommentSeen(p.url));
+        if(!post){a.reason='好友近期没有新的可评论动态，或动态已评论、结果待核对；本轮不唤醒模型';return false;}
+        a.spacePost=post;return true;
+      });
     } finally { this.tickRunning = false; }
   }
   private reminderBlockReason(ctx: ToolContext, creating = false): string {

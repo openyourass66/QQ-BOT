@@ -97,10 +97,10 @@ export async function socialAdmin(input: unknown, store: SocialStore, media: Med
   switch (a.section) {
     case 'thoughts':for(const t of [...data.autonomous.thoughts].sort((x,y)=>Number(['pending','running'].includes(y.state))-Number(['pending','running'].includes(x.state))||y.at-x.at)) {
       const status={pending:'等待判断',running:'执行中',done:'完成',dismissed:'已放弃',expired:'已过期',unknown:'结果待核对'}[t.state];
-      add(t.id,t.chat,t.summary,t.reason,status,t.at,`行动：${{chat:'主动聊天',collect:'看图判断收藏',qzone:'独立空间创作'}[t.kind]}\n来源：${t.chat||'公开创作兴趣'}${t.messageId!==undefined?' · 消息 #'+t.messageId:''}\n\n理由：${t.reason}\n适合时间：${date(t.due)}\n有效期至：${date(t.expires)}\n\n结果：${t.result||'尚未判断'}`);
+      add(t.id,t.chat,t.summary,t.reason,status,t.at,`行动：${{chat:'主动聊天',collect:'看图判断收藏',qzone:'独立空间创作','qzone-comment':'自主空间互动'}[t.kind]}\n来源：${t.targetUser?'QQ '+t.targetUser:t.chat||'公开创作兴趣'}${t.messageId!==undefined?' · 消息 #'+t.messageId:''}\n\n理由：${t.reason}\n适合时间：${date(t.due)}\n有效期至：${date(t.expires)}\n\n结果：${t.result||'尚未判断'}`);
     }break;
     case 'interests':for(const i of [...data.autonomous.interests].sort((x,y)=>y.updatedAt-x.updatedAt))add(i.id,i.chat,i.topic,i.reason,`兴趣程度 ${i.strength}/5`,i.updatedAt,`来源：${i.chat||'公开兴趣'}\n兴趣程度：${i.strength}/5\n\n依据：${i.reason}`,i.topic);break;
-    case 'decisions':for(const d of [...data.autonomous.decisions].reverse())add(d.id,d.chat,{chat:'主动聊天判断',collect:'收藏判断',qzone:'空间创作判断'}[d.kind],d.reason,{done:'完成',dismissed:'保持安静',pending:'已推迟',unknown:'结果待核对',expired:'已过期'}[d.outcome]??d.outcome,d.at,`${d.reason}\n关联想法：${d.thoughtId}`);break;
+    case 'decisions':for(const d of [...data.autonomous.decisions].reverse())add(d.id,d.chat,{chat:'主动聊天判断',collect:'收藏判断',qzone:'空间创作判断','qzone-comment':'空间互动判断'}[d.kind],d.reason,{done:'完成',dismissed:'保持安静',pending:'已推迟',unknown:'结果待核对',expired:'已过期'}[d.outcome]??d.outcome,d.at,`${d.reason}\n关联想法：${d.thoughtId}`);break;
     case 'contacts': for (const c of data.contacts) {
       const [kind,id] = c.chat.split(':');
       const blocked = (kind === 'group' ? s.social.blockedGroups : s.social.blockedUsers).includes(id);

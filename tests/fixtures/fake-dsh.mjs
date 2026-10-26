@@ -61,7 +61,12 @@ lines.on('line', async (line) => {
       try {
         await client.connect(new StdioClientTransport({command:server.command,args:server.args,env:Object.fromEntries(server.env.map(({name,value})=>[name,value])),stderr:'pipe'}));
         if(text.startsWith('自主想法 #')) {
-          if(text.includes('（qzone）')) {
+          if(text.includes('（qzone-comment）')) {
+            if(text.includes('SECRET_AUTONOMY'))throw new Error('空间互动泄露了私聊上下文');
+            const post=JSON.parse(text.split('材料：')[1].split('\n')[0]);
+            const forbidden=await client.callTool({name:'qq_recent_messages',arguments:{}});if(!forbidden.isError)throw new Error('空间互动越权读取聊天');
+            await invoke('qq_qzone_comment',{post_id:post.id,text:'这只猫看起来很有精神。'});
+          } else if(text.includes('（qzone）')) {
             if(text.includes('SECRET_AUTONOMY'))throw new Error('独立空间上下文泄露了聊天内容');
             const forbidden=await client.callTool({name:'qq_recent_messages',arguments:{}});if(!forbidden.isError)throw new Error('空间任务越权读取聊天');
             await invoke('qq_qzone_post',{text:'猫猫表情总能把一个字的情绪表达得很到位。'});
@@ -70,6 +75,9 @@ lines.on('line', async (line) => {
             const preview=JSON.parse((await invoke('qq_collect_sticker',{message_id})).content[0].text);
             if(preview.status==='needs_analysis')await invoke('qq_collect_sticker',{message_id,analysis_token:preview.analysis_token,analysis:structuredClone(mockStickerAnalysis)});
             await invoke('qq_finish',{reason:'真实看图分析并收藏后安静结束'});
+          } else if(process.env.FAKE_AUTONOMY_NO_INSTRUCTION==='1') {
+            if(!text.includes('【后台主动联系机会】')||!text.includes('不要求有新消息'))throw new Error('后台机会仍要求用户先发消息');
+            await invoke('qq_speak',{text:'刚看到一只猫，突然想起你之前说的表情包。'});
           } else await invoke('qq_reply',{text:'昨天说的猫猫表情找到了吗？'});
         } else {
           const message_id=Number(text.match(/当前消息编号 #(-?\d+)/)[1]);
@@ -78,7 +86,7 @@ lines.on('line', async (line) => {
           await invoke('qq_finish',{reason:'先记下有依据的兴趣和想法'});
         }
       } finally {await client.close();}
-      if(process.env.FAKE_AUTONOMY_EVENTS)appendFileSync(process.env.FAKE_AUTONOMY_EVENTS,JSON.stringify({session:params.sessionId,public:text.includes('【独立空间创作】'),prompt:text})+'\n');
+      if(process.env.FAKE_AUTONOMY_EVENTS)appendFileSync(process.env.FAKE_AUTONOMY_EVENTS,JSON.stringify({session:params.sessionId,public:text.includes('【独立空间创作】'),kind:text.match(/（(chat|collect|qzone|qzone-comment)）/)?.[1],prompt:text})+'\n');
       notify('session/update',{sessionId:params.sessionId,update:{sessionUpdate:'agent_message_chunk',content:{type:'text',text:'工具操作后的文字不应重复发送'}}});
       respond(id,{stopReason:'end_turn'});return;
     }
