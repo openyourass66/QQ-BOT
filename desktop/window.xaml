@@ -69,7 +69,9 @@
      <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
      <Border Background="White" CornerRadius="12" BorderBrush="{StaticResource Line}" BorderThickness="1" Padding="16" Margin="0,0,0,15">
       <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="155"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-       <ComboBox x:Name="SocialSection" SelectedIndex="0" AutomationProperties.Name="活动类型"><ComboBoxItem Tag="contacts" Content="联系人与群"/><ComboBoxItem Tag="messages" Content="聊天记录"/><ComboBoxItem Tag="stickers" Content="QQ 收藏表情"/><ComboBoxItem Tag="tasks" Content="定时提醒"/><ComboBoxItem Tag="thoughts" Content="自主想法"/><ComboBoxItem Tag="interests" Content="兴趣偏好"/><ComboBoxItem Tag="decisions" Content="自主行动摘要"/><ComboBoxItem Tag="memories" Content="群友记忆"/><ComboBoxItem Tag="lexicon" Content="群内用语"/><ComboBoxItem Tag="events" Content="QQ 事件"/><ComboBoxItem Tag="actions" Content="动作结果"/><ComboBoxItem Tag="turns" Content="模型会话"/><ComboBoxItem Tag="learning" Content="后台学习记录"/><ComboBoxItem Tag="capabilities" Content="能力状态"/></ComboBox>
+       <ComboBox x:Name="SocialSection" DisplayMemberPath="Name" SelectedValuePath="Key" AutomationProperties.Name="活动类型">
+        <ComboBox.GroupStyle><GroupStyle><GroupStyle.HeaderTemplate><DataTemplate><TextBlock Text="{Binding Name}" Foreground="{StaticResource Muted}" FontSize="10" FontWeight="SemiBold" Margin="11,12,11,5"/></DataTemplate></GroupStyle.HeaderTemplate></GroupStyle></ComboBox.GroupStyle>
+       </ComboBox>
        <TextBox x:Name="SocialSearch" Grid.Column="1" Tag="搜索名字、会话或内容…" Margin="12,0" AutomationProperties.Name="搜索活动"/>
        <Button x:Name="SocialRefresh" Grid.Column="2" Content="刷新列表"/>
        <Button x:Name="SocialContacts" Grid.Column="3" Content="同步联系人" Style="{StaticResource Primary}" Margin="9,0,0,0"/>
@@ -99,14 +101,15 @@
          <Border x:Name="SocialDetailBadge" Background="#F1F4FA" CornerRadius="5" Padding="8,4" HorizontalAlignment="Left" Margin="0,12,0,0" Visibility="Collapsed"><TextBlock x:Name="SocialState" Text="" FontSize="10"/></Border>
          <Border Background="{StaticResource Line}" Height="1" Margin="0,18,0,14"/>
         </StackPanel>
-        <Grid Grid.Row="1"><TextBox x:Name="SocialDetail" AcceptsReturn="True" TextWrapping="Wrap" VerticalContentAlignment="Top" VerticalScrollBarVisibility="Auto" IsReadOnly="True" Background="Transparent" BorderThickness="0" Padding="0" AutomationProperties.Name="记录详情或记忆内容"/>
-         <TextBlock x:Name="SocialDetailEmpty" Text="联系人、消息、记忆和执行结果，
+        <Grid Grid.Row="1"><TextBox x:Name="SocialDetail" AcceptsReturn="True" TextWrapping="Wrap" VerticalContentAlignment="Top" VerticalScrollBarVisibility="Auto" IsReadOnly="True" Background="Transparent" BorderThickness="0" Padding="0" AutomationProperties.Name="活动详情或兴趣主题"/>
+         <TextBlock x:Name="SocialDetailEmpty" Text="联系人、聊天和执行结果，
 都可以在这里展开查看。" Foreground="#66748C" FontSize="11" TextWrapping="Wrap" LineHeight="20" VerticalAlignment="Center" HorizontalAlignment="Center" TextAlignment="Center" IsHitTestVisible="False"/>
         </Grid>
         <StackPanel x:Name="SocialActionPanel" Grid.Row="2" Visibility="Collapsed" Margin="0,16,0,0">
          <Button x:Name="SocialProfile" Content="会话人设与参与" Style="{StaticResource Primary}" HorizontalContentAlignment="Center" Margin="0,0,0,8"/>
-         <Button x:Name="SocialSave" Content="保存记忆更改" Style="{StaticResource Primary}" Margin="0,0,0,8"/>
-         <WrapPanel><Button x:Name="SocialBlock" Content="屏蔽对象" Style="{StaticResource Quiet}" Padding="9,7"/><Button x:Name="SocialUnblock" Content="解除屏蔽" Style="{StaticResource Quiet}" Padding="9,7"/><Button x:Name="SocialReset" Content="重置会话" Style="{StaticResource Quiet}" Padding="9,7"/><Button x:Name="SocialDelete" Content="删除记录" Style="{StaticResource Quiet}" Foreground="{StaticResource Danger}" Padding="9,7"/></WrapPanel>
+         <Button x:Name="SocialSave" Content="保存兴趣主题" Style="{StaticResource Primary}" Margin="0,0,0,8"/>
+         <Button x:Name="SocialUnblock" Content="解除屏蔽" Style="{StaticResource Quiet}" Padding="9,7" HorizontalAlignment="Left"/>
+         <Border x:Name="SocialDangerActions" BorderBrush="{StaticResource Line}" BorderThickness="0,1,0,0" Padding="0,8,0,0" Margin="0,8,0,0"><WrapPanel><Button x:Name="SocialReset" Content="重置会话" Style="{StaticResource Quiet}" Padding="9,7"/><Button x:Name="SocialBlock" Content="屏蔽对象" Style="{StaticResource Quiet}" Foreground="{StaticResource Danger}" Padding="9,7"/><Button x:Name="SocialDelete" Content="删除记录" Style="{StaticResource Quiet}" Foreground="{StaticResource Danger}" Padding="9,7"/></WrapPanel></Border>
         </StackPanel>
        </Grid>
       </Border>
@@ -135,12 +138,14 @@
       <Border Grid.Column="2" Background="White" CornerRadius="14" BorderBrush="{StaticResource Line}" BorderThickness="1" Padding="20"><Grid>
        <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
        <StackPanel><TextBlock x:Name="KnowledgeDetailTitle" Text="当前全局人设" FontSize="18" FontWeight="SemiBold"/><TextBlock x:Name="PersonaHint" Text="全局人设用于未指定专属人设的会话。" TextWrapping="Wrap" Foreground="{StaticResource Muted}" FontSize="10" LineHeight="17" Margin="0,7,0,12"/></StackPanel>
-       <StackPanel Grid.Row="1" Margin="0,0,0,12"><TextBlock x:Name="KnowledgeNameLabel" Text="名称" FontSize="11" Margin="0,0,0,6"/><TextBox x:Name="KnowledgeName" Tag="为这套人设起一个名字" AutomationProperties.Name="人设名称或记忆文件名"/></StackPanel>
-       <TextBox x:Name="Persona" Grid.Row="2" AcceptsReturn="True" AcceptsTab="True" TextWrapping="Wrap" VerticalContentAlignment="Top" FontSize="12" VerticalScrollBarVisibility="Auto" Padding="12" AutomationProperties.Name="人设或记忆内容"/>
+       <StackPanel x:Name="KnowledgeNamePanel" Grid.Row="1" Margin="0,0,0,12"><TextBlock x:Name="KnowledgeNameLabel" Text="名称" FontSize="11" Margin="0,0,0,6"/><TextBox x:Name="KnowledgeName" Tag="为这套人设起一个名字" AutomationProperties.Name="人设名称或记忆文件名"/></StackPanel>
+       <Grid Grid.Row="2"><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions><TextBlock x:Name="KnowledgeContentLabel" Text="人设内容" FontSize="11" Margin="0,0,0,6"/><TextBox x:Name="Persona" Grid.Row="1" AcceptsReturn="True" AcceptsTab="True" TextWrapping="Wrap" VerticalContentAlignment="Top" FontSize="12" VerticalScrollBarVisibility="Auto" Padding="12" AutomationProperties.Name="人设或记忆内容"/></Grid>
        <StackPanel Grid.Row="3" Margin="0,12,0,0"><TextBlock x:Name="KnowledgeError" Foreground="{StaticResource Danger}" FontSize="11" TextWrapping="Wrap" Visibility="Collapsed" Margin="0,0,0,8"/>
-        <DockPanel><TextBlock x:Name="KnowledgeWordCount" Foreground="{StaticResource Muted}" FontSize="10" VerticalAlignment="Center"/><Button x:Name="SavePersona" Content="保存全局人设" Style="{StaticResource Primary}" HorizontalAlignment="Right"/></DockPanel>
-        <WrapPanel Margin="0,8,0,0"><Button x:Name="ApplyPersona" Content="设为全局人设" Style="{StaticResource Quiet}" Padding="8,7" Visibility="Collapsed"/><Button x:Name="CopyPersona" Content="另存为人设" Style="{StaticResource Quiet}" Padding="8,7" Visibility="Collapsed"/><Button x:Name="DiscardKnowledge" Content="放弃编辑" Style="{StaticResource Quiet}" Padding="8,7" Visibility="Collapsed"/><Button x:Name="DeleteKnowledge" Content="删除" Style="{StaticResource Quiet}" Foreground="{StaticResource Danger}" Padding="8,7" Visibility="Collapsed"/></WrapPanel>
-        <WrapPanel Margin="0,6,0,0"><Button x:Name="KnowledgeSources" Content="查看来源与版本" Style="{StaticResource Quiet}" Visibility="Collapsed"/><Button x:Name="LockMemory" Content="切换记忆锁定" Style="{StaticResource Quiet}" Visibility="Collapsed"/><Button x:Name="RestoreMemory" Content="恢复上一版本" Style="{StaticResource Quiet}" Visibility="Collapsed"/><Button x:Name="ActivateLexicon" Content="确认并使用" Style="{StaticResource Quiet}" Visibility="Collapsed"/><Button x:Name="DisableLexicon" Content="停用词条" Style="{StaticResource Quiet}" Visibility="Collapsed"/><Button x:Name="ReviewMemory" Content="整理此会话" Style="{StaticResource Quiet}" Visibility="Collapsed"/></WrapPanel>
+        <DockPanel LastChildFill="True"><WrapPanel DockPanel.Dock="Right"><Button x:Name="DiscardKnowledge" Content="放弃编辑" Style="{StaticResource Quiet}" Padding="8,7" Visibility="Collapsed" Margin="0,0,8,0"/><Button x:Name="SavePersona" Content="保存全局人设" Style="{StaticResource Primary}"/></WrapPanel><TextBlock x:Name="KnowledgeWordCount" Foreground="{StaticResource Muted}" FontSize="10" VerticalAlignment="Center"/></DockPanel>
+        <Border x:Name="KnowledgeSecondaryBar" BorderBrush="{StaticResource Line}" BorderThickness="0,1,0,0" Padding="0,10,0,0" Margin="0,12,0,0"><DockPanel LastChildFill="True">
+         <Border x:Name="KnowledgeDeleteArea" DockPanel.Dock="Right" BorderBrush="{StaticResource Line}" BorderThickness="1,0,0,0" Padding="8,0,0,0" Margin="8,0,0,0"><Button x:Name="DeleteKnowledge" Content="删除" Style="{StaticResource Quiet}" Foreground="{StaticResource Danger}" Padding="8,7" Visibility="Collapsed"/></Border>
+         <WrapPanel><Button x:Name="ApplyPersona" Content="设为全局人设" Style="{StaticResource Quiet}" Padding="8,7" Visibility="Collapsed"/><Button x:Name="CopyPersona" Content="另存为人设" Style="{StaticResource Quiet}" Padding="8,7" Visibility="Collapsed"/><Button x:Name="KnowledgeSources" Content="来源与版本" Style="{StaticResource Quiet}" Padding="8,7" Visibility="Collapsed"/><Button x:Name="LockMemory" Content="锁定记忆" Style="{StaticResource Quiet}" Padding="8,7" Visibility="Collapsed"/><Button x:Name="RestoreMemory" Content="恢复上一版" Style="{StaticResource Quiet}" Padding="8,7" Visibility="Collapsed"/><Button x:Name="ActivateLexicon" Content="确认并使用" Style="{StaticResource Quiet}" Padding="8,7" Visibility="Collapsed"/><Button x:Name="DisableLexicon" Content="停用词条" Style="{StaticResource Quiet}" Padding="8,7" Visibility="Collapsed"/><Button x:Name="ReviewMemory" Content="整理此会话" Style="{StaticResource Quiet}" Padding="8,7" Visibility="Collapsed"/></WrapPanel>
+        </DockPanel></Border>
        </StackPanel>
       </Grid></Border>
      </Grid>
@@ -160,7 +165,11 @@
       <ScrollViewer x:Name="SettingsScroll" Grid.Row="2" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Padding="0,0,8,0">
        <StackPanel><TextBlock x:Name="SettingsTitle" Text="对话与参与" FontSize="20" FontWeight="SemiBold"/><TextBlock x:Name="SettingsSubtitle" Text="决定什么时候回应，以及如何自然地参与聊天。" TextWrapping="Wrap" FontSize="11" Foreground="{StaticResource Muted}" Margin="0,6,0,12"/>
         <TextBlock x:Name="SettingsContext" TextWrapping="Wrap" FontSize="10" Foreground="{StaticResource Muted}" Margin="0,0,0,8"/>
-        <DockPanel Margin="0,0,0,16"><Button x:Name="SettingsRefresh" Content="刷新额度" DockPanel.Dock="Right" Style="{StaticResource Quiet}" Margin="10,0,0,0"/><TextBlock x:Name="SettingsQuota" Text="点击刷新额度查看今日已用、上限与剩余量。" TextWrapping="Wrap" FontSize="10" LineHeight="17" Foreground="{StaticResource Muted}" VerticalAlignment="Center"/></DockPanel>
+        <Border x:Name="SettingsQuotaPanel" Style="{StaticResource Surface}" Padding="16" Margin="0,0,0,16" Visibility="Collapsed"><StackPanel>
+         <DockPanel Margin="0,0,0,10"><Button x:Name="SettingsRefresh" Content="刷新额度" DockPanel.Dock="Right" Style="{StaticResource Quiet}" Margin="10,0,0,0"/><TextBlock x:Name="SettingsQuota" Text="今日额度 · 点击刷新查看已用与剩余量" TextWrapping="Wrap" FontSize="11" LineHeight="18" Foreground="{StaticResource Muted}" VerticalAlignment="Center"/></DockPanel>
+         <UniformGrid x:Name="SettingsQuotaCards" Columns="3" Margin="-4,0,-4,0"/>
+         <Expander x:Name="SettingsGroupQuotas" Header="各群额度" Visibility="Collapsed" Margin="0,8,0,0"><TextBlock x:Name="SettingsGroupQuotaText" TextWrapping="Wrap" Foreground="{StaticResource Muted}" FontSize="11" LineHeight="20" Margin="0,8,0,0"/></Expander>
+        </StackPanel></Border>
         <StackPanel x:Name="Fields"/>
         <StackPanel x:Name="SettingsEmpty" Visibility="Collapsed" Margin="25,50"><TextBlock Text="没有找到相关设置" FontSize="16" HorizontalAlignment="Center"/><TextBlock Text="试试“主动”“图片”或“额度”。" Foreground="{StaticResource Muted}" FontSize="12" HorizontalAlignment="Center" Margin="0,9,0,0"/></StackPanel>
        </StackPanel>

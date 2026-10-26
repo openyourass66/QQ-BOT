@@ -278,13 +278,14 @@ partial class App
         SettingStatus("social.autoCollectPerDay",SettingOn("social.autoCollectStickers")?"后台收藏的独立上限，同时受 QQ 动作总额约束。":"后台收藏已关闭；可先设置额度，开关在主动与提醒管理。");
         SettingStatus("social.autoQzonePerDay",SettingOn("social.autoQzoneEnabled")?"后台发布的独立上限，同时受空间发布总额约束。":"自主空间创作已关闭；可先设置额度，开关在主动与提醒管理。");
         SettingStatus("features.browsing.enabled","已接入本项目搜索与静态正文读取；DSH 外部联网独立管理，截图参数仅兼容保留。");
-        if(Find<TextBlock>("SettingsContext")!=null)Find<TextBlock>("SettingsContext").Text="全局配置："+(settingsPath.Length>0?settingsPath:"当前动态配置文件")+"\n会话专属参与设置优先于这里的全局值；.env 同名项仅补齐缺失默认值。";
+        if(Find<TextBlock>("SettingsContext")!=null){Find<TextBlock>("SettingsContext").Text="全局默认 · 会话专属的参与设置优先";Find<TextBlock>("SettingsContext").ToolTip="配置文件："+(settingsPath.Length>0?settingsPath:"当前动态配置文件");}
     }
     static void FilterSettings() {
         if(Find<TextBox>("SettingsSearch")==null||settingsCards.Count==0)return;
         string query=Find<TextBox>("SettingsSearch").Text.Trim();int count=0,links=0;
         foreach(var card in settingsCards) {bool show=false;foreach(var view in card.Rows){bool match=query.Length==0?card.Category==selectedCategory:(view.Spec.Title+view.Spec.Help+view.Spec.Path+card.Category+view.Spec.Card+(view.Spec.Path=="social.mediaEnabled"?"媒体 视觉 转写 合成 声音 抽帧 FFmpeg "+string.Join(" ",mediaKeys):"")).IndexOf(query,StringComparison.OrdinalIgnoreCase)>=0;view.Row.Visibility=match?Visibility.Visible:Visibility.Collapsed;if(match){show=true;count++;}}card.Surface.Visibility=show?Visibility.Visible:Visibility.Collapsed;}
         foreach(var link in settingsLinks) {bool match=query.Length==0?link.Category==selectedCategory:link.Search.IndexOf(query,StringComparison.OrdinalIgnoreCase)>=0;link.Surface.Visibility=match?Visibility.Visible:Visibility.Collapsed;if(match)links++;}
+        Find<Border>("SettingsQuotaPanel").Visibility=settingsCards.Any(card=>card.Category=="额度与节奏"&&card.Surface.Visibility==Visibility.Visible)?Visibility.Visible:Visibility.Collapsed;
         Find<TextBlock>("SettingsTitle").Text=query.Length==0?selectedCategory:"搜索结果";
         Find<TextBlock>("SettingsSubtitle").Text=query.Length==0?categoryDescriptions[Array.IndexOf(categoryNames,selectedCategory)]:"找到 "+count+" 项设置和 "+links+" 个相关入口，清空搜索可返回分类。";
         Find<StackPanel>("SettingsEmpty").Visibility=count+links==0?Visibility.Visible:Visibility.Collapsed;
@@ -345,6 +346,8 @@ partial class App
         if(json.Serialize(Collect(settings,""))!=before)throw new Exception("切换分类或搜索丢失了设置值");
         for(int i=0;i<7;i++){Find<ListBox>("SettingsNav").SelectedIndex=i;Capture(System.IO.Path.Combine(root,"settings-"+i+".png"),MainPage.Settings);}
         Find<ListBox>("SettingsNav").SelectedIndex=0;
+        if(Find<Border>("SettingsQuotaPanel").Visibility!=Visibility.Collapsed)throw new Exception("额度统计仍出现在无关设置分类");
+        NavigateSetting("social.actionsPerDay");if(Find<Border>("SettingsQuotaPanel").Visibility!=Visibility.Visible)throw new Exception("额度分类没有显示当前用量");Find<ListBox>("SettingsNav").SelectedIndex=0;
         VerifyAuditInteraction();
         VerifySettingsConsistencyInteraction();
     }

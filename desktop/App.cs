@@ -24,8 +24,8 @@ partial class App
         set { Find<TabControl>("Tabs").SelectedItem = Find<TabControl>("Tabs").Items.Cast<TabItem>().First(tab => PageForTab(tab) == value); }
     }
     static int SocialSection {
-        get { var item = Find<ComboBox>("SocialSection").SelectedItem as ComboBoxItem; return Math.Max(0, Array.IndexOf(socialSections, item == null ? "" : Convert.ToString(item.Tag))); }
-        set { Find<ComboBox>("SocialSection").SelectedItem = Find<ComboBox>("SocialSection").Items.Cast<ComboBoxItem>().First(item => Convert.ToString(item.Tag) == socialSections[value]); }
+        get { var item = Find<ComboBox>("SocialSection").SelectedItem as ActivityCategory; return Math.Max(0, Array.IndexOf(socialSections, item == null ? "" : item.Key)); }
+        set { Find<ComboBox>("SocialSection").SelectedItem = Find<ComboBox>("SocialSection").Items.Cast<ActivityCategory>().First(item => item.Key == socialSections[value]); }
     }
     static Window window;
     static Process host;
@@ -66,12 +66,12 @@ partial class App
         var row = Find<ListView>("SocialList").SelectedItem as SocialRow;
         if (op != "list" && op != "refresh_contacts" && row == null) { Feedback("请先选择一条记录。"); return; }
         if (dirtySections.Contains("memory") && op != "edit_memory"&&op!="edit_interest" && MessageBox.Show(window,"记录编辑尚未保存，继续会放弃编辑。", "记录编辑", MessageBoxButton.YesNo) != MessageBoxResult.Yes) return;
-        string deletePrompt=SocialSection==9?"取消这条自主想法？已发出的操作无法撤回。":SocialSection==10?"删除这条兴趣记录？":SocialSection==3?(row!=null&&row.Status.StartsWith("QQ收藏")?"从 QQ 账号的收藏表情中移除这张？本地理解缓存会保留。":"删除所选本地待同步记录？"):"删除这条记忆，或取消所选提醒？";
+        string deletePrompt=SocialSection==9?"取消这条自主想法？已发出的操作无法撤回。":SocialSection==10?"删除这条兴趣记录？":SocialSection==3?(row!=null&&row.Status.StartsWith("QQ收藏")?"从 QQ 账号的收藏表情中移除这张？本地理解缓存会保留。":"删除所选本地待同步记录？"):"取消所选提醒？";
         if ((op == "delete" || op == "reset_session") && MessageBox.Show(window, op == "delete" ? deletePrompt : "清除该会话的 Agent 上下文？消息存档仍会保留。", "确认操作", MessageBoxButton.YesNo) != MessageBoxResult.Yes) return;
         Find<TextBlock>("SocialNote").Text = "正在读取，请稍候…";
         SetSocialBusy(true);
-        var data=new Dictionary<string,object> {{"op",op},{"section",socialSections[SocialSection]},{"query",Find<TextBox>("SocialSearch").Text},{"id",op=="list"||op=="refresh_contacts"||row==null?"":row.Id},{"chat",op=="list"||op=="refresh_contacts"?"":row.Chat},{"text",op=="edit_memory"||op=="edit_interest"?Find<TextBox>("SocialDetail").Text:""},{"blocked",blocked}};
-        if(row!=null&&(SocialSection==2||SocialSection==10)&&(op=="edit_memory"||op=="edit_interest"||op=="delete"))data["expectedText"]=row.Text;
+        var data=new Dictionary<string,object> {{"op",op},{"section",socialSections[SocialSection]},{"query",Find<TextBox>("SocialSearch").Text},{"id",op=="list"||op=="refresh_contacts"||row==null?"":row.Id},{"chat",op=="list"||op=="refresh_contacts"?"":row.Chat},{"text",op=="edit_interest"?Find<TextBox>("SocialDetail").Text:""},{"blocked",blocked}};
+        if(row!=null&&SocialSection==10&&(op=="edit_interest"||op=="delete"))data["expectedText"]=row.Text;
         Send("social",data);
     }
     static void EditProfile() {
@@ -180,7 +180,7 @@ partial class App
             if (section == "env" || section == "runtime" || section == "connection") {
                 var result = (Dictionary<string,object>)message["result"]; loading = true; Find<TextBox>("Env").Text = (string)result["env"]; RuntimeFields(result["runtimeFields"]); loading = false;
                 dirtySections.Remove("env"); dirtySections.Remove("runtime");
-                if(result.ContainsKey("settingsPath")) {if(settingsPath!=(string)result["settingsPath"])Find<TextBlock>("SettingsQuota").Text="已切换动态配置文件，请重新启动机器人并刷新额度。";settingsPath=(string)result["settingsPath"];}
+                if(result.ContainsKey("settingsPath")) {if(settingsPath!=(string)result["settingsPath"]){Find<TextBlock>("SettingsQuota").Text="已切换配置，请重新启动机器人并刷新额度。";Find<System.Windows.Controls.Primitives.UniformGrid>("SettingsQuotaCards").Children.Clear();Find<Expander>("SettingsGroupQuotas").Visibility=Visibility.Collapsed;}settingsPath=(string)result["settingsPath"];}
                 if(result.ContainsKey("settings"))ApplySavedSettings((Dictionary<string,object>)result["settings"],section=="connection"?mediaKeys.Select(key=>"social."+key):new string[0]);
                 connectionRestartPending=message.ContainsKey("restartRequested")&&(bool)message["restartRequested"];
                 Find<TextBlock>("RuntimeHint").Text=message.ContainsKey("restartRequested")&&(bool)message["restartRequested"]?"配置已保存，正在重新启动机器人…":"配置已保存；连接参数重启后生效。";
@@ -288,7 +288,7 @@ partial class App
             header.Children.Add(new TextBlock { Text = names[i] }); tab.Header = header;
             System.Windows.Automation.AutomationProperties.SetName(tab, names[i]);
         }
-        string[] subtitles = { "连接、消息与运行状态，一目了然。", "查看连接与运行记录，定位问题。", "管理对话、回复节奏、审批与额度。", "管理 QQ、模型和运行参数。", "保存多套人设，管理群友与工作区记忆。", "检查启动依赖、连接路径与访问权限。", "查看联系人、聊天、记忆、提醒与动作结果。" };
+        string[] subtitles = { "连接、消息与运行状态，一目了然。", "查看连接与运行记录，定位问题。", "管理对话、回复节奏、审批与额度。", "管理 QQ、模型和运行参数。", "统一管理人设、群友记忆、群内用语与记忆文件。", "检查启动依赖、连接路径与访问权限。", "管理日常互动、自主活动，查看运行记录。" };
         Find<TabControl>("Tabs").SelectionChanged += (s,e) => {
             if (e.Source != Find<TabControl>("Tabs")) return;
             int page = (int)SelectedPage;
@@ -357,7 +357,7 @@ partial class App
             if (smoke && !exiting) {
                 if (DateTime.UtcNow > smokeDeadline) { Environment.ExitCode = 1; File.WriteAllText(Path.Combine(root, "smoke-result.txt"), "FAIL: lifecycle timeout at step "+smokeStep+", socialBusy="+socialBusy+", knowledgeBusy="+knowledgeBusy+", rows="+Find<ListView>("SocialList").Items.Count+", feedback="+Find<TextBlock>("Feedback").Text); exiting = true; Send("quit"); return; }
                 if (smokeStep == 0 && settings != null) {
-                    try { VerifySettingsInteraction(); VerifyRuntimeInteraction(); VerifyQuickSetupInteraction(); VerifyKnowledgeInteraction(); } catch(Exception error) { Environment.ExitCode=1;File.WriteAllText(Path.Combine(root,"smoke-result.txt"),"FAIL: "+error.Message);exiting=true;Send("quit");return; }
+                    try { VerifyActivityInteraction(); VerifySettingsInteraction(); VerifyRuntimeInteraction(); VerifyQuickSetupInteraction(); VerifyKnowledgeInteraction(); } catch(Exception error) { Environment.ExitCode=1;File.WriteAllText(Path.Combine(root,"smoke-result.txt"),"FAIL: "+error.Message);exiting=true;Send("quit");return; }
                     if (fields.Count < 53 || runtimeInputs.Count < 20 || Find<TextBox>("Persona").Text != "测试小鲸人设" || !tray.Registered) { Environment.ExitCode = 1; File.WriteAllText(Path.Combine(root, "smoke-result.txt"), "FAIL: config=" + fields.Count + ", runtime=" + runtimeInputs.Count + ", tray=" + tray.Registered + ", personaLength=" + Find<TextBox>("Persona").Text.Length); exiting = true; Send("quit"); return; }
                     foreach (MainPage page in Enum.GetValues(typeof(MainPage))) Capture(Path.Combine(root,"page-" + (int)page + ".png"), page);
                     ((TextBox)fields["chat.group.prefix"]).Text="native-scope";((TextBox)fields["social.speechVoice"]).Text="native-voice";Find<Button>("SaveSettings").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));
@@ -415,15 +415,17 @@ partial class App
                 } else if(smokeStep==26) {
                     dirtySections.Add("memory");Find<Button>("SettingsRefresh").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));smokeStep=27;
                 } else if(smokeStep==27&&!settingsStatusBusy) {
-                    if(!Find<TextBlock>("SettingsQuota").Text.Contains("今日额度")||!dirtySections.Contains("memory")||Find<ListView>("SocialList").Items.Count!=1)throw new Exception("Refreshing quotas changed activity or memory drafts");
-                    dirtySections.Remove("memory");ReconcileDirtySettings();NavigateSetting("social.actionsPerDay");Capture(Path.Combine(root,"settings-quotas.png"),MainPage.Settings);
-                    SelectedPage=MainPage.Activity;SocialSection=2;smokeStep=28;
-                } else if(smokeStep==28&&!socialBusy&&Find<ListView>("SocialList").Items.Count==1) {
-                    if(!Find<TextBox>("SocialDetail").IsReadOnly||Find<Button>("SocialDelete").Visibility!=Visibility.Collapsed||Find<Button>("SocialProfile").Visibility!=Visibility.Collapsed||!Find<Button>("SocialSave").Content.ToString().Contains("前往"))throw new Exception("Activity still provides a second memory editor or unrelated actions");
-                    Capture(Path.Combine(root,"activity-memory-readonly.png"),MainPage.Activity);Find<Button>("SocialSave").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));smokeStep=29;
+                    if(!Find<TextBlock>("SettingsQuota").Text.Contains("今日额度")||Find<System.Windows.Controls.Primitives.UniformGrid>("SettingsQuotaCards").Children.Count<7||!dirtySections.Contains("memory")||Find<ListView>("SocialList").Items.Count!=1)throw new Exception("Refreshing quotas changed activity or memory drafts, or omitted global usage");
+                    dirtySections.Remove("memory");ReconcileDirtySettings();NavigateSetting("social.actionsPerDay");Find<ScrollViewer>("SettingsScroll").ScrollToTop();Capture(Path.Combine(root,"settings-quotas.png"),MainPage.Settings);
+                    OpenFriendMemory("memory-fixture");smokeStep=29;
                 } else if(smokeStep==29&&!knowledgeBusy&&KnowledgePage==1&&knowledgeSelection!=null&&knowledgeSelection.Id=="memory-fixture") {
-                    if(SelectedPage!=MainPage.Knowledge||!Find<TextBox>("Persona").Text.Contains("Edited friend memory"))throw new Exception("Activity memory link did not select the canonical editor");
+                    if(SelectedPage!=MainPage.Knowledge||!Find<TextBox>("Persona").Text.Contains("Edited friend memory"))throw new Exception("Memory navigation did not select the canonical editor");
+                    if(Find<StackPanel>("KnowledgeNamePanel").Visibility!=Visibility.Collapsed||Find<Button>("SavePersona").IsEnabled||Find<TextBlock>("KnowledgeContentLabel").Text!="记忆内容")throw new Exception("记忆编辑区仍有重复名称或未区分保存状态");
                     Capture(Path.Combine(root,"memory-editor-redirect.png"),MainPage.Knowledge);
+                    double memoryWidth=window.Width,memoryHeight=window.Height;window.Width=1000;window.Height=700;Capture(Path.Combine(root,"memory-compact.png"),MainPage.Knowledge);
+                    if(Find<TextBox>("Persona").ActualHeight<120)throw new Exception("紧凑窗口的记忆正文被操作区挤压");
+                    foreach(string name in new[]{"SavePersona","KnowledgeSources","LockMemory","RestoreMemory","ReviewMemory","DeleteKnowledge"}) {var button=Find<Button>(name);Point position=button.TranslatePoint(new Point(0,0),window);if(button.IsVisible&&(position.X+button.ActualWidth>window.ActualWidth||position.Y+button.ActualHeight>window.ActualHeight))throw new Exception("紧凑窗口的记忆操作超出可见范围");}
+                    window.Width=memoryWidth;window.Height=memoryHeight;
                     if(Find<Button>("LockMemory").Visibility!=Visibility.Visible||Find<Button>("RestoreMemory").Visibility!=Visibility.Visible||Find<Button>("ReviewMemory").Visibility!=Visibility.Visible)throw new Exception("Memory source and revision controls are unavailable");
                     KnowledgePage=3;smokeStep=30;
                 } else if(smokeStep==30&&!knowledgeBusy&&knowledgeSelection!=null&&knowledgeSelection.Kind=="lexicon") {
@@ -433,10 +435,10 @@ partial class App
                     if(knowledgeSelection.Text!="Native corrected meaning")throw new Exception("Lexicon edit was not saved");
                     Find<Button>("ActivateLexicon").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));smokeStep=32;
                 } else if(smokeStep==32&&!knowledgeBusy) {
-                    if(!knowledgeSelection.Meta.Contains("有效"))throw new Exception("Lexicon confirmation was not saved");
+                    if(!knowledgeSelection.Meta.Contains("有效")||Find<Button>("ActivateLexicon").Visibility!=Visibility.Collapsed||Find<Button>("DisableLexicon").Visibility!=Visibility.Visible)throw new Exception("Lexicon confirmation or available actions are incorrect");
                     Capture(Path.Combine(root,"knowledge-lexicon-active.png"),MainPage.Knowledge);Find<Button>("DisableLexicon").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));smokeStep=33;
                 } else if(smokeStep==33&&!knowledgeBusy) {
-                    if(!knowledgeSelection.Meta.Contains("已停用"))throw new Exception("Lexicon disable was not saved");
+                    if(!knowledgeSelection.Meta.Contains("已停用")||Find<Button>("DisableLexicon").Visibility!=Visibility.Collapsed||Find<Button>("ActivateLexicon").Visibility!=Visibility.Visible)throw new Exception("Lexicon disable or available actions are incorrect");
                     Find<Button>("RestoreMemory").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));smokeStep=34;
                 } else if(smokeStep==34&&!knowledgeBusy) {
                     if(knowledgeSelection.Text!="Finish the game")throw new Exception("Lexicon previous version was not restored");
