@@ -3,7 +3,7 @@ import { parseEnv } from 'node:util';
 import { resolve, join, delimiter } from 'node:path';
 import { homedir } from 'node:os';
 import { readChatModelConfig } from '../dist/agent/chat-model.js';
-import { readJsonLimited } from '../dist/services/web-service.js';
+import { readJsonLimited } from '../dist/services/read-json.js';
 import WebSocket from 'ws';
 
 export async function probeSocket(env) {

@@ -15,9 +15,7 @@ import type { AutonomousTurn } from '../agent/autonomous-state.js';
 import { Cognition, forgetMemory, memoryMeta, fingerprint } from '../agent/cognition.js';
 import { MemoryMetaSchema } from '../agent/cognition-state.js';
 import { learningModel } from '../agent/learning-model.js';
-import { WebService } from '../services/web-service.js';
 import { turnBudget, toolAvailable } from '../agent/context-policy.js';
-import { dirname, resolve } from 'node:path';
 
 export class SocialEngine {
   private sending = new Map<string, Promise<unknown>>();
@@ -32,7 +30,6 @@ export class SocialEngine {
   readonly qqStickers: QqStickers;
   readonly autonomy:Autonomy;
   readonly cognition:Cognition;
-  readonly web:WebService;
   constructor(readonly store: SocialStore, readonly media: MediaService, private readonly api: OneBotHttp,
     private readonly usage: DailyUsageStore, private readonly settings: () => BotSettings,
     private readonly confirm: (title: string, signal: AbortSignal) => Promise<boolean>,
@@ -40,7 +37,6 @@ export class SocialEngine {
     private readonly log: (text: string) => void) {
       this.qqStickers=new QqStickers(store,media,api);this.autonomy=new Autonomy(store,settings,usage,undefined,media);
       const model=learningModel();this.cognition=new Cognition(store,settings,usage,model.analyze,model.available);
-      this.web=new WebService(settings,resolve(dirname(store.path),'web-cache'));
     }
   guardTool(ctx:ToolContext,name:string):void {
     ctx.budget??=turnBudget();
@@ -162,7 +158,7 @@ export class SocialEngine {
     const tool = socialTools.find(t => t.name === call.tool);
     if (!tool) throw new Error('未知 QQ 工具');
     const args = z.object(tool.schema as z.ZodRawShape).strict().parse(call.args) as Record<string, any>;
-    const reads = new Set(['qq_capabilities', 'qq_recent_messages', 'qq_message', 'qq_read_forward', 'qq_active_members', 'qq_chats', 'qq_images', 'qq_stickers', 'qq_sticker_image', 'qq_memory_query', 'qq_reminders', 'qq_events', 'qq_transcribe', 'qq_video', 'qq_file', 'qq_event_file', 'qq_group_files', 'qq_search', 'qq_web_read', 'qq_qzone_feed', 'qq_finish', 'qq_report']);
+    const reads = new Set(['qq_capabilities', 'qq_recent_messages', 'qq_message', 'qq_read_forward', 'qq_active_members', 'qq_chats', 'qq_images', 'qq_stickers', 'qq_sticker_image', 'qq_memory_query', 'qq_reminders', 'qq_events', 'qq_transcribe', 'qq_video', 'qq_file', 'qq_event_file', 'qq_group_files', 'qq_qzone_feed', 'qq_finish', 'qq_report']);
     reads.add('qq_self_state');
     const collectPreview = call.tool === 'qq_collect_sticker' && !args.analysis_token;
     const sendSticker = call.tool === 'qq_send_sticker' ? this.store.snapshot().stickers.find(s => s.id === args.sticker_id) : undefined;
@@ -426,12 +422,6 @@ export class SocialEngine {
           ctx.sent++; this.onSent(ctx.chat, 0, [{ type: 'file', data: { name: a.name } }]); return result;
         });
       }
-      case 'qq_search': {
-        const audit=await this.store.beginAction(ctx.chat,'qq_search');
-        try{const result=await this.web.search(ctx.chat,a.query,a.images,a.refresh,ctx.budget!,ctx.signal);this.check(ctx);await this.store.endAction(audit,'success','搜索完成（按调用次数记录，不推算费用）');return result;}
-        catch(e){await this.store.endAction(audit,'failed','搜索失败或被本轮额度拒绝');throw e;}
-      }
-      case 'qq_web_read': {const result=await this.web.read(ctx.chat,{source_id:a.source_id,url:a.url,offset:a.offset},ctx.budget!,ctx.signal);this.check(ctx);return result;}
       case 'qq_qzone_feed': {
         if (!process.env.BOT_QZONE_ADAPTER_URL) throw new Error('空间浏览适配服务未配置');
         if (a.user_id && this.settings().social.blockedUsers.includes(String(a.user_id))) throw new Error('目标用户已屏蔽');

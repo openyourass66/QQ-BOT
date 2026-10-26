@@ -204,7 +204,7 @@ partial class App
         var guide=CreateSetupGuide();guide.Show();guide.UpdateLayout();CaptureContent((FrameworkElement)guide.Content,System.IO.Path.Combine(root,"quick-guide.png"));guide.Close();
         NavigateRuntime(0);if(!Find<Button>("SaveRuntimeRestart").IsEnabled)throw new Exception("退出快速配置后无法保存全部设置");
         NavigateRuntime(4);OpenQuickSetup();Find<Button>("OpenAllSettings").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));window.UpdateLayout();
-        if(SelectedPage!=MainPage.Runtime||Find<TextBlock>("RuntimeTitle").Text!="扩展服务"||!runtimeInputs["BOT_SEARCH_URL"].IsVisible||Find<Expander>("AdvancedEnv").Visibility!=Visibility.Collapsed)throw new Exception("退出快速配置后未返回原来的扩展服务分类");
+        if(SelectedPage!=MainPage.Runtime||Find<TextBlock>("RuntimeTitle").Text!="扩展服务"||!runtimeInputs["BOT_LEARNING_BASE_URL"].IsVisible||Find<Expander>("AdvancedEnv").Visibility!=Visibility.Collapsed)throw new Exception("退出快速配置后未返回原来的扩展服务分类");
         NavigateSetting("approval.adminQq");window.UpdateLayout();
         if(SelectedPage!=MainPage.Settings||Find<TextBlock>("PageTitle").Text!="机器人设置"||Find<TextBlock>("SettingsTitle").Text!="身份与审批"||!fields["approval.adminQq"].IsVisible)throw new Exception("跨页设置入口未定位到身份与审批");
         NavigateRuntime(0);Find<ListBox>("SettingsNav").SelectedIndex=0;

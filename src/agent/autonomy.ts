@@ -12,7 +12,7 @@ import { pathToFileURL } from 'node:url';
 const minute=60000,hour=60*minute;
 const common=['qq_self_state','qq_interest','qq_thought','qq_finish','qq_report'];
 const imageTools=['qq_images','qq_message','qq_recent_messages','qq_stickers','qq_sticker_image','qq_sticker_note','qq_collect_sticker'];
-const chatTools=['qq_reply','qq_send_image','qq_send_sticker','qq_read_forward','qq_memory_query','qq_memory_append','qq_memory_remove','qq_search'];
+const chatTools=['qq_reply','qq_send_image','qq_send_sticker','qq_read_forward','qq_memory_query','qq_memory_append','qq_memory_remove'];
 const digest=(text:string)=>createHash('sha256').update(text).digest('hex');
 export function quietTime(s:BotSettings,now=Date.now()):boolean {
   const current=Number(new Intl.DateTimeFormat('en-US',{timeZone:'Asia/Shanghai',hour:'numeric',hourCycle:'h23'}).format(new Date(now)));
@@ -54,7 +54,7 @@ export class Autonomy {
     if(a.kind==='collect'&&(!s.social.autoCollectStickers||!s.social.stickersEnabled))throw new Error('后台收藏已关闭');
     if(tool==='qq_collect_sticker'&&!s.social.autoCollectStickers)throw new Error('后台收藏已关闭');
     if(a.kind==='qzone'&&(!s.social.autoQzoneEnabled||!s.features.qzone.enabled))throw new Error('自主空间发布已关闭');
-    const allowed=a.kind==='qzone'?[...common,'qq_search','qzone_post']:
+    const allowed=a.kind==='qzone'?[...common,'qzone_post']:
       a.kind==='collect'?[...common,...imageTools]:[...common,...imageTools,...chatTools];
     if(!allowed.includes(tool))throw new Error('当前自主任务不允许执行这个操作');
   }

@@ -22,7 +22,7 @@ createInterface({input:process.stdin}).on('line',async line=>{
       const server=servers.get(params.sessionId)[0],client=new Client({name:'intelligence-fixture',version:'1'});
       try{
         await client.connect(new StdioClientTransport({command:server.command,args:server.args,env:Object.fromEntries(server.env.map(e=>[e.name,e.value])),stderr:'pipe'}));
-        const first=await client.callTool({name:'qq_search',arguments:{query:'first fixture'}}),second=await client.callTool({name:'qq_search',arguments:{query:'second fixture'}}),third=await client.callTool({name:'qq_search',arguments:{query:'third fixture'}});
+        const first=await client.callTool({name:'qq_recent_messages',arguments:{}}),second=await client.callTool({name:'qq_recent_messages',arguments:{}}),third=await client.callTool({name:'qq_recent_messages',arguments:{}});
         record({kind:'tools',first:Boolean(first.isError),second:Boolean(second.isError),third:Boolean(third.isError),reason:third.content[0]?.text});
       }finally{await client.close();}
     }

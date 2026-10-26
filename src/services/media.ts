@@ -258,6 +258,6 @@ export class MediaService {
   }
   capabilities(): Record<string, string> {
     const s = this.settings();
-    return { images: s.visionModel && process.env.BOT_MEDIA_BASE_URL ? '已配置独立视觉服务' : '图片通过 MCP 交给 DSH，需当前模型支持视觉', transcription: s.transcriptionModel && process.env.BOT_MEDIA_BASE_URL ? '已配置' : '未配置', speech: s.speechModel && process.env.BOT_MEDIA_BASE_URL ? '已配置' : '未配置', video: process.env.BOT_FFMPEG_BIN ? '已配置抽帧' : '未配置 FFmpeg', search: process.env.BOT_SEARCH_URL ? '已配置搜索服务' : '使用 DSH 已挂载的搜索/浏览工具；本 QQ 工具未配置搜索服务', qzone: process.env.BOT_QZONE_ADAPTER_URL ? '已配置空间适配服务' : '发布依赖协议端扩展；浏览/评论未配置适配服务' };
+    return { images: s.visionModel && process.env.BOT_MEDIA_BASE_URL ? '已配置独立视觉服务' : '图片通过 MCP 交给 DSH，需当前模型支持视觉', transcription: s.transcriptionModel && process.env.BOT_MEDIA_BASE_URL ? '已配置' : '未配置', speech: s.speechModel && process.env.BOT_MEDIA_BASE_URL ? '已配置' : '未配置', video: process.env.BOT_FFMPEG_BIN ? '已配置抽帧' : '未配置 FFmpeg', search: '使用 DSH / DeepSeek 原生搜索与网页读取，是否可用取决于当前 Profile 和凭据', qzone: process.env.BOT_QZONE_ADAPTER_URL ? '已配置空间适配服务' : '发布依赖协议端扩展；浏览/评论未配置适配服务' };
   }
 }

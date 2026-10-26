@@ -25,7 +25,7 @@ export function learningModel(env:Record<string,string|undefined>=process.env):{
           messages:[{role:'user',content:JSON.stringify({chat:batch.chat,messages:batch.messages.map(m=>({id:m.id,user:String(m.user),text:m.text.slice(0,Math.max(200,Math.floor(20000/Math.max(1,batch.messages.length))))})),memories:batch.memories.slice(-30).map(m=>({id:m.id,user:m.user,text:m.text.slice(0,300)}))})}]}),
       });
       if(!response.ok){await response.body?.cancel();throw new Error(`分析服务失败（HTTP ${response.status}）`);}
-      const {readJsonLimited}=await import('../services/web-service.js');
+      const {readJsonLimited}=await import('../services/read-json.js');
       const data=await readJsonLimited(response,262144) as {content?:Array<{type:string;text?:string}>;usage?:{input_tokens?:number;output_tokens?:number}};
       const text=data.content?.filter(c=>c.type==='text').map(c=>c.text??'').join('')??'';
       const proposal=LearningProposalSchema.parse(JSON.parse(text.replace(/^\s*```(?:json)?\s*/,'').replace(/\s*```\s*$/,'')));

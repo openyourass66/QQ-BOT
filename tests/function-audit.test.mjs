@@ -21,7 +21,7 @@ import { mockStickerAnalysis, fakeQqFavorites } from './helpers/sticker-review.m
 
 test('功能审计：全部 MCP 工具逐项经过真实传输、参数校验和受控协议/服务适配', { timeout: 30000 }, async t => {
   const dir = await mkdtemp(join(tmpdir(), 'qq-tool-audit-'));
-  const keys = ['BOT_MEDIA_BASE_URL','BOT_MEDIA_API_KEY','BOT_SEARCH_URL','BOT_QZONE_ADAPTER_URL','BOT_FFMPEG_BIN'];
+  const keys = ['BOT_MEDIA_BASE_URL','BOT_MEDIA_API_KEY','BOT_QZONE_ADAPTER_URL','BOT_FFMPEG_BIN'];
   const saved = Object.fromEntries(keys.map(k => [k,process.env[k]]));
   const requests = [], calls = [], exercised = new Set();
   const http = createServer(async (req,res) => {
@@ -30,13 +30,12 @@ test('功能审计：全部 MCP 工具逐项经过真实传输、参数校验和
     if(req.url==='/audio/speech') { res.setHeader('content-type','audio/mpeg'); res.end(Buffer.from('test-mp3')); }
     else if(req.url==='/audio/transcriptions') res.end(JSON.stringify({text:'测试语音正文'}));
     else if(req.url==='/chat/completions') res.end(JSON.stringify({choices:[{message:{content:'图片中有测试图案'}}]}));
-    else if(req.url==='/search') res.end(JSON.stringify({results:[{title:'测试来源',url:'https://example.com/source'}]}));
     else if(req.url==='/qzone') res.end(JSON.stringify(JSON.parse(raw).action==='feed'?{posts:[{id:'post-real',text:'动态'}]}:{commented:true}));
     else { res.statusCode=404;res.end('{}'); }
   });
   http.listen(0,'127.0.0.1');await once(http,'listening');
   const base=`http://127.0.0.1:${http.address().port}`;
-  Object.assign(process.env,{BOT_MEDIA_BASE_URL:base+'/',BOT_MEDIA_API_KEY:'local-fixture',BOT_SEARCH_URL:base+'/search',BOT_QZONE_ADAPTER_URL:base+'/qzone'});
+  Object.assign(process.env,{BOT_MEDIA_BASE_URL:base+'/',BOT_MEDIA_API_KEY:'local-fixture',BOT_QZONE_ADAPTER_URL:base+'/qzone'});
   delete process.env.BOT_FFMPEG_BIN;
   let client,actions;
   try {
@@ -91,7 +90,7 @@ test('功能审计：全部 MCP 工具逐项经过真实传输、参数校验和
     client=new Client({name:'feature-audit',version:'1'});
     await client.connect(new StdioClientTransport({command:process.execPath,args:[resolve('dist/mcp-qq.js')],env:{BOT_ACTION_URL:actions.url,BOT_ACTION_TOKEN:actions.token,BOT_ACTION_CONTEXT:'audit-context'},stderr:'pipe'}));
     const registry=(await client.listTools()).tools;
-    assert.equal(registry.length,53);assert.deepEqual(registry.map(d=>d.name).sort(),[...socialTools,...legacyTools].map(d=>d.name).sort());
+    assert.equal(registry.length,51);assert.deepEqual(registry.map(d=>d.name).sort(),[...socialTools,...legacyTools].map(d=>d.name).sort());
     const call=async(name,args={},error)=>{
       let value;
       await t.test(name,async()=>{
@@ -123,12 +122,12 @@ test('功能审计：全部 MCP 工具逐项经过真实传输、参数校验和
     await call('qq_file',{message_id:6});await call('qq_event_file',{event_id:upload});
     await call('qq_group_files');await call('qq_group_file',{file_id:'file-real'});
     const file=await call('qq_create_file',{name:'摘要.md',text:'# 摘要'});await call('qq_send_file',{source:file.file,name:file.name});
-    await call('qq_search',{query:'测试'});await call('qq_web_read',{url:'http://127.0.0.1/private'},/本机或内网/);await call('qq_qzone_feed');await call('qq_qzone_comment',{post_id:'post-real',text:'收到'});await call('qq_report',{text:'审计记录'});
+    await call('qq_qzone_feed');await call('qq_qzone_comment',{post_id:'post-real',text:'收到'});await call('qq_report',{text:'审计记录'});
     await call('qq_send_message',{target_type:'private',target_id:20001,text:'跨会话'});await call('qq_like',{user_id:20001});await call('qq_qzone_post',{text:'测试动态'});
     await call('qq_get_friend_list');await call('qq_get_group_list');await call('qq_get_group_member_list',{group_id:30001});
     await call('qq_set_profile',{nickname:'小鲸',signature:'测试签名'});await call('qq_set_group_card',{group_id:30001,card:'小鲸'});
     await call('qq_set_avatar',{file:png});await call('qq_recall',{message_id:7});await call('qq_self_info',{group_id:30001});
-    assert.equal(exercised.size,53);assert.equal(requests.length,8);
+    assert.equal(exercised.size,51);assert.equal(requests.length,7);
     for(const endpoint of ['send_group_msg','send_private_msg','send_like','send_qzone_msg','upload_group_file','set_qq_profile','set_self_longnick','set_group_card','set_qq_avatar','delete_msg','group_poke','set_group_add_request','add_custom_face','fetch_custom_face_detail'])assert.ok(calls.some(c=>c.action===endpoint),endpoint);
     assert.equal(favorites.items.length,1);assert.equal(store.snapshot().stickers[0].qqPresent,true);
     assert.equal(store.message('group:30001',7).recalled,true);

@@ -51,8 +51,6 @@ partial class App
     static Window profileDialog;
     static SocialRow socialSelection;
     static Dictionary<string, string[]> choices = new Dictionary<string, string[]> {
-        { "web.provider",new[]{"adapter|自定义适配服务","tavily|Tavily","bing|Bing（实验性）"} },
-        { "web.fallback",new[]{"none|不使用备用","adapter|自定义适配服务","tavily|Tavily","bing|Bing（实验性）"} },
         { "social.autonomy", new[] { "autonomous|自主执行", "sensitive|敏感动作需确认", "confirm|所有动作需确认" } },
         { "social.responseMode", new[] { "legacy|沿用群聊开关", "mention|仅直接对话", "keywords|直接对话和关键词", "probability|关键词和概率参与", "all|参与全部消息" } }
     };

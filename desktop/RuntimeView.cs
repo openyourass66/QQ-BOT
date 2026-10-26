@@ -19,7 +19,7 @@ partial class App
         "为本项目选择模型、管理 API Key，并测试实际连接。",
         "集中配置媒体服务、模型名称与声音；留空视觉模型时沿用对话模型。",
         "设置模型等待时间、并发数和消息队列容量；回复节奏在机器人设置管理。",
-        "配置搜索和空间适配服务；对应功能开关在机器人设置管理。",
+        "配置后台分析和空间适配服务；联网搜索由 DSH / DeepSeek 原生工具提供。",
         "管理工作区之外的数据文件位置和高级环境文件；行为参数在机器人设置管理。"
     };
     static readonly string[] mediaKeys = { "visionModel", "transcriptionModel", "speechModel", "speechVoice", "videoFrames" };
@@ -43,8 +43,6 @@ partial class App
         {"BOT_MEDIA_BASE_URL","填写兼容 API 的基础地址，如 https://api.example.com/v1/；语音和独立视觉模型共用此服务。"},
         {"BOT_MEDIA_API_KEY","媒体服务的 API 密钥，输入内容会隐藏。"},
         {"BOT_FFMPEG_BIN","仅视频抽帧需要；选择 FFmpeg 可执行文件。"},
-        {"BOT_SEARCH_URL","选择自定义适配服务时使用；DSH 外部搜索独立管理。"},
-        {"BOT_TAVILY_API_KEY","选择 Tavily 时使用，密钥只发送到 Tavily 官方接口。"},
         {"BOT_LEARNING_API_KEY","分析不挂载工具。项目 Key 模式可留空复用；Profile 或账号模式需独立密钥。"},
         {"BOT_QZONE_ADAPTER_URL","仅浏览和评论空间需要；发布说说使用协议端接口，开关与确认在机器人设置管理。"},
         {"TURN_TIMEOUT_MS","1000–600000 毫秒，超时后取消本轮并在下次重建会话。"},
@@ -85,7 +83,7 @@ partial class App
     }
     static bool IsMediaSetting(string path) { return mediaKeys.Any(key=>path=="social."+key); }
     static int RuntimeCategory(string group) {
-        return group.StartsWith("OneBot")||group.StartsWith("账号")?0:group.StartsWith("模型")?1:group.StartsWith("媒体")||group.StartsWith("图片")?2:group.StartsWith("消息")?3:group.StartsWith("搜索")||group.StartsWith("空间")||group.StartsWith("后台分析")?4:5;
+        return group.StartsWith("OneBot")||group.StartsWith("账号")?0:group.StartsWith("模型")?1:group.StartsWith("媒体")||group.StartsWith("图片")?2:group.StartsWith("消息")?3:group.StartsWith("空间")||group.StartsWith("后台分析")?4:5;
     }
     static void InitRuntimeView() {
         var nav=Find<ListBox>("RuntimeNav");nav.ItemsSource=new[]{runtimeCategories[0],runtimeCategories[1],runtimeCategories[2],runtimeCategories[4],runtimeCategories[3],runtimeCategories[5]};

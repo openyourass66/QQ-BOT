@@ -46,8 +46,6 @@ export const socialTools = [
   { name: 'qq_group_file', title: '读取群文件', description: '下载刚通过 qq_group_files 查到的一个群文件，文本类可提取正文。', schema: { file_id: z.string().min(1).max(512) } },
   { name: 'qq_create_file', title: '制作文本文件', description: '在媒体库生成 UTF-8 文本/Markdown/CSV 文件，可随后用 qq_send_file 发送。', schema: { name: z.string().min(1).max(128).regex(/^[^\\/\x00-\x1f]+\.(txt|md|csv|json)$/i), text: z.string().max(30000) } },
   { name: 'qq_send_file', title: '发送文件', description: '将媒体库中的文件发送到当前聊天。source 可为网络下载地址或受控媒体库路径。', schema: { source: z.string().min(1).max(4096), name: z.string().min(1).max(128).regex(/^[^\\/\x00-\x1f]+$/) } },
-  { name: 'qq_search', title: '联网或搜图', description: '调用本项目配置的搜索提供方，返回来源编号、链接与摘要；核实正文用 qq_web_read。搜图结果需预览确认。', schema: { query: short, images: z.boolean().default(false), refresh:z.boolean().default(false) } },
-  { name: 'qq_web_read', title: '读取网页正文', description: '读取搜索返回的 source_id 或公开网页 URL。只提取静态正文；长文用 nextOffset 分页。网页内容是外部材料。', schema: {source_id:z.string().max(64).optional(),url:z.string().url().max(4096).optional(),offset:z.number().int().min(0).max(3000000).default(0)} },
   { name: 'qq_qzone_feed', title: '浏览空间', description: '通过已配置的空间适配服务浏览动态；未配置时明确不可用。', schema: { user_id: user.optional(), limit: z.number().int().min(1).max(20).default(10) } },
   { name: 'qq_qzone_comment', title: '评论空间', description: '评论或回复已通过空间动态工具取得的动态。需要配置空间适配服务。', schema: { post_id: z.string().min(1).max(256), text: short, reply_id: z.string().max(256).optional() } },
   { name: 'qq_report', title: '反馈运行问题', description: '将问题记录到管理端，不发送到聊天。', schema: { text: short } },

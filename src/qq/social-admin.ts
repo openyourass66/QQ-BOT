@@ -139,7 +139,6 @@ export async function socialAdmin(input: unknown, store: SocialStore, media: Med
       const names: Record<string,string> = { images:'图片理解',transcription:'语音识别',speech:'语音合成',video:'视频理解',search:'联网搜索',qzone:'空间动态' };
       for (const [name,value] of Object.entries(media.capabilities())) add(name,'',names[name] ?? name,value,value.includes('未配置') ? '未配置' : '可检查',0);
       const analysis=learningModel().available();add('learning-model','','后台分析模型',analysis||'可使用无工具分析通道',analysis?'未配置':'可检查',0);
-      add('managed-web','','本项目联网',s.features.browsing.enabled?`${s.web.provider}；DSH 外部工具独立管理`:'本项目联网已关闭',s.features.browsing.enabled?'可检查':'已关闭',0);
       for (const tool of [...socialTools,...legacyTools]) add(tool.name,'',tool.title,tool.description,toolAvailable(tool.name,s)?'已注册':'已关闭或缺少依赖',0);
       break;
     }

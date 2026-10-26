@@ -4,7 +4,7 @@ import { basename, dirname, resolve } from 'node:path';
 import { z } from 'zod';
 import { config } from './config.js';
 import { SocialSettingsSchema } from '../qq/social-settings.js';
-import { LearningSettingsSchema, WebSettingsSchema, ContextSettingsSchema } from '../agent/intelligence-settings.js';
+import { LearningSettingsSchema, ContextSettingsSchema } from '../agent/intelligence-settings.js';
 
 const GroupSchema = z
   .object({
@@ -25,7 +25,6 @@ const GroupSchema = z
 const SettingsSchema = z
   .object({
     learning: LearningSettingsSchema,
-    web: WebSettingsSchema,
     context: ContextSettingsSchema,
     social: SocialSettingsSchema,
     identity: z
@@ -60,13 +59,6 @@ const SettingsSchema = z
             enabled: z.boolean().default(false),
             dailyLimit: z.number().int().min(0).max(10).default(1),
             requireConfirm: z.boolean().default(true),
-          })
-          .default({}),
-        browsing: z
-          .object({
-            enabled: z.boolean().default(true),
-            maxNavigations: z.number().int().min(1).max(10).default(3),
-            maxScreenshots: z.number().int().min(0).max(5).default(2),
           })
           .default({}),
       })

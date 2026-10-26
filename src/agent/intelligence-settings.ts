@@ -15,14 +15,6 @@ export const LearningSettingsSchema = z.object({
   lexiconChars: z.number().int().min(0).max(2000).default(400),
 }).default({});
 
-export const WebSettingsSchema = z.object({
-  provider: z.enum(['adapter', 'tavily', 'bing']).default('adapter'),
-  fallback: z.enum(['none', 'adapter', 'tavily', 'bing']).default('none'),
-  searchesPerTurn: z.number().int().min(0).max(10).default(2),
-  cacheMinutes: z.number().int().min(0).max(60).default(10),
-  pageChars: z.number().int().min(1000).max(16000).default(8000),
-}).default({});
-
 export const ContextSettingsSchema = z.object({
   backgroundChars: z.number().int().min(500).max(12000).default(3000),
   warningPercent: z.number().int().min(30).max(95).default(70),
