@@ -25,11 +25,15 @@ partial class App
     static Dictionary<string,object> knowledgeSnapshot;
     static string knowledgeWorkspace, knowledgePendingKey, knowledgeMemoryTarget, knowledgeRequestedMemory;
     static bool knowledgeLoading, knowledgeBusy;
-    static int KnowledgePage { get { return Math.Max(0,Find<ListBox>("KnowledgeNav").SelectedIndex); } }
+    static readonly string[] knowledgeCategories = { "人设库", "群友记忆", "工作区记忆", "群内用语" };
+    static int KnowledgePage {
+        get { return Math.Max(0,Array.IndexOf(knowledgeCategories,Find<ListBox>("KnowledgeNav").SelectedItem as string)); }
+        set { Find<ListBox>("KnowledgeNav").SelectedItem=knowledgeCategories[value]; }
+    }
     static string KnowledgeSection(string key) { return key=="global"?"persona":"knowledge:"+key; }
     static string ShortText(string text) { return (text??"").Replace("\r"," ").Replace("\n"," "); }
     static void InitKnowledgeView() {
-        var nav=Find<ListBox>("KnowledgeNav");nav.ItemsSource=new[]{"人设库","群友记忆","工作区记忆","群内用语"};
+        var nav=Find<ListBox>("KnowledgeNav");nav.ItemsSource=new[]{knowledgeCategories[0],knowledgeCategories[1],knowledgeCategories[3],knowledgeCategories[2]};
         nav.SelectionChanged+=(s,e)=>{if(knowledgeLoading)return;Find<TextBox>("KnowledgeSearch").Clear();RefreshKnowledgeList();if(KnowledgePage==1||KnowledgePage==3)RequestKnowledgeMemories();};nav.SelectedIndex=0;
         Find<ListView>("KnowledgeList").SelectionChanged+=(s,e)=>{if(knowledgeLoading)return;ShowKnowledge(Find<ListView>("KnowledgeList").SelectedItem as KnowledgeRow);};
         Find<TextBox>("KnowledgeSearch").TextChanged+=(s,e)=>{if(!knowledgeLoading)RefreshKnowledgeList();};
@@ -76,9 +80,9 @@ partial class App
     }
     static void OpenFriendMemory(string id) {
         if(knowledgeBusy){Feedback("人设与记忆正在读取，请稍后再打开。");return;}
-        knowledgeLoading=true;Find<ListBox>("KnowledgeNav").SelectedIndex=1;Find<TextBox>("KnowledgeSearch").Clear();knowledgeLoading=false;
+        knowledgeLoading=true;KnowledgePage=1;Find<TextBox>("KnowledgeSearch").Clear();knowledgeLoading=false;
         if(!string.IsNullOrEmpty(id))knowledgeSelections[1]="memory:"+id;
-        knowledgeMemoryTarget=id;Find<TabControl>("Tabs").SelectedIndex=4;RefreshKnowledgeList();RequestKnowledgeMemories();
+        knowledgeMemoryTarget=id;SelectedPage=MainPage.Knowledge;RefreshKnowledgeList();RequestKnowledgeMemories();
     }
     static void RenderKnowledge(Dictionary<string,object> data) {
         knowledgeSnapshot=data;knowledgeWorkspace=(string)data["workspace"];
@@ -99,7 +103,7 @@ partial class App
             var file=(Dictionary<string,object>)data["file"];KnowledgeRow row;
             if(knowledgeItems.TryGetValue("file:"+(string)file["name"],out row)){row.Text=(string)file["text"];row.Revision=(string)file["revision"];row.Loaded=true;row.Summary=ShortText(row.Text);}
         }
-        if(data.ContainsKey("selectedKey")) {string selected=(string)data["selectedKey"];if(op=="apply_preset"){knowledgeLoading=true;Find<ListBox>("KnowledgeNav").SelectedIndex=0;knowledgeLoading=false;}knowledgeSelections[KnowledgePage]=selected;}
+        if(data.ContainsKey("selectedKey")) {string selected=(string)data["selectedKey"];if(op=="apply_preset"){knowledgeLoading=true;KnowledgePage=0;knowledgeLoading=false;}knowledgeSelections[KnowledgePage]=selected;}
         SetKnowledgeBusy(false);UpdateDirtySummary();RefreshKnowledgeList();
         if(data.ContainsKey("error"))KnowledgeError((string)data["error"]);
         else if(data.ContainsKey("warning")) {KnowledgeError((string)data["warning"]);if(op!="list"&&op!="read_memory")Feedback("当前内容已保存；部分其他记录暂不可用，请查看行内提示。");}
@@ -122,7 +126,7 @@ partial class App
         var rows=knowledgeItems.Values.Where(row=>(row.Kind==kind||KnowledgePage==0&&row.Kind=="global")&&(query.Length==0||(row.Name+" "+row.Meta+" "+row.Summary+" "+row.Revision+" "+row.Text+" "+(knowledgeDrafts.ContainsKey(row.Key)?knowledgeDrafts[row.Key].Name+" "+knowledgeDrafts[row.Key].Text:"")).IndexOf(query,StringComparison.OrdinalIgnoreCase)>=0)).OrderBy(row=>row.Kind=="global"?0:row.IsNew?1:2).ThenBy(row=>row.Name).ToList();
         knowledgeLoading=true;Find<ListView>("KnowledgeList").ItemsSource=rows;
         var selected=rows.FirstOrDefault(row=>row.Key==knowledgeSelections[KnowledgePage])??rows.FirstOrDefault();Find<ListView>("KnowledgeList").SelectedItem=selected;knowledgeLoading=false;
-        Find<TextBlock>("KnowledgeCount").Text=new[]{"人设库","群友记忆","工作区记忆","群内用语"}[KnowledgePage]+" · "+rows.Count+" 项";
+        Find<TextBlock>("KnowledgeCount").Text=knowledgeCategories[KnowledgePage]+" · "+rows.Count+" 项";
         Find<TextBlock>("KnowledgeStatus").Text=KnowledgePage==0?"切换条目保留草稿 · 会话可选择已保存的人设":KnowledgePage==1?"名字、QQ、群号或内容 · 回车搜索全部记忆":KnowledgePage==3?"仅在来源群使用 · 确认后生效 · 支持纠正与停用":"支持子目录 · 回车搜索文件内容 · 切换条目保留草稿";
         Find<Button>("KnowledgeNew").Visibility=KnowledgePage==1||KnowledgePage==3?Visibility.Collapsed:Visibility.Visible;Find<Button>("KnowledgeNew").Content=KnowledgePage==0?"新建人设":"新建记忆文件";
         Find<Button>("Memory").Visibility=KnowledgePage==2?Visibility.Visible:Visibility.Collapsed;
@@ -215,15 +219,15 @@ partial class App
         if(editor.Text!=friendly.Text||editor.Text=="preset draft")throw new Exception("会话人设选择没有使用已保存内容");
         editor.Text="conversation copy";if(friendly.Text==editor.Text)throw new Exception("会话编辑改动了库内人设");
         picker.SelectedIndex=0;if(editor.Text!=""||editor.IsEnabled)throw new Exception("会话没有恢复沿用全局人设");
-        knowledgeLoading=true;Find<ListBox>("KnowledgeNav").SelectedIndex=2;knowledgeLoading=false;NewKnowledge();
+        knowledgeLoading=true;KnowledgePage=2;knowledgeLoading=false;NewKnowledge();
         string fileKey=knowledgeSelection.Key;Find<TextBox>("KnowledgeName").Text="draft.md";Find<TextBox>("Persona").Text="workspace draft";
-        Find<ListBox>("KnowledgeNav").SelectedIndex=0;Find<ListBox>("KnowledgeNav").SelectedIndex=2;
+        KnowledgePage=0;KnowledgePage=2;
         if(knowledgeSelection.Key!=fileKey||Find<TextBox>("Persona").Text!="workspace draft")throw new Exception("切换分类丢失工作区文件草稿");
-        Capture(Path.Combine(root,"knowledge-draft.png"),4);
+        Capture(Path.Combine(root,"knowledge-draft.png"),MainPage.Knowledge);
         knowledgeItems=originalItems;knowledgeDrafts.Clear();dirtySections=originalSections;knowledgeSelections=new[]{"global","","",""};
-        Find<ListBox>("KnowledgeNav").SelectedIndex=0;UpdateDirtySummary();RefreshKnowledgeList();
-        Find<ListView>("KnowledgeList").SelectedItem=knowledgeItems["preset:preset-friendly"];Capture(Path.Combine(root,"knowledge-personas.png"),4);
-        double width=window.Width,height=window.Height;window.Width=1000;window.Height=700;Capture(Path.Combine(root,"knowledge-compact.png"),4);window.Width=width;window.Height=height;
+        KnowledgePage=0;UpdateDirtySummary();RefreshKnowledgeList();
+        Find<ListView>("KnowledgeList").SelectedItem=knowledgeItems["preset:preset-friendly"];Capture(Path.Combine(root,"knowledge-personas.png"),MainPage.Knowledge);
+        double width=window.Width,height=window.Height;window.Width=1000;window.Height=700;Capture(Path.Combine(root,"knowledge-compact.png"),MainPage.Knowledge);window.Width=width;window.Height=height;
         Find<ListView>("KnowledgeList").SelectedItem=knowledgeItems["global"];
     }
 }

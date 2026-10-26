@@ -26,9 +26,9 @@ partial class App
     static List<SettingsLink> settingsLinks = new List<SettingsLink>();
     static Dictionary<string, FieldView> fieldViews = new Dictionary<string, FieldView>();
     static string selectedCategory = "对话与参与";
-    static readonly string[] categoryNames = { "对话与参与", "联系范围", "功能开关", "主动与提醒", "额度与节奏", "身份与审批", "记录保留" };
+    static readonly string[] categoryNames = { "对话与参与", "功能开关", "主动与提醒", "额度与节奏", "联系范围", "身份与审批", "记录保留" };
     static readonly string[] categoryDescriptions = {
-        "决定什么时候回应，以及如何自然地参与聊天。", "管理允许与屏蔽名单；动作确认统一在身份与审批设置。", "决定允许使用哪些能力；模型与服务在连接与运行配置。", "管理后台活动、联系间隔与安静时段；每日额度集中在额度与节奏。", "集中管理每日额度与回复节奏。", "管理机器人名称、管理员，以及 QQ 动作和工作区操作的确认规则。", "控制消息记录的保留时间与条数；文件位置在连接与运行管理。"
+        "决定什么时候回应，以及如何自然地参与聊天。", "决定允许使用哪些能力；模型与服务在连接与运行配置。", "管理后台活动、联系间隔与安静时段；每日额度集中在额度与节奏。", "集中管理每日额度与回复节奏。", "管理允许与屏蔽名单；动作确认统一在身份与审批设置。", "管理机器人名称、管理员，以及 QQ 动作和工作区操作的确认规则。", "控制消息记录的保留时间与条数；文件位置在连接与运行管理。"
     };
     static readonly FieldSpec[] fieldSpecs = {
         new FieldSpec("learning.memory", "功能开关", "记忆与群内学习", "自动整理群友记忆", "仅分析明确开启的会话；提案经来源与版本校验后保存。"),
@@ -311,7 +311,7 @@ partial class App
     }
     static void SaveRobotSettings() {try {var paths=dirtySettingPaths.Where(path=>!IsMediaSetting(path)).ToArray();if(paths.Length==0){Feedback("机器人设置没有未保存的修改；媒体参数请在媒体服务中保存。");return;}if(ValidateSettingsForm())Send("settings",new{draft=CollectDraft(paths),baseline=settings,paths=paths,settingsPath=settingsPath});}catch(Exception error){Feedback(error.Message);}}
     static void SelectSetting(string path,bool invalid=true) {
-        if(IsMediaSetting(path))NavigateRuntime(2);else {Find<TabControl>("Tabs").SelectedIndex=2;Find<TextBox>("SettingsSearch").Clear();Find<ListBox>("SettingsNav").SelectedItem=((IEnumerable<SettingsCategory>)Find<ListBox>("SettingsNav").ItemsSource).First(c=>c.Name==fieldViews[path].Spec.Category);}
+        if(IsMediaSetting(path))NavigateRuntime(2);else {SelectedPage=MainPage.Settings;Find<TextBox>("SettingsSearch").Clear();Find<ListBox>("SettingsNav").SelectedItem=((IEnumerable<SettingsCategory>)Find<ListBox>("SettingsNav").ItemsSource).First(c=>c.Name==fieldViews[path].Spec.Category);}
         fieldViews[path].Row.BringIntoView();fields[path].Focus();if(invalid)Feedback("设置需要调整，请检查行内提示。");
     }
     static void VerifySettingsInteraction() {
@@ -343,7 +343,7 @@ partial class App
         if(((IEnumerable)((Dictionary<string,object>)Collect(settings,"")["social"])["personalInterests"]).Cast<object>().Count()!=2)throw new Exception("全局创作兴趣未按列表保存");interests.Text=oldInterests;
         var name=(TextBox)fields["identity.name"];string originalName=name.Text;name.Text="测试中的名称";Find<ListBox>("SettingsNav").SelectedIndex=6;Find<ListBox>("SettingsNav").SelectedIndex=5;if(name.Text!="测试中的名称")throw new Exception("切换分类丢失了未保存输入");name.Text=originalName;
         if(json.Serialize(Collect(settings,""))!=before)throw new Exception("切换分类或搜索丢失了设置值");
-        for(int i=0;i<7;i++){Find<ListBox>("SettingsNav").SelectedIndex=i;Capture(System.IO.Path.Combine(root,"settings-"+i+".png"),2);}
+        for(int i=0;i<7;i++){Find<ListBox>("SettingsNav").SelectedIndex=i;Capture(System.IO.Path.Combine(root,"settings-"+i+".png"),MainPage.Settings);}
         Find<ListBox>("SettingsNav").SelectedIndex=0;
         VerifyAuditInteraction();
         VerifySettingsConsistencyInteraction();
@@ -385,10 +385,10 @@ partial class App
         if(json.Serialize(Collect(settings,""))!=originalDraft)throw new Exception("一致性检查改变了原设置");
     }
     static void VerifyAuditInteraction() {
-        var originalLogs=logs.ToArray();bool originalPaused=paused;int originalPage=Find<TabControl>("Tabs").SelectedIndex;
+        var originalLogs=logs.ToArray();bool originalPaused=paused;MainPage originalPage=SelectedPage;
         string originalSearch=Find<TextBox>("LogSearch").Text;int originalFilter=Find<ComboBox>("LogFilter").SelectedIndex;
         try {
-            Find<TabControl>("Tabs").SelectedIndex=1;Find<TextBox>("LogSearch").Clear();Find<ComboBox>("LogFilter").SelectedIndex=0;
+            SelectedPage=MainPage.Logs;Find<TextBox>("LogSearch").Clear();Find<ComboBox>("LogFilter").SelectedIndex=0;
             logs.Clear();for(int i=0;i<300;i++)logs.Enqueue("[bridge] 审查日志 "+i);paused=false;RefreshLogs();window.UpdateLayout();
             var editor=Find<TextBox>("Logs");editor.ScrollToVerticalOffset(100);window.UpdateLayout();double offset=editor.VerticalOffset;
             if(offset<=0)throw new Exception("日志滚动测试没有产生可滚动内容");
@@ -396,7 +396,7 @@ partial class App
             if(Math.Abs(editor.VerticalOffset-offset)>1)throw new Exception("暂停滚动时日志仍跳回顶部或底部");
         } finally {
             logs.Clear();foreach(string line in originalLogs)logs.Enqueue(line);paused=originalPaused;
-            Find<TextBox>("LogSearch").Text=originalSearch;Find<ComboBox>("LogFilter").SelectedIndex=originalFilter;RefreshLogs();Find<TabControl>("Tabs").SelectedIndex=originalPage;
+            Find<TextBox>("LogSearch").Text=originalSearch;Find<ComboBox>("LogFilter").SelectedIndex=originalFilter;RefreshLogs();SelectedPage=originalPage;
         }
         string hint=Find<TextBlock>("RuntimeHint").Text;bool pending=connectionRestartPending;
         connectionRestartPending=true;Event("{\"type\":\"control\",\"action\":\"restartBridge\",\"ok\":false}");

@@ -35,7 +35,7 @@ partial class App
         }
         Find<Button>("OpenQuickSetup").Click+=(s,e)=>OpenQuickSetup();
         Find<Button>("StartSetup").Click+=(s,e)=>OpenQuickSetup();
-        Find<Button>("OpenAllSettings").Click+=(s,e)=>NavigateRuntime(Math.Max(0,Find<ListBox>("RuntimeNav").SelectedIndex));
+        Find<Button>("OpenAllSettings").Click+=(s,e)=>NavigateRuntime(RuntimePage);
         Find<Button>("QuickBack").Click+=(s,e)=>ShowQuickStep(Math.Max(0,quickStep-1));
         Find<Button>("QuickNext").Click+=(s,e)=>{
             foreach(string key in QuickKeys())if(!ValidateRuntimeField(key)){runtimeInputs[key].Focus();return;}
@@ -47,7 +47,7 @@ partial class App
             ShowSetupGuide();
         };
     }
-    static void OpenQuickSetup() {quickSetupMode=true;Find<TabControl>("Tabs").SelectedIndex=3;ShowQuickStep(quickStep);}
+    static void OpenQuickSetup() {quickSetupMode=true;SelectedPage=MainPage.Runtime;ShowQuickStep(quickStep);}
     static void ShowQuickStep(int step) {
         quickStep=step;FilterRuntime();RefreshQuickSetup();Find<ScrollViewer>("RuntimeScroll").ScrollToTop();
         Find<TextBlock>("QuickNotice").Text=quickDescriptions[quickStep];
@@ -169,9 +169,9 @@ partial class App
     static void VerifyQuickSetupInteraction() {
         string original=RuntimeValue("BOT_DSH_BIN"),mode=RuntimeValue("BOT_CHAT_MODE"),key=RuntimeValue("QQ_BOT_DEEPSEEK_API_KEY");OpenQuickSetup();ShowQuickStep(0);Feedback("快速配置和全部设置共用草稿，切换页面不会丢失输入。");
         if(Find<ListBox>("RuntimeNav").Visibility!=Visibility.Collapsed||runtimeInputs["BOT_DSH_BIN"].IsVisible==false)throw new Exception("快速配置未显示基础环境");
-        Capture(System.IO.Path.Combine(root,"quick-environment.png"),3);
-        ShowQuickStep(1);Capture(System.IO.Path.Combine(root,"quick-profile.png"),3);
-        ((ComboBox)runtimeInputs["BOT_CHAT_MODE"]).SelectedValue="project";((PasswordBox)runtimeInputs["QQ_BOT_DEEPSEEK_API_KEY"]).Password="native-setup-key";Capture(System.IO.Path.Combine(root,"quick-model.png"),3);
+        Capture(System.IO.Path.Combine(root,"quick-environment.png"),MainPage.Runtime);
+        ShowQuickStep(1);Capture(System.IO.Path.Combine(root,"quick-profile.png"),MainPage.Runtime);
+        ((ComboBox)runtimeInputs["BOT_CHAT_MODE"]).SelectedValue="project";((PasswordBox)runtimeInputs["QQ_BOT_DEEPSEEK_API_KEY"]).Password="native-setup-key";Capture(System.IO.Path.Combine(root,"quick-model.png"),MainPage.Runtime);
         ((ComboBox)runtimeInputs["BOT_CHAT_MODE"]).SelectedValue=mode;((PasswordBox)runtimeInputs["QQ_BOT_DEEPSEEK_API_KEY"]).Password=key;
         ShowQuickStep(3);quickReady=true;RefreshQuickSetup();
         ((TextBox)runtimeInputs["BOT_DSH_BIN"]).Text=original+"-changed";
@@ -184,9 +184,14 @@ partial class App
         if(RuntimeValue("BOT_DSH_BIN")!="user-selected.cmd")throw new Exception("自动检测覆盖了用户输入");((TextBox)runtimeInputs["BOT_DSH_BIN"]).Text=original;
         var rows=new object[]{new Dictionary<string,object>{{"name","DSH 启动入口"},{"ok",false},{"required",true},{"detail","请检测或选择已安装的 DSH 启动文件。"},{"key","BOT_DSH_BIN"}},new Dictionary<string,object>{{"name","NapCat Shell"},{"ok",false},{"required",false},{"detail","使用已有 QQ 服务，本机组件可跳过。"},{"key","BOT_NAPCAT_DIR"}}};
         checkedQuickRevision=quickRevision;RenderOnboarding(new Dictionary<string,object>{{"operation","check"},{"ok",false},{"rows",rows},{"message","请处理需处理的项目，再重新检查。"}});
-        Capture(System.IO.Path.Combine(root,"quick-check.png"),3);
-        double width=window.Width,height=window.Height;window.Width=1000;window.Height=720;Capture(System.IO.Path.Combine(root,"quick-compact.png"),3);window.Width=width;window.Height=height;
+        Capture(System.IO.Path.Combine(root,"quick-check.png"),MainPage.Runtime);
+        double width=window.Width,height=window.Height;window.Width=1000;window.Height=720;Capture(System.IO.Path.Combine(root,"quick-compact.png"),MainPage.Runtime);window.Width=width;window.Height=height;
         var guide=CreateSetupGuide();guide.Show();guide.UpdateLayout();CaptureContent((FrameworkElement)guide.Content,System.IO.Path.Combine(root,"quick-guide.png"));guide.Close();
         NavigateRuntime(0);if(!Find<Button>("SaveRuntimeRestart").IsEnabled)throw new Exception("退出快速配置后无法保存全部设置");
+        NavigateRuntime(4);OpenQuickSetup();Find<Button>("OpenAllSettings").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));window.UpdateLayout();
+        if(SelectedPage!=MainPage.Runtime||Find<TextBlock>("RuntimeTitle").Text!="扩展服务"||!runtimeInputs["BOT_SEARCH_URL"].IsVisible||Find<Expander>("AdvancedEnv").Visibility!=Visibility.Collapsed)throw new Exception("退出快速配置后未返回原来的扩展服务分类");
+        NavigateSetting("approval.adminQq");window.UpdateLayout();
+        if(SelectedPage!=MainPage.Settings||Find<TextBlock>("PageTitle").Text!="机器人设置"||Find<TextBlock>("SettingsTitle").Text!="身份与审批"||!fields["approval.adminQq"].IsVisible)throw new Exception("跨页设置入口未定位到身份与审批");
+        NavigateRuntime(0);Find<ListBox>("SettingsNav").SelectedIndex=0;
     }
 }

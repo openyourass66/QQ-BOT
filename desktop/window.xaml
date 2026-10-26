@@ -36,7 +36,7 @@
      <StackPanel IsItemsHost="True" VerticalAlignment="Top" Margin="12,126,12,0"/>
      <ContentPresenter x:Name="PART_SelectedContentHost" Grid.Column="1" ContentSource="SelectedContent" TextElement.Foreground="#25324B" Margin="28,104,28,42"/>
     </Grid></ControlTemplate></TabControl.Template>
-    <TabItem Header="工作总览"><ScrollViewer VerticalScrollBarVisibility="Auto"><StackPanel>
+    <TabItem Tag="Overview" Header="工作总览"><ScrollViewer VerticalScrollBarVisibility="Auto"><StackPanel>
      <Border Style="{StaticResource Surface}" Padding="16" Margin="0,0,0,14"><DockPanel><Button x:Name="StartSetup" DockPanel.Dock="Right" Content="快速配置 →" Style="{StaticResource Primary}" Margin="16,0,0,0"/><StackPanel><TextBlock Text="第一次使用？从这里开始" FontWeight="SemiBold" FontSize="14"/><TextBlock Text="检测环境、选择模型、连接 QQ，四步完成基础设置。" Foreground="{StaticResource Muted}" FontSize="11" TextWrapping="Wrap" Margin="0,5,0,0"/></StackPanel></DockPanel></Border>
      <Border CornerRadius="18" Padding="24,22" Margin="0,0,0,18"><Border.Background><LinearGradientBrush StartPoint="0,0" EndPoint="1,0"><GradientStop Color="#E9EFFF"/><GradientStop Color="#F0F5FF" Offset="1"/></LinearGradientBrush></Border.Background>
       <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="220"/></Grid.ColumnDefinitions>
@@ -65,104 +65,11 @@
       <Border Grid.Column="1" Style="{StaticResource Surface}"><StackPanel><DockPanel Margin="0,0,0,18"><TextBlock Text="环境检查" FontSize="15" FontWeight="SemiBold"/><TextBlock Text="启动诊断" Foreground="#94A0B4" FontSize="10" HorizontalAlignment="Right" VerticalAlignment="Center"/></DockPanel><TextBlock Text="运行依赖、连接配置与文件权限" Foreground="#71809A" FontSize="11" Margin="0,0,0,12"/><TextBlock x:Name="HealthSummary" Text="检查环境，确认小鲸已经准备好。" Foreground="#526787" TextWrapping="Wrap" FontSize="12"/><Button x:Name="Diagnose" Content="查看启动诊断 →" Style="{StaticResource Quiet}" HorizontalAlignment="Left" Margin="-10,16,0,0"/></StackPanel></Border>
      </Grid>
     </StackPanel></ScrollViewer></TabItem>
-    <TabItem Header="运行日志"><Border Style="{StaticResource Surface}"><Grid>
-     <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
-     <Grid Margin="0,0,0,17"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="114"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-      <TextBox x:Name="LogSearch" Tag="搜索日志内容…" ToolTip="搜索日志" Margin="0,0,10,0"/>
-      <ComboBox x:Name="LogFilter" Grid.Column="1" SelectedIndex="0" VerticalContentAlignment="Center"><ComboBoxItem Content="全部日志"/><ComboBoxItem Content="仅错误"/><ComboBoxItem Content="桥接"/><ComboBoxItem Content="NapCat"/></ComboBox>
-      <Button x:Name="Pause" Grid.Column="2" Content="暂停滚动" Margin="10,0,8,0"/><Button x:Name="ExportLogs" Grid.Column="3" Content="导出日志"/>
-     </Grid>
-     <Grid Grid.Row="1"><TextBox x:Name="Logs" IsReadOnly="True" FontFamily="Cascadia Mono, Consolas, Microsoft YaHei UI" FontSize="12" Background="#F8FAFD" Padding="15" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto"/>
-      <StackPanel x:Name="LogEmpty" VerticalAlignment="Center" HorizontalAlignment="Center" IsHitTestVisible="False"><TextBlock Text="还没有工作日志" FontSize="16" Foreground="#8291AC" HorizontalAlignment="Center"/><TextBlock Text="启动机器人后，连接与运行记录会出现在这里。" FontSize="11" Foreground="#94A0B4" Margin="0,9,0,0"/></StackPanel>
-     </Grid>
-     <DockPanel Grid.Row="2" Margin="0,12,0,0"><Button x:Name="Clear" Content="清空窗口" Style="{StaticResource Quiet}" DockPanel.Dock="Right" Padding="7,0" FontSize="11"/><TextBlock x:Name="LogCount" Text="保留最近 1500 条日志" Foreground="#8390A6" FontSize="10"/></DockPanel>
-    </Grid></Border></TabItem>
-    <TabItem Header="机器人设置"><Grid>
-     <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
-     <DockPanel Margin="0,0,0,18">
-      <TextBox x:Name="SettingsSearch" Tag="搜索设置、功能或关键词" Width="230" DockPanel.Dock="Right" AutomationProperties.Name="搜索机器人设置"/>
-      <StackPanel VerticalAlignment="Center"><TextBlock Text="让小鲸按你的方式工作" FontSize="15" FontWeight="SemiBold"/><TextBlock x:Name="SettingsCount" Text="设置按主题整理，修改后统一保存。" Foreground="{StaticResource Muted}" FontSize="11" Margin="0,5,0,0"/></StackPanel>
-     </DockPanel>
-     <Border Grid.Row="1" Background="White" CornerRadius="12" BorderBrush="{StaticResource Line}" BorderThickness="1" Padding="6" Margin="0,0,0,18">
-      <ListBox x:Name="SettingsNav" Background="Transparent" BorderThickness="0" ItemContainerStyle="{StaticResource SettingsNavItem}" ScrollViewer.HorizontalScrollBarVisibility="Disabled" ScrollViewer.VerticalScrollBarVisibility="Disabled" ScrollViewer.CanContentScroll="False" AutomationProperties.Name="设置分类">
-       <ListBox.ItemsPanel><ItemsPanelTemplate><WrapPanel IsItemsHost="True"/></ItemsPanelTemplate></ListBox.ItemsPanel>
-       <ListBox.ItemTemplate><DataTemplate><StackPanel Orientation="Horizontal"><TextBlock Text="{Binding Name}" FontSize="11"/><TextBlock Text="{Binding Count}" Foreground="{StaticResource Muted}" FontSize="10" VerticalAlignment="Center" Margin="7,0,0,0"/></StackPanel></DataTemplate></ListBox.ItemTemplate>
-      </ListBox>
-     </Border>
-      <ScrollViewer x:Name="SettingsScroll" Grid.Row="2" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Padding="0,0,8,0">
-       <StackPanel><TextBlock x:Name="SettingsTitle" Text="对话与参与" FontSize="20" FontWeight="SemiBold"/><TextBlock x:Name="SettingsSubtitle" Text="决定什么时候回应，以及如何自然地参与聊天。" TextWrapping="Wrap" FontSize="11" Foreground="{StaticResource Muted}" Margin="0,6,0,12"/>
-        <TextBlock x:Name="SettingsContext" TextWrapping="Wrap" FontSize="10" Foreground="{StaticResource Muted}" Margin="0,0,0,8"/>
-        <DockPanel Margin="0,0,0,16"><Button x:Name="SettingsRefresh" Content="刷新额度" DockPanel.Dock="Right" Style="{StaticResource Quiet}" Margin="10,0,0,0"/><TextBlock x:Name="SettingsQuota" Text="点击刷新额度查看今日已用、上限与剩余量。" TextWrapping="Wrap" FontSize="10" LineHeight="17" Foreground="{StaticResource Muted}" VerticalAlignment="Center"/></DockPanel>
-        <StackPanel x:Name="Fields"/>
-        <StackPanel x:Name="SettingsEmpty" Visibility="Collapsed" Margin="25,50"><TextBlock Text="没有找到相关设置" FontSize="16" HorizontalAlignment="Center"/><TextBlock Text="试试“主动”“图片”或“额度”。" Foreground="{StaticResource Muted}" FontSize="12" HorizontalAlignment="Center" Margin="0,9,0,0"/></StackPanel>
-       </StackPanel>
-      </ScrollViewer>
-     <Border Grid.Row="3" BorderBrush="#E3E8F2" BorderThickness="0,1,0,0" Padding="0,15,0,0" Margin="0,16,0,0"><DockPanel>
-      <Button x:Name="SaveSettings" Content="保存机器人设置" Style="{StaticResource Primary}" DockPanel.Dock="Right" MinWidth="124"/>
-      <StackPanel VerticalAlignment="Center"><TextBlock x:Name="SettingsSaveHint" Text="保存此页行为设置" FontSize="12"/><TextBlock Text="媒体服务参数在连接与运行单独保存。" Foreground="{StaticResource Muted}" FontSize="10" Margin="0,4,0,0"/></StackPanel>
-     </DockPanel></Border>
-    </Grid></TabItem>
-    <TabItem Header="连接配置"><Grid>
-     <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
-     <StackPanel Margin="0,0,0,14"><WrapPanel Margin="0,0,0,10"><Button x:Name="OpenQuickSetup" Content="快速配置" Margin="0,0,8,0"/><Button x:Name="OpenAllSettings" Content="全部连接设置" Style="{StaticResource Quiet}"/></WrapPanel><Border x:Name="RuntimeCategoryBar" Background="White" CornerRadius="12" BorderBrush="{StaticResource Line}" BorderThickness="1" Padding="6"><ListBox x:Name="RuntimeNav" Background="Transparent" BorderThickness="0" ItemContainerStyle="{StaticResource SettingsNavItem}" ScrollViewer.HorizontalScrollBarVisibility="Disabled" ScrollViewer.VerticalScrollBarVisibility="Disabled" ScrollViewer.CanContentScroll="False" AutomationProperties.Name="连接配置分类"><ListBox.ItemsPanel><ItemsPanelTemplate><WrapPanel/></ItemsPanelTemplate></ListBox.ItemsPanel></ListBox></Border></StackPanel>
-     <ScrollViewer x:Name="RuntimeScroll" Grid.Row="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Padding="0,0,8,0"><StackPanel>
-      <TextBlock x:Name="RuntimeTitle" Text="QQ 连接" FontSize="20" FontWeight="SemiBold"/>
-      <TextBlock x:Name="RuntimeSubtitle" Foreground="{StaticResource Muted}" FontSize="11" TextWrapping="Wrap" Margin="0,6,0,18"/>
-      <Border x:Name="QuickSetupPanel" Style="{StaticResource Surface}" Padding="18" Margin="0,0,0,14" Visibility="Collapsed"><StackPanel>
-       <WrapPanel x:Name="QuickSteps" Margin="0,0,0,12"/>
-       <TextBlock x:Name="QuickNotice" Text="先完成基础连接，媒体、搜索和高级参数可以稍后配置。" Foreground="{StaticResource Muted}" FontSize="12" TextWrapping="Wrap" LineHeight="20"/>
-       <WrapPanel Margin="0,12,0,0"><Button x:Name="DetectEnvironment" Content="自动检测本机环境" Margin="0,0,8,8"/><Button x:Name="CheckSetup" Content="检查当前配置" Margin="0,0,8,8"/><Button x:Name="SetupGuide" Content="查看安装指引" Style="{StaticResource Quiet}" Margin="0,0,0,8"/></WrapPanel>
-       <StackPanel x:Name="QuickResults"/>
-      </StackPanel></Border>
-      <StackPanel x:Name="RuntimeFields"/>
-      <Expander x:Name="AdvancedEnv" Header="高级环境文件（自定义参数与排障）" Margin="0,6,0,0" Visibility="Collapsed"><StackPanel><TextBlock Text="包含连接凭据，适合自定义参数与排障。常用参数通过表单管理；管理员和回复行为的同名环境项仅提供缺失默认值，当前值请在机器人设置编辑。" Foreground="{StaticResource Muted}" FontSize="11" TextWrapping="Wrap" Margin="0,0,0,12"/><TextBox x:Name="Env" Height="290" FontFamily="Cascadia Mono, Consolas, Microsoft YaHei UI" AcceptsReturn="True" AcceptsTab="True" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto"/><Button x:Name="SaveEnv" Content="保存环境文件" HorizontalAlignment="Right" Margin="0,12,0,0"/></StackPanel></Expander>
-     </StackPanel></ScrollViewer>
-     <Border Grid.Row="2" BorderBrush="{StaticResource Line}" BorderThickness="0,1,0,0" Padding="0,15,0,0" Margin="0,16,0,0"><DockPanel><StackPanel DockPanel.Dock="Right" Orientation="Horizontal"><Button x:Name="QuickBack" Content="上一步" Visibility="Collapsed" Margin="0,0,8,0"/><Button x:Name="QuickNext" Content="下一步" Visibility="Collapsed" Style="{StaticResource Primary}"/><Button x:Name="SaveRuntime" Content="保存连接与媒体" Margin="0,0,10,0"/><Button x:Name="SaveRuntimeRestart" Content="保存并重新启动" Style="{StaticResource Primary}"/></StackPanel><StackPanel Margin="0,0,16,0" VerticalAlignment="Center"><TextBlock x:Name="RuntimeSaveScope" Text="保存本页所有分类；机器人设置中的草稿另行保存。" FontSize="10" TextWrapping="Wrap"/><TextBlock x:Name="RuntimeHint" Text="模型参数可热更新；连接地址、密钥和启动文件需重启。" Foreground="{StaticResource Muted}" FontSize="10" TextWrapping="Wrap" Margin="0,4,0,0"/></StackPanel></DockPanel></Border>
-    </Grid></TabItem>
-    <TabItem Header="人设与记忆"><Grid>
-     <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
-     <Border Background="White" CornerRadius="12" BorderBrush="{StaticResource Line}" BorderThickness="1" Padding="6" Margin="0,0,0,16"><ListBox x:Name="KnowledgeNav" Background="Transparent" BorderThickness="0" ItemContainerStyle="{StaticResource SettingsNavItem}" ScrollViewer.HorizontalScrollBarVisibility="Disabled" ScrollViewer.VerticalScrollBarVisibility="Disabled" AutomationProperties.Name="人设与记忆分类"><ListBox.ItemsPanel><ItemsPanelTemplate><WrapPanel/></ItemsPanelTemplate></ListBox.ItemsPanel></ListBox></Border>
-     <Grid Grid.Row="1" Margin="0,0,0,12"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-      <TextBox x:Name="KnowledgeSearch" Tag="搜索名称或内容" AutomationProperties.Name="搜索人设或记忆" Margin="0,0,10,0"/>
-      <Button x:Name="KnowledgeRefresh" Grid.Column="1" Content="刷新列表" Margin="0,0,8,0"/>
-      <Button x:Name="KnowledgeNew" Grid.Column="2" Content="新建人设" Style="{StaticResource Primary}"/>
-      <Button x:Name="Memory" Grid.Column="3" Content="打开目录" Visibility="Collapsed" Margin="8,0,0,0"/>
-     </Grid>
-     <DockPanel Grid.Row="2" Margin="2,0,2,12"><TextBlock x:Name="KnowledgeCount" Text="人设库" FontSize="13" FontWeight="SemiBold"/><TextBlock x:Name="KnowledgeStatus" Text="保存多套人设，在会话设置中自由选择。" Foreground="{StaticResource Muted}" FontSize="10" HorizontalAlignment="Right" VerticalAlignment="Center"/></DockPanel>
-     <Grid Grid.Row="3"><Grid.ColumnDefinitions><ColumnDefinition Width="0.85*" MinWidth="220"/><ColumnDefinition Width="16"/><ColumnDefinition Width="2*" MinWidth="360"/></Grid.ColumnDefinitions>
-      <Border Background="White" CornerRadius="14" BorderBrush="{StaticResource Line}" BorderThickness="1" Padding="8"><Grid>
-       <ListView x:Name="KnowledgeList" AutomationProperties.Name="人设与记忆列表"><ListView.ItemTemplate><DataTemplate><StackPanel>
-        <TextBlock Text="{Binding Name}" FontWeight="SemiBold" FontSize="12" TextTrimming="CharacterEllipsis"/>
-        <TextBlock Text="{Binding Meta}" FontSize="10" Foreground="{StaticResource Muted}" Margin="0,5,0,0" TextTrimming="CharacterEllipsis"/>
-        <TextBlock Text="{Binding Summary}" FontSize="10" Foreground="{StaticResource Muted}" Margin="0,5,0,0" TextTrimming="CharacterEllipsis"/>
-       </StackPanel></DataTemplate></ListView.ItemTemplate></ListView>
-       <TextBlock x:Name="KnowledgeEmpty" Text="暂无记录" TextWrapping="Wrap" TextAlignment="Center" Foreground="{StaticResource Muted}" FontSize="12" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="15" IsHitTestVisible="False" Visibility="Collapsed"/>
-      </Grid></Border>
-      <GridSplitter Grid.Column="1" Width="6" HorizontalAlignment="Center" VerticalAlignment="Stretch" Background="Transparent" ResizeDirection="Columns" ResizeBehavior="PreviousAndNext" AutomationProperties.Name="调整人设列表和编辑区宽度"/>
-      <Border Grid.Column="2" Background="White" CornerRadius="14" BorderBrush="{StaticResource Line}" BorderThickness="1" Padding="20"><Grid>
-       <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
-       <StackPanel><TextBlock x:Name="KnowledgeDetailTitle" Text="当前全局人设" FontSize="18" FontWeight="SemiBold"/><TextBlock x:Name="PersonaHint" Text="全局人设用于未指定专属人设的会话。" TextWrapping="Wrap" Foreground="{StaticResource Muted}" FontSize="10" LineHeight="17" Margin="0,7,0,12"/></StackPanel>
-       <StackPanel Grid.Row="1" Margin="0,0,0,12"><TextBlock x:Name="KnowledgeNameLabel" Text="名称" FontSize="11" Margin="0,0,0,6"/><TextBox x:Name="KnowledgeName" Tag="为这套人设起一个名字" AutomationProperties.Name="人设名称或记忆文件名"/></StackPanel>
-       <TextBox x:Name="Persona" Grid.Row="2" AcceptsReturn="True" AcceptsTab="True" TextWrapping="Wrap" VerticalContentAlignment="Top" FontSize="12" VerticalScrollBarVisibility="Auto" Padding="12" AutomationProperties.Name="人设或记忆内容"/>
-       <StackPanel Grid.Row="3" Margin="0,12,0,0"><TextBlock x:Name="KnowledgeError" Foreground="{StaticResource Danger}" FontSize="11" TextWrapping="Wrap" Visibility="Collapsed" Margin="0,0,0,8"/>
-        <DockPanel><TextBlock x:Name="KnowledgeWordCount" Foreground="{StaticResource Muted}" FontSize="10" VerticalAlignment="Center"/><Button x:Name="SavePersona" Content="保存全局人设" Style="{StaticResource Primary}" HorizontalAlignment="Right"/></DockPanel>
-        <WrapPanel Margin="0,8,0,0"><Button x:Name="ApplyPersona" Content="设为全局人设" Style="{StaticResource Quiet}" Padding="8,7" Visibility="Collapsed"/><Button x:Name="CopyPersona" Content="另存为人设" Style="{StaticResource Quiet}" Padding="8,7" Visibility="Collapsed"/><Button x:Name="DiscardKnowledge" Content="放弃编辑" Style="{StaticResource Quiet}" Padding="8,7" Visibility="Collapsed"/><Button x:Name="DeleteKnowledge" Content="删除" Style="{StaticResource Quiet}" Foreground="{StaticResource Danger}" Padding="8,7" Visibility="Collapsed"/></WrapPanel>
-        <WrapPanel Margin="0,6,0,0"><Button x:Name="KnowledgeSources" Content="查看来源与版本" Style="{StaticResource Quiet}" Visibility="Collapsed"/><Button x:Name="LockMemory" Content="切换记忆锁定" Style="{StaticResource Quiet}" Visibility="Collapsed"/><Button x:Name="RestoreMemory" Content="恢复上一版本" Style="{StaticResource Quiet}" Visibility="Collapsed"/><Button x:Name="ActivateLexicon" Content="确认并使用" Style="{StaticResource Quiet}" Visibility="Collapsed"/><Button x:Name="DisableLexicon" Content="停用词条" Style="{StaticResource Quiet}" Visibility="Collapsed"/><Button x:Name="ReviewMemory" Content="整理此会话" Style="{StaticResource Quiet}" Visibility="Collapsed"/></WrapPanel>
-       </StackPanel>
-      </Grid></Border>
-     </Grid>
-    </Grid></TabItem>
-    <TabItem Header="启动诊断"><Border Style="{StaticResource Surface}"><Grid>
-     <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
-     <DockPanel Margin="0,0,0,18"><Button x:Name="RunDiagnostics" Content="重新检查" Style="{StaticResource Primary}" DockPanel.Dock="Right"/><StackPanel><TextBlock x:Name="DiagnosticSummary" Text="正在检查启动环境…" FontSize="16" FontWeight="SemiBold"/><TextBlock Text="检查依赖、配置路径和访问权限。" Foreground="{StaticResource Muted}" FontSize="11" Margin="0,7,0,0"/></StackPanel></DockPanel>
-     <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto"><StackPanel x:Name="Diagnostics"/></ScrollViewer>
-     <Button x:Name="OpenLogs" Grid.Row="2" Content="打开日志目录" HorizontalAlignment="Right" Margin="0,15,0,0"/>
-    </Grid></Border></TabItem>
-    <TabItem Header="QQ 活动"><Grid>
+    <TabItem Tag="Activity" Header="QQ 活动"><Grid>
      <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
      <Border Background="White" CornerRadius="12" BorderBrush="{StaticResource Line}" BorderThickness="1" Padding="16" Margin="0,0,0,15">
       <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="155"/><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
-       <ComboBox x:Name="SocialSection" SelectedIndex="0" AutomationProperties.Name="活动类型"><ComboBoxItem Content="联系人与群"/><ComboBoxItem Content="聊天记录"/><ComboBoxItem Content="群友记忆"/><ComboBoxItem Content="QQ 收藏表情"/><ComboBoxItem Content="定时提醒"/><ComboBoxItem Content="QQ 事件"/><ComboBoxItem Content="动作结果"/><ComboBoxItem Content="模型会话"/><ComboBoxItem Content="能力状态"/><ComboBoxItem Content="自主想法"/><ComboBoxItem Content="兴趣偏好"/><ComboBoxItem Content="自主行动摘要"/><ComboBoxItem Content="群内用语"/><ComboBoxItem Content="后台学习记录"/></ComboBox>
+       <ComboBox x:Name="SocialSection" SelectedIndex="0" AutomationProperties.Name="活动类型"><ComboBoxItem Tag="contacts" Content="联系人与群"/><ComboBoxItem Tag="messages" Content="聊天记录"/><ComboBoxItem Tag="stickers" Content="QQ 收藏表情"/><ComboBoxItem Tag="tasks" Content="定时提醒"/><ComboBoxItem Tag="thoughts" Content="自主想法"/><ComboBoxItem Tag="interests" Content="兴趣偏好"/><ComboBoxItem Tag="decisions" Content="自主行动摘要"/><ComboBoxItem Tag="memories" Content="群友记忆"/><ComboBoxItem Tag="lexicon" Content="群内用语"/><ComboBoxItem Tag="events" Content="QQ 事件"/><ComboBoxItem Tag="actions" Content="动作结果"/><ComboBoxItem Tag="turns" Content="模型会话"/><ComboBoxItem Tag="learning" Content="后台学习记录"/><ComboBoxItem Tag="capabilities" Content="能力状态"/></ComboBox>
        <TextBox x:Name="SocialSearch" Grid.Column="1" Tag="搜索名字、会话或内容…" Margin="12,0" AutomationProperties.Name="搜索活动"/>
        <Button x:Name="SocialRefresh" Grid.Column="2" Content="刷新列表"/>
        <Button x:Name="SocialContacts" Grid.Column="3" Content="同步联系人" Style="{StaticResource Primary}" Margin="9,0,0,0"/>
@@ -205,6 +112,99 @@
       </Border>
      </Grid>
     </Grid></TabItem>
+    <TabItem Margin="0,14,0,6" Tag="Knowledge" Header="人设与记忆"><Grid>
+     <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+     <Border Background="White" CornerRadius="12" BorderBrush="{StaticResource Line}" BorderThickness="1" Padding="6" Margin="0,0,0,16"><ListBox x:Name="KnowledgeNav" Background="Transparent" BorderThickness="0" ItemContainerStyle="{StaticResource SettingsNavItem}" ScrollViewer.HorizontalScrollBarVisibility="Disabled" ScrollViewer.VerticalScrollBarVisibility="Disabled" AutomationProperties.Name="人设与记忆分类"><ListBox.ItemsPanel><ItemsPanelTemplate><WrapPanel/></ItemsPanelTemplate></ListBox.ItemsPanel></ListBox></Border>
+     <Grid Grid.Row="1" Margin="0,0,0,12"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+      <TextBox x:Name="KnowledgeSearch" Tag="搜索名称或内容" AutomationProperties.Name="搜索人设或记忆" Margin="0,0,10,0"/>
+      <Button x:Name="KnowledgeRefresh" Grid.Column="1" Content="刷新列表" Margin="0,0,8,0"/>
+      <Button x:Name="KnowledgeNew" Grid.Column="2" Content="新建人设" Style="{StaticResource Primary}"/>
+      <Button x:Name="Memory" Grid.Column="3" Content="打开目录" Visibility="Collapsed" Margin="8,0,0,0"/>
+     </Grid>
+     <DockPanel Grid.Row="2" Margin="2,0,2,12"><TextBlock x:Name="KnowledgeCount" Text="人设库" FontSize="13" FontWeight="SemiBold"/><TextBlock x:Name="KnowledgeStatus" Text="保存多套人设，在会话设置中自由选择。" Foreground="{StaticResource Muted}" FontSize="10" HorizontalAlignment="Right" VerticalAlignment="Center"/></DockPanel>
+     <Grid Grid.Row="3"><Grid.ColumnDefinitions><ColumnDefinition Width="0.85*" MinWidth="220"/><ColumnDefinition Width="16"/><ColumnDefinition Width="2*" MinWidth="360"/></Grid.ColumnDefinitions>
+      <Border Background="White" CornerRadius="14" BorderBrush="{StaticResource Line}" BorderThickness="1" Padding="8"><Grid>
+       <ListView x:Name="KnowledgeList" AutomationProperties.Name="人设与记忆列表"><ListView.ItemTemplate><DataTemplate><StackPanel>
+        <TextBlock Text="{Binding Name}" FontWeight="SemiBold" FontSize="12" TextTrimming="CharacterEllipsis"/>
+        <TextBlock Text="{Binding Meta}" FontSize="10" Foreground="{StaticResource Muted}" Margin="0,5,0,0" TextTrimming="CharacterEllipsis"/>
+        <TextBlock Text="{Binding Summary}" FontSize="10" Foreground="{StaticResource Muted}" Margin="0,5,0,0" TextTrimming="CharacterEllipsis"/>
+       </StackPanel></DataTemplate></ListView.ItemTemplate></ListView>
+       <TextBlock x:Name="KnowledgeEmpty" Text="暂无记录" TextWrapping="Wrap" TextAlignment="Center" Foreground="{StaticResource Muted}" FontSize="12" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="15" IsHitTestVisible="False" Visibility="Collapsed"/>
+      </Grid></Border>
+      <GridSplitter Grid.Column="1" Width="6" HorizontalAlignment="Center" VerticalAlignment="Stretch" Background="Transparent" ResizeDirection="Columns" ResizeBehavior="PreviousAndNext" AutomationProperties.Name="调整人设列表和编辑区宽度"/>
+      <Border Grid.Column="2" Background="White" CornerRadius="14" BorderBrush="{StaticResource Line}" BorderThickness="1" Padding="20"><Grid>
+       <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+       <StackPanel><TextBlock x:Name="KnowledgeDetailTitle" Text="当前全局人设" FontSize="18" FontWeight="SemiBold"/><TextBlock x:Name="PersonaHint" Text="全局人设用于未指定专属人设的会话。" TextWrapping="Wrap" Foreground="{StaticResource Muted}" FontSize="10" LineHeight="17" Margin="0,7,0,12"/></StackPanel>
+       <StackPanel Grid.Row="1" Margin="0,0,0,12"><TextBlock x:Name="KnowledgeNameLabel" Text="名称" FontSize="11" Margin="0,0,0,6"/><TextBox x:Name="KnowledgeName" Tag="为这套人设起一个名字" AutomationProperties.Name="人设名称或记忆文件名"/></StackPanel>
+       <TextBox x:Name="Persona" Grid.Row="2" AcceptsReturn="True" AcceptsTab="True" TextWrapping="Wrap" VerticalContentAlignment="Top" FontSize="12" VerticalScrollBarVisibility="Auto" Padding="12" AutomationProperties.Name="人设或记忆内容"/>
+       <StackPanel Grid.Row="3" Margin="0,12,0,0"><TextBlock x:Name="KnowledgeError" Foreground="{StaticResource Danger}" FontSize="11" TextWrapping="Wrap" Visibility="Collapsed" Margin="0,0,0,8"/>
+        <DockPanel><TextBlock x:Name="KnowledgeWordCount" Foreground="{StaticResource Muted}" FontSize="10" VerticalAlignment="Center"/><Button x:Name="SavePersona" Content="保存全局人设" Style="{StaticResource Primary}" HorizontalAlignment="Right"/></DockPanel>
+        <WrapPanel Margin="0,8,0,0"><Button x:Name="ApplyPersona" Content="设为全局人设" Style="{StaticResource Quiet}" Padding="8,7" Visibility="Collapsed"/><Button x:Name="CopyPersona" Content="另存为人设" Style="{StaticResource Quiet}" Padding="8,7" Visibility="Collapsed"/><Button x:Name="DiscardKnowledge" Content="放弃编辑" Style="{StaticResource Quiet}" Padding="8,7" Visibility="Collapsed"/><Button x:Name="DeleteKnowledge" Content="删除" Style="{StaticResource Quiet}" Foreground="{StaticResource Danger}" Padding="8,7" Visibility="Collapsed"/></WrapPanel>
+        <WrapPanel Margin="0,6,0,0"><Button x:Name="KnowledgeSources" Content="查看来源与版本" Style="{StaticResource Quiet}" Visibility="Collapsed"/><Button x:Name="LockMemory" Content="切换记忆锁定" Style="{StaticResource Quiet}" Visibility="Collapsed"/><Button x:Name="RestoreMemory" Content="恢复上一版本" Style="{StaticResource Quiet}" Visibility="Collapsed"/><Button x:Name="ActivateLexicon" Content="确认并使用" Style="{StaticResource Quiet}" Visibility="Collapsed"/><Button x:Name="DisableLexicon" Content="停用词条" Style="{StaticResource Quiet}" Visibility="Collapsed"/><Button x:Name="ReviewMemory" Content="整理此会话" Style="{StaticResource Quiet}" Visibility="Collapsed"/></WrapPanel>
+       </StackPanel>
+      </Grid></Border>
+     </Grid>
+    </Grid></TabItem>
+    <TabItem Tag="Settings" Header="机器人设置"><Grid>
+     <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+     <DockPanel Margin="0,0,0,18">
+      <TextBox x:Name="SettingsSearch" Tag="搜索设置、功能或关键词" Width="230" DockPanel.Dock="Right" AutomationProperties.Name="搜索机器人设置"/>
+      <StackPanel VerticalAlignment="Center"><TextBlock Text="让小鲸按你的方式工作" FontSize="15" FontWeight="SemiBold"/><TextBlock x:Name="SettingsCount" Text="设置按主题整理，修改后统一保存。" Foreground="{StaticResource Muted}" FontSize="11" Margin="0,5,0,0"/></StackPanel>
+     </DockPanel>
+     <Border Grid.Row="1" Background="White" CornerRadius="12" BorderBrush="{StaticResource Line}" BorderThickness="1" Padding="6" Margin="0,0,0,18">
+      <ListBox x:Name="SettingsNav" Background="Transparent" BorderThickness="0" ItemContainerStyle="{StaticResource SettingsNavItem}" ScrollViewer.HorizontalScrollBarVisibility="Disabled" ScrollViewer.VerticalScrollBarVisibility="Disabled" ScrollViewer.CanContentScroll="False" AutomationProperties.Name="设置分类">
+       <ListBox.ItemsPanel><ItemsPanelTemplate><WrapPanel IsItemsHost="True"/></ItemsPanelTemplate></ListBox.ItemsPanel>
+       <ListBox.ItemTemplate><DataTemplate><StackPanel Orientation="Horizontal"><TextBlock Text="{Binding Name}" FontSize="11"/><TextBlock Text="{Binding Count}" Foreground="{StaticResource Muted}" FontSize="10" VerticalAlignment="Center" Margin="7,0,0,0"/></StackPanel></DataTemplate></ListBox.ItemTemplate>
+      </ListBox>
+     </Border>
+      <ScrollViewer x:Name="SettingsScroll" Grid.Row="2" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Padding="0,0,8,0">
+       <StackPanel><TextBlock x:Name="SettingsTitle" Text="对话与参与" FontSize="20" FontWeight="SemiBold"/><TextBlock x:Name="SettingsSubtitle" Text="决定什么时候回应，以及如何自然地参与聊天。" TextWrapping="Wrap" FontSize="11" Foreground="{StaticResource Muted}" Margin="0,6,0,12"/>
+        <TextBlock x:Name="SettingsContext" TextWrapping="Wrap" FontSize="10" Foreground="{StaticResource Muted}" Margin="0,0,0,8"/>
+        <DockPanel Margin="0,0,0,16"><Button x:Name="SettingsRefresh" Content="刷新额度" DockPanel.Dock="Right" Style="{StaticResource Quiet}" Margin="10,0,0,0"/><TextBlock x:Name="SettingsQuota" Text="点击刷新额度查看今日已用、上限与剩余量。" TextWrapping="Wrap" FontSize="10" LineHeight="17" Foreground="{StaticResource Muted}" VerticalAlignment="Center"/></DockPanel>
+        <StackPanel x:Name="Fields"/>
+        <StackPanel x:Name="SettingsEmpty" Visibility="Collapsed" Margin="25,50"><TextBlock Text="没有找到相关设置" FontSize="16" HorizontalAlignment="Center"/><TextBlock Text="试试“主动”“图片”或“额度”。" Foreground="{StaticResource Muted}" FontSize="12" HorizontalAlignment="Center" Margin="0,9,0,0"/></StackPanel>
+       </StackPanel>
+      </ScrollViewer>
+     <Border Grid.Row="3" BorderBrush="#E3E8F2" BorderThickness="0,1,0,0" Padding="0,15,0,0" Margin="0,16,0,0"><DockPanel>
+      <Button x:Name="SaveSettings" Content="保存机器人设置" Style="{StaticResource Primary}" DockPanel.Dock="Right" MinWidth="124"/>
+      <StackPanel VerticalAlignment="Center"><TextBlock x:Name="SettingsSaveHint" Text="保存此页行为设置" FontSize="12"/><TextBlock Text="媒体服务参数在连接与运行单独保存。" Foreground="{StaticResource Muted}" FontSize="10" Margin="0,4,0,0"/></StackPanel>
+     </DockPanel></Border>
+    </Grid></TabItem>
+    <TabItem Tag="Runtime" Header="连接与运行"><Grid>
+     <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+     <StackPanel Margin="0,0,0,14"><WrapPanel Margin="0,0,0,10"><Button x:Name="OpenQuickSetup" Content="快速配置" Margin="0,0,8,0"/><Button x:Name="OpenAllSettings" Content="全部连接设置" Style="{StaticResource Quiet}"/></WrapPanel><Border x:Name="RuntimeCategoryBar" Background="White" CornerRadius="12" BorderBrush="{StaticResource Line}" BorderThickness="1" Padding="6"><ListBox x:Name="RuntimeNav" Background="Transparent" BorderThickness="0" ItemContainerStyle="{StaticResource SettingsNavItem}" ScrollViewer.HorizontalScrollBarVisibility="Disabled" ScrollViewer.VerticalScrollBarVisibility="Disabled" ScrollViewer.CanContentScroll="False" AutomationProperties.Name="连接配置分类"><ListBox.ItemsPanel><ItemsPanelTemplate><WrapPanel/></ItemsPanelTemplate></ListBox.ItemsPanel></ListBox></Border></StackPanel>
+     <ScrollViewer x:Name="RuntimeScroll" Grid.Row="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Padding="0,0,8,0"><StackPanel>
+      <TextBlock x:Name="RuntimeTitle" Text="QQ 连接" FontSize="20" FontWeight="SemiBold"/>
+      <TextBlock x:Name="RuntimeSubtitle" Foreground="{StaticResource Muted}" FontSize="11" TextWrapping="Wrap" Margin="0,6,0,18"/>
+      <Border x:Name="QuickSetupPanel" Style="{StaticResource Surface}" Padding="18" Margin="0,0,0,14" Visibility="Collapsed"><StackPanel>
+       <WrapPanel x:Name="QuickSteps" Margin="0,0,0,12"/>
+       <TextBlock x:Name="QuickNotice" Text="先完成基础连接，媒体、搜索和高级参数可以稍后配置。" Foreground="{StaticResource Muted}" FontSize="12" TextWrapping="Wrap" LineHeight="20"/>
+       <WrapPanel Margin="0,12,0,0"><Button x:Name="DetectEnvironment" Content="自动检测本机环境" Margin="0,0,8,8"/><Button x:Name="CheckSetup" Content="检查当前配置" Margin="0,0,8,8"/><Button x:Name="SetupGuide" Content="查看安装指引" Style="{StaticResource Quiet}" Margin="0,0,0,8"/></WrapPanel>
+       <StackPanel x:Name="QuickResults"/>
+      </StackPanel></Border>
+      <StackPanel x:Name="RuntimeFields"/>
+      <Expander x:Name="AdvancedEnv" Header="高级环境文件（自定义参数与排障）" Margin="0,6,0,0" Visibility="Collapsed"><StackPanel><TextBlock Text="包含连接凭据，适合自定义参数与排障。常用参数通过表单管理；管理员和回复行为的同名环境项仅提供缺失默认值，当前值请在机器人设置编辑。" Foreground="{StaticResource Muted}" FontSize="11" TextWrapping="Wrap" Margin="0,0,0,12"/><TextBox x:Name="Env" Height="290" FontFamily="Cascadia Mono, Consolas, Microsoft YaHei UI" AcceptsReturn="True" AcceptsTab="True" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto"/><Button x:Name="SaveEnv" Content="保存环境文件" HorizontalAlignment="Right" Margin="0,12,0,0"/></StackPanel></Expander>
+     </StackPanel></ScrollViewer>
+     <Border Grid.Row="2" BorderBrush="{StaticResource Line}" BorderThickness="0,1,0,0" Padding="0,15,0,0" Margin="0,16,0,0"><DockPanel><StackPanel DockPanel.Dock="Right" Orientation="Horizontal"><Button x:Name="QuickBack" Content="上一步" Visibility="Collapsed" Margin="0,0,8,0"/><Button x:Name="QuickNext" Content="下一步" Visibility="Collapsed" Style="{StaticResource Primary}"/><Button x:Name="SaveRuntime" Content="保存连接与媒体" Margin="0,0,10,0"/><Button x:Name="SaveRuntimeRestart" Content="保存并重新启动" Style="{StaticResource Primary}"/></StackPanel><StackPanel Margin="0,0,16,0" VerticalAlignment="Center"><TextBlock x:Name="RuntimeSaveScope" Text="保存本页所有分类；机器人设置中的草稿另行保存。" FontSize="10" TextWrapping="Wrap"/><TextBlock x:Name="RuntimeHint" Text="模型参数可热更新；连接地址、密钥和启动文件需重启。" Foreground="{StaticResource Muted}" FontSize="10" TextWrapping="Wrap" Margin="0,4,0,0"/></StackPanel></DockPanel></Border>
+    </Grid></TabItem>
+    <TabItem Margin="0,14,0,6" Tag="Logs" Header="工作日志"><Border Style="{StaticResource Surface}"><Grid>
+     <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+     <Grid Margin="0,0,0,17"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="114"/><ColumnDefinition Width="Auto"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+      <TextBox x:Name="LogSearch" Tag="搜索日志内容…" ToolTip="搜索日志" Margin="0,0,10,0"/>
+      <ComboBox x:Name="LogFilter" Grid.Column="1" SelectedIndex="0" VerticalContentAlignment="Center"><ComboBoxItem Content="全部日志"/><ComboBoxItem Content="仅错误"/><ComboBoxItem Content="桥接"/><ComboBoxItem Content="NapCat"/></ComboBox>
+      <Button x:Name="Pause" Grid.Column="2" Content="暂停滚动" Margin="10,0,8,0"/><Button x:Name="ExportLogs" Grid.Column="3" Content="导出日志"/>
+     </Grid>
+     <Grid Grid.Row="1"><TextBox x:Name="Logs" IsReadOnly="True" FontFamily="Cascadia Mono, Consolas, Microsoft YaHei UI" FontSize="12" Background="#F8FAFD" Padding="15" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto"/>
+      <StackPanel x:Name="LogEmpty" VerticalAlignment="Center" HorizontalAlignment="Center" IsHitTestVisible="False"><TextBlock Text="还没有工作日志" FontSize="16" Foreground="#8291AC" HorizontalAlignment="Center"/><TextBlock Text="启动机器人后，连接与运行记录会出现在这里。" FontSize="11" Foreground="#94A0B4" Margin="0,9,0,0"/></StackPanel>
+     </Grid>
+     <DockPanel Grid.Row="2" Margin="0,12,0,0"><Button x:Name="Clear" Content="清空窗口" Style="{StaticResource Quiet}" DockPanel.Dock="Right" Padding="7,0" FontSize="11"/><TextBlock x:Name="LogCount" Text="保留最近 1500 条日志" Foreground="#8390A6" FontSize="10"/></DockPanel>
+    </Grid></Border></TabItem>
+    <TabItem Tag="Diagnostics" Header="启动诊断"><Border Style="{StaticResource Surface}"><Grid>
+     <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+     <DockPanel Margin="0,0,0,18"><Button x:Name="RunDiagnostics" Content="重新检查" Style="{StaticResource Primary}" DockPanel.Dock="Right"/><StackPanel><TextBlock x:Name="DiagnosticSummary" Text="正在检查启动环境…" FontSize="16" FontWeight="SemiBold"/><TextBlock Text="检查依赖、配置路径和访问权限。" Foreground="{StaticResource Muted}" FontSize="11" Margin="0,7,0,0"/></StackPanel></DockPanel>
+     <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto"><StackPanel x:Name="Diagnostics"/></ScrollViewer>
+     <Button x:Name="OpenLogs" Grid.Row="2" Content="打开日志目录" HorizontalAlignment="Right" Margin="0,15,0,0"/>
+    </Grid></Border></TabItem>
    </TabControl>
    <Border x:Name="ErrorBanner" Grid.Row="1" Grid.Column="1" VerticalAlignment="Top" Margin="28,96,28,0" Background="#FFF1F2" BorderBrush="#F5D7DD" BorderThickness="1" CornerRadius="9" Padding="13,10" Visibility="Collapsed" Panel.ZIndex="10">
     <DockPanel><TextBlock x:Name="LastError" Foreground="#A43D52" TextWrapping="Wrap" FontSize="11"/></DockPanel>

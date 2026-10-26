@@ -28,15 +28,15 @@ partial class App
         Find<Button>("SocialContacts").Click+=(s,e)=>SocialRequest("refresh_contacts");
         Find<Button>("SocialBlock").Click+=(s,e)=>SocialRequest("block");
         Find<Button>("SocialUnblock").Click+=(s,e)=>SocialRequest("block",false);
-        Find<Button>("SocialSave").Click+=(s,e)=>{if(Find<ComboBox>("SocialSection").SelectedIndex==2){if(socialSelection!=null)OpenFriendMemory(socialSelection.Id);}else SocialRequest(Find<ComboBox>("SocialSection").SelectedIndex==3?"collect_sticker":Find<ComboBox>("SocialSection").SelectedIndex==9?"defer_thought":"edit_interest");};
+        Find<Button>("SocialSave").Click+=(s,e)=>{if(SocialSection==2){if(socialSelection!=null)OpenFriendMemory(socialSelection.Id);}else SocialRequest(SocialSection==3?"collect_sticker":SocialSection==9?"defer_thought":"edit_interest");};
         Find<Button>("SocialDelete").Click+=(s,e)=>SocialRequest("delete");
         Find<Button>("SocialReset").Click+=(s,e)=>SocialRequest("reset_session");
         Find<Button>("SocialProfile").Click+=(s,e)=>EditProfile();
         Find<TextBox>("SocialSearch").KeyDown+=(s,e)=>{if(e.Key==Key.Enter){e.Handled=true;SocialRequest();}if(e.Key==Key.Escape){Find<TextBox>("SocialSearch").Clear();e.Handled=true;}};
         Find<ComboBox>("SocialSection").SelectionChanged+=(s,e)=>{
             if(loading)return;
-            if(!DiscardMemoryEdit()){loading=true;Find<ComboBox>("SocialSection").SelectedIndex=visibleSocialSection;loading=false;return;}
-            visibleSocialSection=Find<ComboBox>("SocialSection").SelectedIndex;
+            if(!DiscardMemoryEdit()){loading=true;SocialSection=visibleSocialSection;loading=false;return;}
+            visibleSocialSection=SocialSection;
             Find<Button>("SocialContacts").Visibility=visibleSocialSection==0?Visibility.Visible:Visibility.Collapsed;
             SocialRequest();
         };
@@ -59,7 +59,7 @@ partial class App
         Find<Button>("SettingsRefresh").IsEnabled=!busy&&!settingsStatusBusy;
         Find<Button>("SocialRefresh").IsEnabled=!busy;Find<Button>("SocialContacts").IsEnabled=!busy;Find<ComboBox>("SocialSection").IsEnabled=!busy;
         Find<TextBox>("SocialSearch").IsEnabled=!busy;Find<StackPanel>("SocialActionPanel").IsEnabled=!busy;Find<TextBox>("SocialDetail").IsEnabled=!busy;
-        Find<Button>("SocialRefresh").Content=busy?"读取中…":Find<ComboBox>("SocialSection").SelectedIndex==3?"刷新 QQ 收藏":"刷新列表";
+        Find<Button>("SocialRefresh").Content=busy?"读取中…":SocialSection==3?"刷新 QQ 收藏":"刷新列表";
     }
     static void RenderActivity(Dictionary<string,object> message) {
         if(profileDialog!=null&&message.ContainsKey("op")&&(string)message["op"]=="profile")profileDialog.Close();
@@ -102,9 +102,9 @@ partial class App
         if(!loading)ReconcileDirtySettings();
     }
     static void ShowActivityDetail(SocialRow row) {
-        bool memory=Find<ComboBox>("SocialSection").SelectedIndex==10;
+        bool memory=SocialSection==10;
         loading=true;
-        int section=Find<ComboBox>("SocialSection").SelectedIndex;
+        int section=SocialSection;
         var editor=Find<TextBox>("SocialDetail");editor.IsReadOnly=!memory;
         editor.Text=row==null?"":memory?row.Text:row.Detail;
         editor.Background=memory?Color("#FAFBFE"):Brushes.Transparent;editor.BorderThickness=memory?new Thickness(1):new Thickness(0);editor.Padding=memory?new Thickness(12):new Thickness(0);
