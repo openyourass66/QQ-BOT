@@ -328,7 +328,8 @@ export class SocialEngine {
         if (imageHash(Buffer.from(image.data, 'base64')) !== s.analysis.imageHash) throw new Error('表情图片与理解记录不一致，请先用 qq_sticker_image 重新分析');
         if (s.analysis.confidence === 'low') throw new Error('这张表情含义尚不确定，请结合上下文重新看图分析，或选择其他已理解的表情');
         if(ctx.autonomous&&this.autonomy.lastSticker(ctx.chat,s.id)>Date.now()-this.settings().social.stickerRepeatHours*3600000)throw new Error('这张表情最近已在当前会话使用，请换一张或保持安静');
-        const result = await this.send(ctx, [...await this.decorators(ctx, a), { type: 'image', data: { file: toFile(s.file) } }]);
+        // QQ uses the image subtype to distinguish custom stickers from ordinary pictures.
+        const result = await this.send(ctx, [...await this.decorators(ctx, a), { type: 'image', data: { file: toFile(s.file), sub_type: 1, summary: '[动画表情]' } }]);
         ctx.pendingStickerSends?.delete(s.id);
         await this.autonomy.usedSticker(ctx.chat,s.id);
         await this.store.update(d => { const s = d.stickers.find(s => s.id === a.sticker_id); if (s) s.uses++; }); return result;

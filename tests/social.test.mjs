@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, readFile, writeFile, mkdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { SocialStore } from '../dist/qq/social-store.js';
 import { SocialEngine, parseShanghaiTime } from '../dist/qq/social-engine.js';
 import { MediaService, downloadPublic } from '../dist/services/media.js';
@@ -123,10 +124,34 @@ test('表情收藏转存、备注、查看和发送闭环；不读取库外文�
   assert.equal((await call('qq_stickers',{query:'赞同'})).length,1);
   assert.ok((await call('qq_sticker_image',{sticker_id:sticker.id})).content.some(c=>c.type==='image'));
   await call('qq_send_sticker',{sticker_id:sticker.id}); assert.equal(store.snapshot().stickers[0].uses,1);
-  assert.ok(calls.some(c=>Array.isArray(c.params.message)&&c.params.message[0].type==='image'));
+  const sent=calls.find(c=>c.action==='send_group_msg').params.message[0];
+  assert.equal(sent.type,'image');assert.equal(sent.data.sub_type,1);assert.equal(sent.data.summary,'[动画表情]');
   await assert.rejects(media.bytes(join(dir,'social.json'),new AbortController().signal),/媒体库/);
   settings.social.stickersEnabled=false; await assert.rejects(call('qq_send_sticker',{sticker_id:sticker.id}),/关闭/);
 }));
+for (const chat of ['group:30001','private:20001']) for (const [extension,encoded] of [
+  ['png','iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jP1kAAAAASUVORK5CYII='],
+  ['gif','R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7'],
+]) test(`${chat} 的 ${extension} 收藏按自定义表情发送，普通图片保持原格式`,()=>fixture(async({call,store,media,calls,ctx})=>{
+  const buffer=Buffer.from(encoded,'base64'),file=await media.save(buffer,'.'+extension);
+  await store.add(entry(-12,{chat,segments:[{type:'image',data:{file}}]}));
+  const context=ctx();context.chat=chat;
+  const sticker=await call('qq_collect_sticker',{message_id:-12},context);
+  await call('qq_send_sticker',{sticker_id:sticker.id,reply_to:-12,...(chat.startsWith('group:')?{at_user:20001}:{})},context);
+  const action=chat.startsWith('group:')?'send_group_msg':'send_private_msg';
+  const message=calls.find(c=>c.action===action).params.message;
+  assert.deepEqual(message.slice(0,-1),[{type:'reply',data:{id:'-12'}},...(chat.startsWith('group:')?[{type:'at',data:{qq:'20001'}}]:[])]);
+  const sent=message.at(-1);
+  assert.equal(sent.type,'image');assert.equal(sent.data.sub_type,1);assert.equal(sent.data.summary,'[动画表情]');
+  assert.deepEqual(await readFile(fileURLToPath(sent.data.file)),buffer);
+  assert.equal(store.message(chat,100).segments.at(-1).data.sub_type,1);
+  assert.equal(store.snapshot().stickers[0].uses,1);
+  await call('qq_send_image',{source:file},context);
+  const ordinary=calls.filter(c=>c.action===action).at(-1).params.message[0];
+  assert.equal(ordinary.type,'image');assert.equal(ordinary.data.sub_type,undefined);assert.equal(ordinary.data.summary,undefined);
+  assert.deepEqual(await readFile(fileURLToPath(ordinary.data.file)),buffer);
+}));
+
 test('撤回核验自己的消息与会话，负消息 ID 可用；合并转发可展开', () => fixture(async ({store,call,engine,ctx,calls}) => {
   await store.add(entry(-1));
   await assert.rejects(engine.legacy('qq_recall',{message_id:-1},ctx()),/只能撤回/);
