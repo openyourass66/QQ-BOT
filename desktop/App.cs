@@ -31,6 +31,10 @@ partial class App
     static Process host;
     static StreamWriter hostInput;
     static string root;
+    static string dataRoot;
+    static string nodeExecutable;
+    static string startupArguments = "";
+    static string launchDirectory;
     static JavaScriptSerializer json = new JavaScriptSerializer { MaxJsonLength = 4194304 };
     static ConcurrentQueue<string> events = new ConcurrentQueue<string>();
     static Dictionary<string, Control> fields = new Dictionary<string, Control>();
@@ -256,10 +260,49 @@ partial class App
             Find<TextBlock>("Uptime").Text = "运行 " + (int)elapsed.TotalHours + elapsed.ToString(@"\:mm\:ss");
         }
     }
+    static string QuoteArgument(string value) {
+        var text = new StringBuilder("\"");
+        int slashes = 0;
+        foreach (char c in value) {
+            if (c == '\\') { slashes++; continue; }
+            text.Append('\\', c == '"' ? slashes * 2 + 1 : slashes);
+            text.Append(c); slashes = 0;
+        }
+        text.Append('\\', slashes * 2); text.Append('"'); return text.ToString();
+    }
+    static void ResolveStartupPaths(string[] args) {
+        launchDirectory = Environment.CurrentDirectory;
+        nodeExecutable = Path.Combine(root, "runtime/node.exe");
+        if (!File.Exists(nodeExecutable)) {
+            if (File.Exists(Path.Combine(root,"release-manifest.json"))) throw new Exception("程序缺少内置运行环境，请重新解压完整程序。");
+            nodeExecutable = "node.exe";
+        }
+        var options = new List<string>();
+        for (int i=0; i<args.Length; i++) {
+            if (args[i]=="--portable") options.Add(args[i]);
+            else if (args[i]=="--data-dir") {
+                options.Add(args[i]);
+                if (++i>=args.Length) throw new Exception("--data-dir 需要一个数据目录。");
+                options.Add(args[i]);
+            } else if (args[i]!="--smoke" && args[i]!="--tray-check") throw new Exception("未知启动参数："+args[i]);
+        }
+        startupArguments = string.Join(" ", options.Select(QuoteArgument));
+        var info = new ProcessStartInfo(nodeExecutable, QuoteArgument(Path.Combine(root,"scripts/app-paths.mjs"))+" --prepare "+startupArguments) { WorkingDirectory=launchDirectory, UseShellExecute=false, CreateNoWindow=true, RedirectStandardOutput=true, RedirectStandardError=true, StandardOutputEncoding=Encoding.UTF8, StandardErrorEncoding=Encoding.UTF8 };
+        using (var resolver = Process.Start(info)) {
+            var output = resolver.StandardOutput.ReadToEndAsync(); var error = resolver.StandardError.ReadToEndAsync();
+            if (!resolver.WaitForExit(10000)) { resolver.Kill(); throw new Exception("数据目录检查超时，请检查程序文件。"); }
+            if (resolver.ExitCode!=0) throw new Exception(error.Result.Trim());
+            dataRoot = Convert.ToString(json.Deserialize<Dictionary<string,object>>(output.Result)["dataRoot"]);
+        }
+    }
     [STAThread] static void Main(string[] args) {
         root = AppDomain.CurrentDomain.BaseDirectory;
+        dataRoot = root;
+        if (!(args.Length > 0 && args[0] == "--preview")) {
+            try { ResolveStartupPaths(args); } catch (Exception error) { MessageBox.Show(error.Message,"小鲸控制台启动失败"); return; }
+        }
         bool owner;
-        string id = BitConverter.ToString(System.Security.Cryptography.SHA256.Create().ComputeHash(Encoding.UTF8.GetBytes(root.ToLowerInvariant()))).Replace("-", "").Substring(0, 24);
+        string id = BitConverter.ToString(System.Security.Cryptography.SHA256.Create().ComputeHash(Encoding.UTF8.GetBytes(dataRoot.ToLowerInvariant()))).Replace("-", "").Substring(0, 24);
         if (args.Length > 0 && args[0] == "--preview") id += Guid.NewGuid().ToString("N");
         using (var mutex = new Mutex(true, "Local\\QQBotDesktop-" + id, out owner)) {
             restore = new EventWaitHandle(false, EventResetMode.AutoReset, "Local\\QQBotRestore-" + id);
@@ -317,8 +360,7 @@ partial class App
             window.Show(); window.UpdateLayout();
             Capture(args[1], args.Length > 2 ? PageForTab((TabItem)Find<TabControl>("Tabs").Items[int.Parse(args[2])]) : MainPage.Overview); window.Close(); return;
         }
-        string node = Path.Combine(root, "runtime/node.exe");
-        var info = new ProcessStartInfo(File.Exists(node) ? node : "node.exe", "\"" + Path.Combine(root, "desktop/host.mjs") + "\"") { WorkingDirectory = root, UseShellExecute = false, CreateNoWindow = true, RedirectStandardInput = true, RedirectStandardOutput = true, RedirectStandardError = true, StandardOutputEncoding = Encoding.UTF8, StandardErrorEncoding = Encoding.UTF8 };
+        var info = new ProcessStartInfo(nodeExecutable, QuoteArgument(Path.Combine(root, "desktop/host.mjs"))+" "+startupArguments) { WorkingDirectory = launchDirectory, UseShellExecute = false, CreateNoWindow = true, RedirectStandardInput = true, RedirectStandardOutput = true, RedirectStandardError = true, StandardOutputEncoding = Encoding.UTF8, StandardErrorEncoding = Encoding.UTF8 };
         info.EnvironmentVariables["QQBOT_LOW_INTEGRITY"] = NativeTray.IsLowIntegrity() ? "1" : "0";
         host = new Process { StartInfo = info, EnableRaisingEvents = true };
         host.OutputDataReceived += (s, e) => { if (e.Data != null) events.Enqueue(e.Data); };
@@ -349,7 +391,7 @@ partial class App
         Find<TextBox>("Env").TextChanged += EditChanged;
         Find<TextBox>("LogSearch").TextChanged += (s,e) => RefreshLogs(); Find<ComboBox>("LogFilter").SelectionChanged += (s,e) => RefreshLogs();
         Find<Button>("Diagnose").Click += (s,e) => { SelectedPage = MainPage.Diagnostics; Send("diagnose"); }; Find<Button>("RunDiagnostics").Click += (s,e) => Send("diagnose");
-        Find<Button>("OpenLogs").Click += (s,e) => { string path = Path.Combine(root,"data/desktop"); Directory.CreateDirectory(path); Process.Start(new ProcessStartInfo(path) { UseShellExecute = true }); };
+        Find<Button>("OpenLogs").Click += (s,e) => { string path = Path.Combine(dataRoot,"data/desktop"); Directory.CreateDirectory(path); Process.Start(new ProcessStartInfo(path) { UseShellExecute = true }); };
         Find<Button>("ExportLogs").Click += (s,e) => { var dialog = new Microsoft.Win32.SaveFileDialog { FileName = "小鲸运行日志.txt", Filter = "文本日志|*.txt" }; if (dialog.ShowDialog(window) == true) { try { File.WriteAllLines(dialog.FileName, logs, new UTF8Encoding(true)); Feedback("日志已导出，连接凭据已自动遮盖。"); } catch (Exception error) { Feedback(error.Message); } } };
         var timer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(200) };
         timer.Tick += (s, e) => {
@@ -390,7 +432,7 @@ partial class App
                 } else if(smokeStep==13&&!knowledgeBusy&&knowledgeSelection!=null&&knowledgeSelection.Kind=="file"&&knowledgeSelection.Loaded) {
                     Capture(Path.Combine(root,"knowledge-workspace.png"),MainPage.Knowledge);Find<TextBox>("Persona").Text="Edited workspace memory from native controls.";SaveKnowledge();smokeStep=14;
                 } else if(smokeStep==14&&!knowledgeBusy&&knowledgeDrafts.Count==0) {
-                    if(File.ReadAllText(Path.Combine(root,"memory/notes.md"))!="Edited workspace memory from native controls.")throw new Exception("Workspace memory save failed");
+                    if(File.ReadAllText(Path.Combine(dataRoot,"memory/notes.md"))!="Edited workspace memory from native controls.")throw new Exception("Workspace memory save failed");
                     KnowledgePage=1;smokeStep=15;
                 } else if(smokeStep==15&&!knowledgeBusy&&knowledgeSelection!=null&&knowledgeSelection.Kind=="memory") {
                     Capture(Path.Combine(root,"knowledge-friends.png"),MainPage.Knowledge);Find<TextBox>("Persona").Text="Edited friend memory from native controls.";SaveKnowledge();smokeStep=16;
@@ -453,7 +495,7 @@ partial class App
                     SelectedPage = MainPage.Overview;
                     window.Close();
                     if (window.IsVisible) throw new Exception("Close did not hide window");
-                    Process.Start(new ProcessStartInfo(Path.Combine(root, "QQ-BOT.exe")) { UseShellExecute = false, CreateNoWindow = true });
+                    Process.Start(new ProcessStartInfo(Path.Combine(root, "QQ-BOT.exe"), startupArguments) { WorkingDirectory = launchDirectory, UseShellExecute = false, CreateNoWindow = true });
                     smokeStep = 1;
                 } else if (smokeStep == 1 && window.IsVisible) {
                     File.WriteAllText(Path.Combine(root, "smoke-result.txt"), "PASS: persona library save and selection, independent conversation copies, retained drafts, workspace and friend memory editing, compact layout, settings and model validation, activity isolation, QQ favorites and local migration controls, autonomous thought controls, interest editing, decision summaries, Shell tray restore, graceful exit");

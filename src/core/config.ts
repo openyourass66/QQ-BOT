@@ -24,10 +24,10 @@ export const config = {
     token: env('ONEBOT_TOKEN'),
   },
   dsh: {
-    bin: env('BOT_DSH_BIN', 'dsh.cmd'),
+    bin: /[\\/]/.test(env('BOT_DSH_BIN')) ? resolve(env('BOT_DSH_BIN')) : env('BOT_DSH_BIN', 'dsh.cmd'),
     profile: env('BOT_DSH_PROFILE', 'acp'),
-    home: env('BOT_DSH_HOME'),
-    workspace: resolve(env('BOT_WORKSPACE', process.cwd())),
+    home: env('BOT_DSH_HOME') ? resolve(env('BOT_DSH_HOME')) : '',
+    workspace: resolve(env('BOT_WORKSPACE', 'bot-workspace')),
   },
   bot: {
     selfId: num('BOT_SELF_ID', 0),

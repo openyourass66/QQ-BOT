@@ -45,6 +45,7 @@ export function mergeRuntimeEnv(original, data) {
 export function validateRuntimeEnv(data) {
   if (typeof data !== 'string' || data.includes('\0')) throw new Error('连接配置格式无效');
   const parsed = parseEnv(data);
+  if (Object.hasOwn(parsed, 'BOT_DATA_DIR')) throw new Error('连接配置格式无效：数据目录请用启动参数 --data-dir 或系统环境变量 BOT_DATA_DIR 指定，不能写入 .env');
   if (parsed.BOT_ONEBOT_MODE && !['auto','managed','external'].includes(parsed.BOT_ONEBOT_MODE)) throw new Error('连接配置格式无效：QQ 接入方式无效');
   readChatModelConfig(parsed);
   for (const key of runtimeFields.map(field => field[1]).filter(key => key.endsWith('_URL'))) if (parsed[key] && (key !== 'BOT_CHAT_BASE_URL' || parsed.BOT_CHAT_MODE === 'project')) {

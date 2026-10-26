@@ -1,15 +1,16 @@
 import { cp, mkdir, readFile, stat, writeFile, access } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { loadEnvFile } from 'node:process';
+import { enterRuntime, prepareRuntime } from './app-paths.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-try { loadEnvFile(join(root, '.env')); } catch (error) { if (error.code !== 'ENOENT') throw error; }
+const layout = await prepareRuntime({ root });
+enterRuntime(layout);
 if (process.platform !== 'win32') throw new Error('此 NapCat Node 启动器仅支持 Windows');
 if (!process.env.BOT_QQ_DIR) throw new Error('请在 .env 中配置 BOT_QQ_DIR，指向 QQ.exe 所在目录');
 const qqRoot = resolve(process.env.BOT_QQ_DIR);
-const shell = resolve(root, process.env.BOT_NAPCAT_DIR || 'napcat/shell');
-const runtime = resolve(root, 'napcat/node-runtime');
+const shell = resolve(layout.dataRoot, process.env.BOT_NAPCAT_DIR || 'napcat/shell');
+const runtime = layout.napcatRuntime;
 const json = async (path) => JSON.parse((await readFile(path, 'utf8')).replace(/^\uFEFF/, ''));
 const versions = await json(join(qqRoot, 'versions/config.json'));
 if (typeof versions.curVersion !== 'string' || !/^\d+\.\d+\.\d+-\d+$/.test(versions.curVersion)) throw new Error('QQ 当前版本配置无效');

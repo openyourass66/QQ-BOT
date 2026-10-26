@@ -47,7 +47,7 @@ partial class App
             ShowSetupGuide();
         };
     }
-    static string SetupCompletionPath { get { return System.IO.Path.Combine(root,"data/desktop/setup-complete"); } }
+    static string SetupCompletionPath { get { return System.IO.Path.Combine(dataRoot,"data/desktop/setup-complete"); } }
     static void CompleteSetup() {
         Find<Border>("SetupPrompt").Visibility=Visibility.Collapsed;
         if(setupComplete)return;

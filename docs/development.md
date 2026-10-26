@@ -4,6 +4,8 @@
 
 当前已实现范围及验证结果见[实施进展](implementation-status.md)。
 
+桌面与正式命令行入口使用 `scripts/app-paths.mjs`、`scripts/run.mjs` 统一运行布局；程序资源从安装目录读取，用户配置与运行文件按选定数据目录解析。入口参数和兼容规则见[运行布局说明](runtime-layout.md)。
+
 ## 模块边界
 
 `src/bridge.ts` 与 `src/mcp-qq.ts` 保留稳定入口。内部模块按职责划分：
@@ -49,6 +51,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File tests/desktop-smoke.ps1
 ```
 
 `-SkipTrayCheck` 只跳过交互托盘检查，继续验证窗口与配置控件。没有交互桌面的环境不应把跳过的托盘测试记为通过。测试会打印隔离工作区位置，供检查界面截图。
+
+附加 `-SeparateData` 会在临时发行布局内复制 Node，使用带空格的独立数据目录启动同一套原生测试，并检查个人文件没有写回程序目录。该夹具不会使用真实 QQ 或模型凭据，不替代成品安装验收。
 
 ## 假 OneBot 联调
 

@@ -1,6 +1,6 @@
 import { readFile, writeFile, rename, mkdir, rm } from 'node:fs/promises';
-import { resolve, dirname } from 'node:path';
-import { loadEnvFile } from 'node:process';
+import { resolve, dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { parseEnv } from 'node:util';
 import { existsSync } from 'node:fs';
 import { setup } from '../scripts/setup.mjs';
@@ -11,8 +11,9 @@ import { knowledge } from './knowledge.mjs';
 import { mediaKeys, settingsFileFor, validateMediaService, mergeSettingsDraft } from './settings-config.mjs';
 import { dataPaths, mutableDataResources } from '../dist/core/data-paths.js';
 import { acquireDataResources } from '../dist/core/resource-lock.js';
-if (existsSync('.env.example') && existsSync('templates/bot-persona.md')) await setup(process.cwd());
-try { loadEnvFile('.env'); } catch (e) { if (e.code !== 'ENOENT') throw e; }
+const programRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+if ((existsSync('.env.example') || process.env.BOT_DATA_DIR) && existsSync(join(programRoot, '.env.example')) && existsSync(join(programRoot, 'templates/bot-persona.md'))) await setup(programRoot, process.cwd());
+try { Object.assign(process.env, parseEnv(await readFile('.env', 'utf8'))); } catch (e) { if (e.code !== 'ENOENT') throw e; }
 const settings = await import('../dist/core/settings.js');
 const read = async (p) => readFile(p, 'utf8').catch(e => { if (e.code === 'ENOENT') return ''; throw e; });
 const personaPath = resolve(process.env.BOT_WORKSPACE || 'bot-workspace', 'AGENTS.md');
@@ -33,7 +34,7 @@ process.once('message', async ({ action, data }) => {
       if (!['detect','check'].includes(data?.operation)) throw new Error('连接配置格式无效：未知快速配置操作');
       const env = mergeRuntimeEnv(await read('.env'), data.runtime || {});
       if (data.operation === 'check') validateRuntimeEnv(env);
-      result = data.operation === 'detect' ? await detectEnvironment(process.cwd(), { ...process.env, ...parseEnv(env) }) : await checkSetup(process.cwd(), parseEnv(env));
+      result = data.operation === 'detect' ? await detectEnvironment(process.cwd(), { ...process.env, ...parseEnv(env) }) : await checkSetup(programRoot, parseEnv(env), { dataRoot: process.cwd() });
     }
     else if (action === 'settings') {
       if (data?.settingsPath && resolve(data.settingsPath) !== settings.getSettingsPath()) throw new Error('配置格式无效：动态配置文件已切换，当前输入已保留，请重新打开工作台核对');

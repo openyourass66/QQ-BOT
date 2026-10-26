@@ -2,6 +2,7 @@
 /node_modules/
 /dist/
 /release/
+/user-data/
 /desktop/bin/
 /desktop/obj/
 # 可选便携 Node 运行库，由本机部署，不纳入源码

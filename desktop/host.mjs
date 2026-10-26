@@ -4,16 +4,19 @@ import { fileURLToPath } from 'node:url';
 import { resolve, dirname, join } from 'node:path';
 import { mkdirSync, appendFileSync, existsSync, statSync, renameSync, readFileSync, rmSync } from 'node:fs';
 import { diagnose, environment, onebotOnline } from './diagnostics.mjs';
+import { enterRuntime, prepareRuntime } from '../scripts/app-paths.mjs';
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-process.chdir(root);
-const logDir = join(root, 'data/desktop'); mkdirSync(logDir, { recursive: true });
+const layout = await prepareRuntime({ root, args: process.argv.slice(2) });
+enterRuntime(layout, { loadEnv: false });
+const dataRoot = layout.dataRoot;
+const logDir = layout.logDir; mkdirSync(logDir, { recursive: true });
 const logPath = join(logDir, 'console.log');
 const children = new Map();
 const socialRequests = new Map();
 let socialSequence = 0;
 let busy = false, quitting = false, externalNapcat = false;
 let secrets = [];
-async function refreshSecrets() { const env = await environment(root); secrets = Object.entries(env).filter(([key, value]) => /TOKEN|SECRET|PASSWORD|API_KEY/i.test(key) && value?.length >= 4).map(([, value]) => value); }
+async function refreshSecrets() { const env = await environment(dataRoot); secrets = Object.entries(env).filter(([key, value]) => /TOKEN|SECRET|PASSWORD|API_KEY/i.test(key) && value?.length >= 4).map(([, value]) => value); }
 await refreshSecrets();
 const redact = text => {
   for (const secret of secrets) text = text.split(secret).join('[已隐藏]');
@@ -30,9 +33,11 @@ const emit = event => {
   }
   process.stdout.write(JSON.stringify(event) + '\n');
 };
-const state = () => emit({ type: 'state', bridge: children.has('bridge'), napcat: children.has('napcat') || externalNapcat, externalNapcat, busy });
-function launch(name, script) {
-  const child = fork(resolve(root, script), [], { cwd: root, execArgv: ['--env-file-if-exists=.env'], silent: true, windowsHide: true });
+const state = () => emit({ type: 'state', bridge: children.has('bridge'), napcat: children.has('napcat') || externalNapcat, externalNapcat, busy, paths: layout });
+async function launch(name, script) {
+  const env = await environment(dataRoot);
+  env.BOT_DATA_DIR = dataRoot;
+  const child = fork(resolve(root, script), [], { cwd: dataRoot, env, execArgv: [], silent: true, windowsHide: true });
   children.set(name, child);
   for (const stream of [child.stdout, child.stderr]) {
     createInterface({ input: stream }).on('line', text => {
@@ -67,7 +72,7 @@ async function stopOne(name) {
 async function stop() { await stopOne('bridge'); await stopOne('napcat'); externalNapcat = false; }
 async function config(action, data) {
   return new Promise((done, reject) => {
-    const worker = fork(resolve(root, 'desktop/config-worker.mjs'), [], { cwd: root, silent: true, execArgv: [], windowsHide: true });
+    const worker = fork(resolve(root, 'desktop/config-worker.mjs'), [], { cwd: dataRoot, silent: true, execArgv: [], windowsHide: true });
     const timeout = setTimeout(() => { worker.kill(); reject(new Error('配置操作超时，请重试')); }, action === 'qzone-check' ? 30000 : action === 'model' ? 25000 : 10000);
     let replied = false;
     worker.once('message', result => { replied = true; clearTimeout(timeout); result.ok ? done(result.result) : reject(new Error(result.error)); });
@@ -77,9 +82,9 @@ async function config(action, data) {
   });
 }
 async function check() {
-  const env = await environment(root);
-  const external = env.BOT_ONEBOT_MODE === 'external' || env.BOT_ONEBOT_MODE !== 'managed' && await onebotOnline(root);
-  const result = await diagnose(root, { externalOnebot: children.has('napcat') || external });
+  const env = await environment(dataRoot);
+  const external = env.BOT_ONEBOT_MODE === 'external' || env.BOT_ONEBOT_MODE !== 'managed' && await onebotOnline(dataRoot);
+  const result = await diagnose(root, { dataRoot, externalOnebot: children.has('napcat') || external });
   emit({ type: 'diagnostics', ...result }); return result;
 }
 async function command({ action, data }) {
@@ -120,12 +125,12 @@ async function command({ action, data }) {
       if (action === 'restart') await stop();
       if (action === 'restartBridge') await stopOne('bridge');
       if (!children.has('napcat')) {
-        const env = await environment(root);
-        externalNapcat = env.BOT_ONEBOT_MODE === 'external' || env.BOT_ONEBOT_MODE !== 'managed' && await onebotOnline(root);
+        const env = await environment(dataRoot);
+        externalNapcat = env.BOT_ONEBOT_MODE === 'external' || env.BOT_ONEBOT_MODE !== 'managed' && await onebotOnline(dataRoot);
         if (externalNapcat) emit({ type: 'log', text: env.BOT_ONEBOT_MODE === 'external' ? '[desktop] 连接指定的外部 OneBot；服务离线时等待重连，不启动或结束外部 NapCat。' : '[desktop] 复用已运行的 OneBot，不结束外部 NapCat 进程。' });
-        else launch('napcat', 'scripts/napcat-node.mjs');
+        else await launch('napcat', 'scripts/napcat-node.mjs');
       }
-      if (!children.has('bridge')) launch('bridge', 'dist/bridge.js');
+      if (!children.has('bridge')) await launch('bridge', 'dist/bridge.js');
     } else if (action === 'stop' || action === 'quit') { await stop(); if (action === 'quit') quitting = true; }
     completed = true;
   } finally { busy = false; emit({ type: 'control', action, ok: completed }); state(); if (quitting) process.exit(); }

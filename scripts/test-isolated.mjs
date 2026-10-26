@@ -14,7 +14,9 @@ const scratch = await mkdtemp(join(tempRoot, 'qq-bot-check-'));
 let code = 1;
 async function run(args) {
   return new Promise((done, reject) => {
-    const child = spawn(process.execPath, args, { cwd: scratch, stdio: 'inherit', windowsHide: true });
+    const env = { ...process.env };
+    delete env.BOT_DATA_DIR;
+    const child = spawn(process.execPath, args, { cwd: scratch, env, stdio: 'inherit', windowsHide: true });
     child.once('error', reject);
     child.once('exit', (status, signal) => signal ? reject(new Error(`测试进程中断：${signal}`)) : done(status ?? 1));
   });

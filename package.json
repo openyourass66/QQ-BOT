@@ -7,18 +7,18 @@
     "node": "^22.13.0 || >=24.0.0"
   },
   "scripts": {
-    "setup": "node scripts/setup.mjs",
+    "setup": "node scripts/run.mjs setup",
     "desktop:build": "npm run build && powershell -NoProfile -ExecutionPolicy Bypass -File desktop/build.ps1",
     "desktop": "powershell -NoProfile -ExecutionPolicy Bypass -File desktop/start.ps1",
     "build": "node scripts/build.mjs",
-    "start": "node --env-file=.env dist/bridge.js",
-    "mcp": "node --env-file=.env dist/mcp-qq.js",
+    "start": "node scripts/run.mjs bridge",
+    "mcp": "node scripts/run.mjs mcp",
     "mock": "node scripts/dev/mock-onebot.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "npm run build && node --test tests/*.test.mjs",
     "test:isolated": "node scripts/test-isolated.mjs",
     "benchmark:store": "npm run build && node --expose-gc scripts/benchmark-store.mjs",
-    "napcat": "node --env-file=.env scripts/napcat-node.mjs"
+    "napcat": "node scripts/run.mjs napcat"
   },
   "dependencies": {
     "@agentclientprotocol/sdk": "1.4.0",

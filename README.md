@@ -66,6 +66,8 @@ npm run desktop
 
 ### 更新与运行文件
 
+程序与数据目录的启动契约已经接入，源码继续使用原目录；发行布局默认使用用户目录，也支持显式便携/自定义目录。完整发行包仍待交付，规则与升级方法见[运行布局说明](docs/runtime-layout.md)。
+
 更新项目时，从托盘选择「退出并停止机器人」，再运行 `npm ci` 和 `npm run desktop:build`，随后重新打开工作台。
 
 可以直接双击根目录的 `QQ-BOT.exe`，运行时需保留完整项目目录，尤其是 `package.json`、`desktop/`、`dist/`、`node_modules/`、`scripts/`、`templates/` 和 `.env.example`。EXE 由本机构建，不包含在源码仓库中。可选的 `runtime/node.exe` 是本机便携运行库；未提供时使用系统 Node.js。
