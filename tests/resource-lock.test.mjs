@@ -70,7 +70,7 @@ test('两个真实进程同时争用相同资源只有一个成功，进程崩�
   const b = holder([resource(join(root, 'data.json'))]);
   try {
     const results = await Promise.all([a.ready, b.ready]);
-    assert.equal(results.filter(r => r.type === 'locked').length, 1);
+    assert.equal(results.filter(r => r.type === 'locked').length, 1, JSON.stringify(results));
     assert.equal(results.find(r => r.type === 'failed').code, 'BOT_RESOURCE_LOCKED');
     const winner = results[0].type === 'locked' ? a : b;
     await finish(winner);

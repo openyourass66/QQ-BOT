@@ -75,8 +75,8 @@ export class SocialStore {
       for (let attempt = 0; ; attempt++) {
         try { await rename(`${this.path}.tmp`, this.path); break; }
         catch (error) {
-          if (process.platform !== 'win32' || !['EPERM','EACCES','EBUSY'].includes((error as NodeJS.ErrnoException).code ?? '') || attempt >= 5) throw error;
-          await new Promise(resolve => setTimeout(resolve, 20 * (attempt + 1)));
+          if (process.platform !== 'win32' || !['EPERM','EACCES','EBUSY'].includes((error as NodeJS.ErrnoException).code ?? '') || attempt >= 8) throw error;
+          await new Promise(resolve => setTimeout(resolve, 40 * (attempt + 1)));
         }
       }
       this.data = validated;

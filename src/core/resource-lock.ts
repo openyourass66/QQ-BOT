@@ -72,14 +72,21 @@ export async function acquireDataResources(
       });
       if (info?.isFile() && info.nlink > 1) throw new Error(`数据资源不支持硬链接（${label}）`);
       await mkdir(dirname(path), { recursive: true });
-      const db = new DatabaseSync(`${path}.qqbot-lock.sqlite`);
-      try {
-        db.exec('PRAGMA busy_timeout=0; BEGIN EXCLUSIVE');
-        held.push(db);
-      } catch (error) {
-        db.close();
-        if ([5, 6].includes((error as { errcode?: number }).errcode ?? 0)) throw new ResourceLockedError(label);
-        throw error;
+      for (let attempt = 0; ; attempt++) {
+        signal?.throwIfAborted();
+        let db: DatabaseSync | undefined;
+        try {
+          db = new DatabaseSync(`${path}.qqbot-lock.sqlite`);
+          db.exec('PRAGMA busy_timeout=0; BEGIN EXCLUSIVE');
+          held.push(db);
+          break;
+        } catch (error) {
+          db?.close();
+          if (![5, 6].includes((error as { errcode?: number }).errcode ?? 0)) throw error;
+          if (attempt >= 3) throw new ResourceLockedError(label);
+          // 同时打开新侧文件的连接可能都暂时升级失败；先关闭失败句柄，再短暂退避。
+          await new Promise(done => setTimeout(done, (attempt + 1) * (5 + Math.floor(Math.random() * 6))));
+        }
       }
     }
     signal?.throwIfAborted();
