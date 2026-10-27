@@ -43,6 +43,9 @@ test('Web 事件按允许字段序列化，SSE 连接限额并在退出时断开
   const {app,origin}=server,session=await claim(server);
   assert.equal(managementEvent({type:'config',env:'fixture-private'}),undefined);
   assert.doesNotMatch(JSON.stringify(managementEvent({type:'state',bridge:true,paths:{dataRoot:'fixture-private'}})),/fixture-private|paths/);
+  assert.equal(managementEvent({type:'state',bridge:false,napcat:false}).acpConnected,false);
+  assert.equal(managementEvent({type:'state',bridge:false,napcat:false}).qqOnline,false);
+  assert.doesNotMatch(JSON.stringify(managementEvent({type:'job',job:{id:'a'.repeat(32),kind:'stop',state:'running',phase:'running',message:'fixture-private',credential:'fixture-private'}})),/fixture-private|credential/);
   assert.doesNotMatch(JSON.stringify(managementEvent({type:'status',lastError:'fixture-private-token',model:'fixture-private-model'})),/fixture-private/);
   const connections=[];
   try {

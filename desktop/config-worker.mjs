@@ -21,7 +21,9 @@ const atomic = async (p, text) => { await mkdir(dirname(p), { recursive: true })
 const describeEnv = env => { const values = parseEnv(env); return runtimeFields.map(([group, key, label, fallback, kind]) => ({ group, key, label, initialDefault: initialDefaultKeys.has(key), kind: kind || 'text', value: values[key] ?? fallback })); };
 process.once('message', async ({ action, data }) => {
   let dataLease;
+  let configurationLease;
   try {
+    if(['connection','env','runtime'].includes(action))configurationLease=await acquireDataResources([{path:resolve('.env'),label:'连接配置'}]);
     let result;
     if (action === 'load') {
       const env = await read('.env') || await read('.env.example');
@@ -129,6 +131,7 @@ process.once('message', async ({ action, data }) => {
       : e.code === 'BOT_RESOURCE_LOCKED' || /工作区已变更|协议无效|配置格式无效|^管理操作失败：|^空间连接检查失败：/.test(e.message) ? e.message : '配置操作失败，请检查文件格式与访问权限；原有文件保留。';
     process.send({ ok: false, error }, () => process.disconnect());
   } finally {
+    configurationLease?.release();
     dataLease?.release();
   }
 });

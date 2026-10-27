@@ -33,6 +33,7 @@ try {
     Copy-Item -LiteralPath (Join-Path $projectRoot 'scripts/app-paths.mjs') -Destination (Join-Path $testRoot 'scripts/app-paths.mjs')
     Copy-Item -LiteralPath (Join-Path $projectRoot 'scripts/component-paths.mjs') -Destination (Join-Path $testRoot 'scripts/component-paths.mjs')
     Copy-Item -LiteralPath (Join-Path $projectRoot 'scripts/runtime-service.mjs') -Destination (Join-Path $testRoot 'scripts/runtime-service.mjs')
+    Copy-Item -LiteralPath (Join-Path $projectRoot 'scripts/runtime-configuration.mjs') -Destination (Join-Path $testRoot 'scripts/runtime-configuration.mjs')
     Copy-Item -LiteralPath (Join-Path $projectRoot 'scripts/runtime-lease.mjs') -Destination (Join-Path $testRoot 'scripts/runtime-lease.mjs')
     }
     if ($SeparateData -and !$ReleaseDirectory) {

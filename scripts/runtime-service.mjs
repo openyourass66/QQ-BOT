@@ -4,12 +4,14 @@ import { resolve, join } from 'node:path';
 import { mkdirSync, appendFileSync, existsSync, statSync, renameSync, readFileSync, rmSync } from 'node:fs';
 import { diagnose, environment, onebotOnline } from '../desktop/diagnostics.mjs';
 import { acquireRuntimeLease } from './runtime-lease.mjs';
+import { RuntimeConfiguration } from './runtime-configuration.mjs';
 
 export const runtimeActions=new Set(["qq-login","components","components-cancel","onboarding","model","qzone-check","knowledge","social","memory","settings-status","load","settings","env","runtime","connection","persona","diagnose","start","restart","restartBridge","stop","quit"]);
 export async function createRuntimeService({root,layout,onEvent,onFatal=()=>{}}) {
 const lease=await acquireRuntimeLease(root,layout.dataRoot);
 try {
 const dataRoot = layout.dataRoot;
+const configuration = new RuntimeConfiguration(dataRoot);
 const logDir = layout.logDir; mkdirSync(logDir, { recursive: true });
 const logPath = join(logDir, 'console.log');
 const children = new Map();
@@ -165,7 +167,7 @@ async function command({ action, data }) {
   try {
     if (['start', 'restart', 'restartBridge'].includes(action)) {
       const diagnostics = await check();
-      if (!diagnostics.ok) { emit({ type: 'error', text: '启动检查未通过，请打开“启动诊断”修复红色项目。' }); return; }
+      if (!diagnostics.ok) { emit({ type: 'error', text: '启动检查未通过，请打开“启动诊断”修复红色项目。' }); return {ok:false}; }
       if (action === 'restart') await stop();
       if (action === 'restartBridge') await stopOne('bridge');
       if (!children.has('napcat')) {
@@ -178,6 +180,7 @@ async function command({ action, data }) {
     } else if (action === 'stop' || action === 'quit') { await stop(); if (action === 'quit') quitting = true; }
     completed = true;
   } finally { busy = false; emit({ type: 'control', action, ok: completed }); state(); }
+  return {ok:completed};
 }
 
 const pendingComponents = new Set();
@@ -191,7 +194,7 @@ function receive(request) {
   if(request.action==='components-cancel'||request.action==='quit')cancelComponents();
   if(request.action==='components-cancel')return Promise.resolve();
   const task=queue.then(async()=>{
-    try {if(request.action==='components'&&request.cancelled)throw new Error('组件准备已取消');await command(request);}
+    try {if(request.action==='components'&&request.cancelled)throw new Error('组件准备已取消');return await command(request);}
     catch(error){emit({type:'error',action:request.action,text:error.message});throw error;}
     finally{pendingComponents.delete(request);}
   });
@@ -206,6 +209,10 @@ function close() {
 lease.lost.then(async error=>{if(!error)return;emit({type:'error',text:error.message});try{await close();}finally{onFatal(error);}}).catch(()=>{});
 try{for(const text of readFileSync(logPath,'utf8').trim().split('\n').slice(-100))if(text)onEvent({type:'log',text:redact(text),historical:true});}catch{}
 state();
-return {receive,close,get quitting(){return quitting;}};
+return {receive,close,readConfiguration:()=>configuration.read(),updateConfiguration(data){
+  if(closing)return Promise.reject(new Error('运行管理服务正在关闭'));
+  const task=queue.then(async()=>{if(!lease.held)throw new Error('运行管理实例锁已失效');const result=await configuration.update(data);await refreshSecrets();return result;});
+  queue=task.catch(()=>{});return task;
+},get quitting(){return quitting;}};
 } catch(error){await lease.release();throw error;}
 }
