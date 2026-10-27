@@ -2,6 +2,7 @@ import { z } from 'zod';
 import type { OneBotHttp } from './onebot.js';
 import type { BotSettings } from '../core/settings.js';
 import { DailyUsageStore, type Quota } from '../core/usage.js';
+import { approvalBinding } from '../security/tool-policy.js';
 
 export const QqActionSchema = z.discriminatedUnion('action', [
   z.object({
@@ -37,14 +38,17 @@ export class QqActionPolicy {
     const action = QqActionSchema.parse(input);
     signal.throwIfAborted();
     let confirmed = false;
+    let checkApproval: (()=>void) | undefined;
     if (action.action === 'qzone_post') {
       const qzone = this.settings().features.qzone;
       if (!qzone.enabled) throw new Error('QQ 空间发布已关闭');
       if (qzone.requireConfirm || this.settings().social.autonomy !== 'autonomous') {
+        const binding=approvalBinding(this.settings(),action);
         confirmed = await this.confirm(
           `要发布 QQ 空间说说：\n${action.text}\n图片：\n${action.images?.join('\n') || '(无)'}`, signal,
         );
         if (!confirmed) throw new Error('空间发布未获管理员确认');
+        checkApproval=()=>binding.assert(this.settings());
       }
     }
 
@@ -55,6 +59,7 @@ export class QqActionPolicy {
       const quotas: Quota[] = [];
       if (action.action === 'qzone_post') {
         if (!settings.features.qzone.enabled) throw new Error('QQ 空间发布已关闭');
+        checkApproval?.();
         if ((settings.features.qzone.requireConfirm || settings.social.autonomy !== 'autonomous') && !confirmed) throw new Error('空间发布需要管理员确认，请重试');
         quotas.push({ key: 'qzone', amount: 1, limit: settings.features.qzone.dailyLimit, label: '空间发布' });
       } else if (action.action === 'like') {
@@ -70,6 +75,7 @@ export class QqActionPolicy {
       return [...additionalQuotas(), ...quotas];
     }, onReserved);
     signal.throwIfAborted();
+    checkApproval?.();
 
     if (action.action === 'like') {
       return this.api.call('send_like', { user_id: action.user_id, times: action.times }, signal);

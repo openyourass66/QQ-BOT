@@ -126,19 +126,19 @@ test('完整桥接链路：群上下文、连续回复顺序、超时恢复、DS
     assert.ok(modelEvents.some(event => event.sessionId === 'test-session-1' && event.configId === 'model'));
     assert.ok(!(await readFile(join(dir, 'dsh', 'chat-model.patch.json'), 'utf8')).includes('project-test-key'));
 
-    send('MCP点赞');
+    send('MCP点赞', false, 12345);
     await waitReply((r) => r.message === 'MCP调用成功');
-    send('MCP点赞');
+    send('MCP点赞', false, 12345);
     await waitReply((r) => r.message.includes('MCP拒绝:') && r.message.includes('额度不足'));
     assert.equal(likes, 1);
 
     let after = replies.length;
-    send('MCP空间');
+    send('MCP空间', false, 12345);
     const cancelledApproval = await waitReply((r) => r.user_id === 12345 && r.message.includes('审批正文'), after);
     const cancelledId = /授权请求 #([a-f0-9]{6})/.exec(cancelledApproval.message)[1];
     await waitReply((r) => r.message.includes('走神'), after);
     after = replies.length;
-    send('MCP空间');
+    send('MCP空间', false, 12345);
     const approval = await waitReply((r) => r.user_id === 12345 && r.message.includes('审批正文'), after);
     assert.match(approval.message, /https:\/\/example.test\/picture.png/);
     assert.equal(posts, 0);
@@ -163,7 +163,7 @@ test('完整桥接链路：群上下文、连续回复顺序、超时恢复、DS
     send('恢复成功');
     await waitReply((r) => r.message.includes('恢复成功'));
     after = replies.length;
-    send('MCP点赞');
+    send('MCP点赞', false, 12345);
     await waitReply((r) => r.message.includes('MCP拒绝:') && r.message.includes('额度不足'), after);
     send('测试崩溃');
     const [code] = await withTimeout(exited, 8000);

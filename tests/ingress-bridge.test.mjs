@@ -106,7 +106,7 @@ test('聚合独立限制字节，不把超限内容送入模型，结束后释�
 test('归档与聚合容量满时管理员确认优先处理，停止可排空未完成聚合', { timeout: 25000 }, async () => {
   const f = await fixture({ approval: { adminQq: 12345, timeoutMs: 5000 }, features: { qzone: { enabled: true, requireConfirm: true } } }, { FAKE_GROUP_PROMPTS: '' });
   try {
-    f.send('MCP空间');
+    f.send('MCP空间',12345);
     await f.until(() => f.sent.some(r => r.user_id === 12345 && /授权请求 #/.test(r.message)));
     const approval = f.sent.find(r => r.user_id === 12345 && /授权请求 #/.test(r.message));
     const id = /授权请求 #([a-f0-9]{6})/.exec(approval.message)[1];

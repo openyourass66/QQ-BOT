@@ -5,6 +5,7 @@ import { SocialStore, type ScheduledTask } from './social-store.js';
 import { MediaService } from '../services/media.js';
 import { socialTools, SocialCallSchema, type ToolContext } from './social-tools.js';
 import { assertAccountTool, isAccountOwner } from '../core/permissions.js';
+import { assertToolAccess, assertTargetAccess, toolAccessVisible, approvalBinding, approvalDescription } from '../security/tool-policy.js';
 import { allowedChat } from './social-settings.js';
 import type { BotSettings } from '../core/settings.js';
 import { OneBotHttp, parseMessageEvent, parseCqMessage, segmentsToText, type Segment } from './onebot.js';
@@ -16,7 +17,7 @@ import type { AutonomousTurn } from '../agent/autonomous-state.js';
 import { Cognition, forgetMemory, memoryMeta, fingerprint } from '../agent/cognition.js';
 import { MemoryMetaSchema } from '../agent/cognition-state.js';
 import { learningModel } from '../agent/learning-model.js';
-import { turnBudget, toolAvailable } from '../agent/context-policy.js';
+import { turnBudget, toolAvailable, toolEnabled } from '../agent/context-policy.js';
 import { QzoneService, type SpacePost } from '../services/qzone.js';
 
 export class SocialEngine {
@@ -67,11 +68,13 @@ export class SocialEngine {
   }
   check(ctx: ToolContext, target = ctx.chat): void {
     ctx.signal.throwIfAborted();
+    ctx.authorize?.();
     if(['qzone','qzone-comment'].includes(ctx.autonomous?.kind??'')&&target===ctx.chat&&ctx.chat===`private:${ctx.self}`)return;
     if (!allowedChat(this.settings().social, target, target === ctx.chat ? ctx.user : undefined)) throw new Error('该用户或会话已屏蔽或不在允许名单中');
   }
-  async target(ctx: ToolContext, target: string): Promise<void> {
+  async target(ctx: ToolContext, target: string, actor = false): Promise<void> {
     this.check(ctx, target);
+    if(ctx.autonomous?.kind!=='qzone-comment')assertTargetAccess(ctx,this.settings(),target,actor);
     if(ctx.autonomous&&target!==ctx.chat)throw new Error('自主任务不能跨会话发送消息');
     if (target === ctx.chat) return;
     await this.contacts(ctx.signal);
@@ -83,10 +86,16 @@ export class SocialEngine {
     this.check(ctx,`private:${user}`);await this.contacts(ctx.signal);
     if(!this.friendIds.has(String(user)))throw new Error('空间目标已不是当前 QQ 好友');
   }
-  async approve(ctx: ToolContext, tool: string, sensitive = false): Promise<void> {
+  async approve(ctx: ToolContext, tool: string, sensitive = false, args: unknown = {}): Promise<void> {
     assertAccountTool(ctx, this.settings().approval.adminQq, tool);
     const mode = this.settings().social.autonomy;
-    if ((mode === 'confirm' || (mode === 'sensitive' && sensitive)) && !await this.confirm(`QQ 操作：${tool}\n来源：${ctx.chat}`, ctx.signal)) throw new Error('操作未获确认');
+    if (mode === 'confirm' || (mode === 'sensitive' && sensitive)) {
+      const binding=approvalBinding(this.settings(),{tool,chat:ctx.chat,user:ctx.user,args});
+      if(!await this.confirm(approvalDescription(ctx,tool,args),ctx.signal))throw new Error('操作未获确认');
+      assertAccountTool(ctx, this.settings().approval.adminQq, tool);
+      binding.assert(this.settings());
+      const previous=ctx.authorize;ctx.authorize=()=>{previous?.();binding.assert(this.settings());};
+    }
     this.check(ctx);
     assertAccountTool(ctx, this.settings().approval.adminQq, tool);
   }
@@ -171,6 +180,7 @@ export class SocialEngine {
     const tool = socialTools.find(t => t.name === call.tool);
     if (!tool) throw new Error('未知 QQ 工具');
     const args = z.object(tool.schema as z.ZodRawShape).strict().parse(call.args) as Record<string, any>;
+    assertToolAccess(ctx,this.settings(),call.tool,args);
     const reads = new Set(['qq_capabilities', 'qq_recent_messages', 'qq_message', 'qq_read_forward', 'qq_active_members', 'qq_chats', 'qq_images', 'qq_stickers', 'qq_sticker_image', 'qq_memory_query', 'qq_reminders', 'qq_events', 'qq_transcribe', 'qq_video', 'qq_file', 'qq_event_file', 'qq_group_files', 'qq_qzone_feed', 'qq_finish', 'qq_report']);
     reads.add('qq_self_state');
     const collectPreview = call.tool === 'qq_collect_sticker' && !args.analysis_token;
@@ -179,15 +189,17 @@ export class SocialEngine {
     const sendPreview = call.tool === 'qq_send_sticker' && !sendSticker?.analysis;
     const mutates = !reads.has(call.tool) && !['qq_group_file','qq_actions'].includes(call.tool) && !(call.tool === 'qq_send_image' && args.preview) && !collectPreview && !sendPreview;
     const actionId = mutates ? await this.store.beginAction(ctx.chat, call.tool) : undefined;
+    const previousAuthorization=ctx.authorize;
+    ctx.authorize=()=>{previousAuthorization?.();assertToolAccess(ctx,this.settings(),call.tool,args);if(!toolEnabled(call.tool,this.settings()))throw new Error('该工具已关闭或依赖尚未就绪');};
     try {
-      if (mutates&&call.tool!=='qq_qzone_comment') await this.approve(ctx, call.tool, call.tool==='qq_handle_request');
+      if (mutates&&call.tool!=='qq_qzone_comment') await this.approve(ctx, call.tool, call.tool==='qq_handle_request',args);
       const result = await this.perform(call.tool, args, ctx);
       if (actionId) await this.store.endAction(actionId, 'success', `${tool.title}：${String(args.text ?? args.name ?? args.note ?? '已完成')}`);
       return result;
     } catch (e) {
       if (actionId) await this.store.endAction(actionId, 'unknown', String(e));
       throw e;
-    }
+    } finally {ctx.authorize=previousAuthorization;}
   }
   private async perform(tool: string, a: Record<string, any>, ctx: ToolContext): Promise<unknown> {
     if(['qq_stickers','qq_sticker_note'].includes(tool)) { this.feature('stickersEnabled');await this.qqStickers.sync(ctx.signal); }
@@ -196,7 +208,7 @@ export class SocialEngine {
       case 'qq_self_state':return this.autonomy.view(ctx);
       case 'qq_interest':return this.autonomy.interest(ctx,a as never);
       case 'qq_thought':return this.autonomy.thought(ctx,a as never);
-      case 'qq_capabilities': return { media: this.media.capabilities(), settings: this.settings().social, tools: socialTools.map(t => ({ name: t.name, description: t.description })), notes: ['消息、成员必须使用真实编号', '本地记录仅包含已收到或主动拉取的消息', '接口成功不等于接收者已阅读'] };
+      case 'qq_capabilities': return { media: this.media.capabilities(), settings: isAccountOwner(ctx,this.settings().approval.adminQq)?this.settings().social:Object.fromEntries(Object.entries(this.settings().social).filter(([,value])=>typeof value==='boolean')), tools: socialTools.filter(t=>toolAccessVisible(ctx,this.settings(),t.name)).map(t => ({ name: t.name, description: t.description })), notes: ['消息、成员必须使用真实编号', '本地记录仅包含已收到或主动拉取的消息', '接口成功不等于接收者已阅读'] };
       case 'qq_reply': {
         if (!a.text) throw new Error('文字不能为空；只想潜水请调用 qq_finish');
         return this.send(ctx, [...await this.decorators(ctx, a), { type: 'text', data: { text: a.text } }]);
@@ -359,7 +371,7 @@ export class SocialEngine {
         });
       }
       case 'qq_memory_query': this.feature('memoryEnabled'); return state().memories.filter(m => m.chat === ctx.chat && (!a.user_id || m.user === String(a.user_id)) && `${m.name} ${m.text}`.includes(a.query) && !this.settings().social.blockedUsers.includes(m.user)).slice(-100);
-      case 'qq_memory_remove': this.feature('memoryEnabled'); return this.store.update(d => {const m=d.memories.find(m=>m.chat===ctx.chat&&m.id===a.memory_id);if(!m)return {removed:0};if(memoryMeta(d,m.id).locked&&ctx.user!==this.settings().approval.adminQq)throw new Error('管理员锁定的记忆需要在管理端修改');forgetMemory(d,m.id);return {removed:1};});
+      case 'qq_memory_remove': this.feature('memoryEnabled'); return this.store.update(d => {this.check(ctx);const m=d.memories.find(m=>m.chat===ctx.chat&&m.id===a.memory_id);if(!m)return {removed:0};if(memoryMeta(d,m.id).locked&&!isAccountOwner(ctx,this.settings().approval.adminQq))throw new Error('管理员锁定的记忆需要主人真实消息或在管理端修改');forgetMemory(d,m.id);return {removed:1};});
       case 'qq_finish': ctx.silent = true; ctx.topic = a.active_topic; ctx.endTopic = a.end_topic;if(ctx.autonomous)ctx.autonomous.reason=a.reason; this.log(`[decision] ${ctx.chat} ${a.reason}`); return { finished: true };
       case 'qq_set_reminder': {
         this.feature('remindersEnabled');
@@ -370,13 +382,13 @@ export class SocialEngine {
         if (!Number.isFinite(due) || due <= Date.now()) throw new Error('提醒时间必须在未来，格式为上海时间 YYYY-MM-DD HH:mm');
         return this.store.addTask({ chat: ctx.chat, creator: String(ctx.user), text: a.text, due, interval: a.interval_minutes * 60000 });
       }
-      case 'qq_reminders': return state().tasks.filter(t => t.chat === ctx.chat && !['sent', 'cancelled'].includes(t.state));
-      case 'qq_cancel_reminder': return this.store.update(d => { const task = d.tasks.find(t => t.id === a.reminder_id && t.chat === ctx.chat); if (!task || !['pending','blocked'].includes(task.state)) throw new Error('该提醒不存在或已开始执行'); task.state = 'cancelled'; return task; });
+      case 'qq_reminders': return state().tasks.filter(t => t.chat === ctx.chat && (t.creator===String(ctx.user)||isAccountOwner(ctx,this.settings().approval.adminQq)) && !['sent', 'cancelled'].includes(t.state));
+      case 'qq_cancel_reminder': return this.store.update(d => { this.check(ctx);const task = d.tasks.find(t => t.id === a.reminder_id && t.chat === ctx.chat); if (!task || !['pending','blocked'].includes(task.state)) throw new Error('该提醒不存在或已开始执行');if(task.creator!==String(ctx.user)&&!isAccountOwner(ctx,this.settings().approval.adminQq))throw new Error('只能取消自己在当前会话创建的提醒');task.state = 'cancelled'; return task; });
       case 'qq_events': {
         const ownerInbox = isAccountOwner(ctx, this.settings().approval.adminQq) && ctx.chat === `private:${ctx.user}`;
         return state().events.filter(e =>
           (e.chat === ctx.chat || ownerInbox && e.type.startsWith('request:') && allowedChat(this.settings().social, e.chat)) &&
-          (!a.pending_only || !e.handled)).slice(-50);
+          (!e.type.startsWith('request:')||isAccountOwner(ctx,this.settings().approval.adminQq))&&(!a.pending_only || !e.handled)).slice(-50).map(e=>({...e,data:Object.fromEntries(Object.entries(e.data).filter(([key])=>!['flag','token','cookie'].includes(key.toLowerCase())))}));
       }
       case 'qq_actions': return state().actions.filter(action => action.chat === ctx.chat).slice(-30);
       case 'qq_handle_request': {
@@ -464,13 +476,16 @@ export class SocialEngine {
           return {qzone,target};
         };
         const {qzone,target}=validate();if(target.post.user_id!==ctx.self)await this.spaceTarget(ctx,target.post.user_id);
+        let checkApproval:(()=>void)|undefined;
         if(qzone.commentRequireConfirm||this.settings().social.autonomy!=='autonomous') {
+          const binding=approvalBinding(this.settings(),{tool,chat:ctx.chat,user:ctx.user,target:target.post.url,args:a});
           confirmed=await this.confirm(`要${target.reply?'回复空间评论':'评论 QQ 空间说说'}：\n目标：${target.post.name||target.post.user_id}（QQ ${target.post.user_id}）\n动态：${target.post.text.slice(0,800)}\n${target.reply?'回复 '+(target.reply.name||target.reply.user_id)+'：'+target.reply.text+'\n':''}评论正文：\n${a.text}`,ctx.signal);
           if(!confirmed)throw new Error('空间评论未获管理员确认');
+          checkApproval=()=>binding.assert(this.settings());
         }
         let reserved=false;
         try {const result=await this.qzone.comment(ctx.chat,ctx.self,{post_id:a.post_id,text:a.text,reply_id:a.reply_id},ctx.signal,async()=>{
-          const check=()=>{const {qzone}=validate();if((qzone.commentRequireConfirm||this.settings().social.autonomy!=='autonomous')&&!confirmed)throw new Error('空间评论现在需要管理员确认，请重新发起');return qzone;};
+          const check=()=>{const {qzone}=validate();if((qzone.commentRequireConfirm||this.settings().social.autonomy!=='autonomous')&&!confirmed)throw new Error('空间评论现在需要管理员确认，请重新发起');checkApproval?.();return qzone;};
           check();await this.quota(ctx,ctx.chat,()=>[{key:'qzone-comments',amount:1,limit:check().commentDailyLimit,label:'空间评论'}]);check();
           await this.autonomy.reserveSpaceComment(ctx,target.post.url);reserved=true;check();
         });await this.autonomy.finishSpaceComment(ctx,target.post.url,true);return result;}
@@ -559,6 +574,7 @@ export class SocialEngine {
     this.check(ctx);
     if (tool === 'qq_set_profile' && Object.keys(args).length === 0) throw new Error('请至少填写一项要修改的资料');
     assertAccountTool(ctx, this.settings().approval.adminQq, tool);
+    assertToolAccess(ctx,this.settings(),tool,args);
     if (tool === 'qq_self_info') {
       if (args.group_id) { await this.target(ctx, `group:${args.group_id}`); return this.api.call('get_group_member_info', { group_id: args.group_id, user_id: ctx.self, no_cache: true }, ctx.signal); }
       return this.api.call('get_login_info', {}, ctx.signal);
@@ -567,13 +583,17 @@ export class SocialEngine {
     if (readActions[tool]) {
       if (args.group_id) await this.target(ctx, `group:${args.group_id}`);
       const result = await this.api.call<unknown>(readActions[tool], args, ctx.signal);
-      if (Array.isArray(result)) return result.filter(item => !this.settings().social.blockedUsers.includes(String(item.user_id ?? '')) && !this.settings().social.blockedGroups.includes(String(item.group_id ?? '')));
+      this.check(ctx);assertToolAccess(ctx,this.settings(),tool,args);
+      if (Array.isArray(result)) return result.filter(item => !this.settings().social.blockedUsers.includes(String(item.user_id ?? '')) && !this.settings().social.blockedGroups.includes(String(item.group_id ?? '')) && (tool==='qq_get_group_member_list'||allowedChat(this.settings().social,`${tool==='qq_get_group_list'?'group':'private'}:${item.group_id??item.user_id}`)));
       return result;
     }
     if (tool === 'qq_get_cookies') throw new Error('登录凭据不提供给会话模型；空间操作请使用空间浏览与评论工具');
-    await this.approve(ctx, tool, true);
-    const id = await this.store.beginAction(ctx.chat, tool);
+    const previousAuthorization=ctx.authorize;
+    ctx.authorize=()=>{previousAuthorization?.();assertToolAccess(ctx,this.settings(),tool,args);};
+    let id:string|undefined;
     try {
+      await this.approve(ctx, tool, true,args);
+      id = await this.store.beginAction(ctx.chat, tool);
       await this.quota(ctx, ctx.chat);
       let result: unknown;
       if (tool === 'qq_set_profile') {
@@ -597,7 +617,8 @@ export class SocialEngine {
         await this.store.update(d => { const m = d.messages.find(m => m.chat === ctx.chat && m.id === args.message_id); if (m) m.recalled = true; });
       } else throw new Error('未知 QQ 动作');
       await this.store.endAction(id, 'success', '已完成'); return result;
-    } catch (error) { await this.store.endAction(id, 'unknown', String(error)); throw error; }
+    } catch (error) { if(id)await this.store.endAction(id, 'unknown', String(error)); throw error; }
+    finally {ctx.authorize=previousAuthorization;}
   }
   async tick(self: number, signal: AbortSignal, wake: (chat: string, reason: string,autonomous?:AutonomousTurn) => Promise<void|boolean>,canWake?:(chat:string,kind:AutonomousTurn['kind'])=>boolean): Promise<void> {
     if (this.tickRunning || !self || signal.aborted) return;

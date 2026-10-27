@@ -42,6 +42,34 @@ async function fixture(run) {
 }
 const entry = (id, extra={}) => ({ chat:'group:30001',id,user:20001,name:'甲',at:Date.now(),text:'测试',segments:[{type:'text',data:{text:'测试'}}],self:false,recalled:false,...extra });
 
+test('普通群友无法枚举联系人、访问其它群、读取申请凭据或修改他人的提醒',()=>fixture(async({engine,ctx,call,store,settings,calls})=>{
+  const member={...ctx(),user:20002};
+  for(const tool of ['qq_get_friend_list','qq_get_group_list'])await assert.rejects(engine.legacy(tool,{},member),/仅机器人主人/);
+  await assert.rejects(call('qq_chats',{},member),/仅机器人主人/);
+  await assert.rejects(engine.legacy('qq_get_group_member_list',{group_id:30002},member),/当前群/);
+  await assert.rejects(engine.target(member,'private:20001'),/跨会话/);
+  assert.equal(calls.length,0);
+  settings.chat.group.proactive.enabled=true;
+  const reminder=await call('qq_set_reminder',{text:'主人的提醒',delay_minutes:1},ctx());
+  assert.deepEqual(await call('qq_reminders',{},member),[]);
+  await assert.rejects(call('qq_cancel_reminder',{reminder_id:reminder.id},member),/只能取消自己/);
+  await store.addEvent('group:30001','request:group',{flag:'private-flag',token:'private-token',sub_type:'invite'});
+  assert.deepEqual(await call('qq_events',{},member),[]);
+  const events=await call('qq_events');assert.equal(events.length,1);assert.doesNotMatch(JSON.stringify(events),/private-flag|private-token/);
+  const capabilities=await call('qq_capabilities',{},member);assert.equal(capabilities.settings.allowedUsers,undefined);assert.equal(capabilities.tools.some(t=>t.name==='qq_chats'),false);
+  settings.social.autonomy='autonomous';await engine.normalReply(member,'正常聊天');assert.ok(calls.some(c=>c.action==='send_group_msg'));
+}));
+
+test('后台来源不能靠主人 QQ 删除锁定记忆，实际确认展示正文并在策略变化后失效',()=>fixture(async({engine,ctx,call,store,settings,api,media,usage,calls})=>{
+  const memory=await call('qq_memory_append',{user_id:20001,name:'甲',text:'锁定的事实'});
+  await store.update(d=>{d.cognition.memories[memory.id].locked=true;});
+  await assert.rejects(call('qq_memory_remove',{memory_id:memory.id},{...ctx(),origin:'background'}),/锁定的记忆/);
+  settings.social.autonomy='confirm';
+  const changing=new SocialEngine(store,media,api,usage,()=>settings,async text=>{assert.match(text,/实际正文/);assert.match(text,/group:30001/);settings.social.blockedGroups.push('30001');return true;},()=>{},()=>{});
+  await assert.rejects(changing.execute({action:'social',tool:'qq_reply',args:{text:'实际正文'}},ctx()),/确认已过期/);
+  assert.equal(calls.some(c=>c.action==='send_group_msg'),false);
+}));
+
 test('回复当前会话不扣主动额度，引用与 @ 使用真实消息和群成员', () => fixture(async ({store,call,ctx,calls,usage}) => {
   await store.add(entry(-12)); const turn=ctx();
   const result=await call('qq_reply',{text:'收到',reply_to:-12,at_user:20001},turn);

@@ -22,6 +22,7 @@ import { ConversationQueue, QueueFullError, withTimeout } from './core/runtime.j
 import { RecentMessages, splitForQq } from './core/message-utils.js';
 import { GroupContextStore, groupTrigger, formatGroupEntry } from './qq/group-context.js';
 import { parseApprovalReply, permissionOutcome } from './core/permissions.js';
+import { assertToolAccess, toolAccessVisible, approvalBinding } from './security/tool-policy.js';
 import { DailyUsageStore } from './core/usage.js';
 import { QqActionPolicy } from './qq/qq-actions.js';
 import { startActionServer, type ActionServer } from './services/action-server.js';
@@ -128,16 +129,16 @@ function qqMcpServers(key: string,overrideContext?:string): acp.McpServer[] {
       { name: 'BOT_ACTION_URL', value: actionServer.url },
       { name: 'BOT_ACTION_TOKEN', value: actionServer.token },
       { name: 'BOT_ACTION_CONTEXT', value: context },
-      ...(getSettings().context.filterTools?[{name:'BOT_QQ_TOOLS',value:toolPolicy()}]:[]),
+      ...(getSettings().context.filterTools?[{name:'BOT_QQ_TOOLS',value:toolPolicy(key)}]:[]),
     ],
   }];
 }
 
-function toolPolicy():string {return getSettings().context.filterTools?JSON.stringify([...socialTools,...legacyTools].filter(t=>toolAvailable(t.name,getSettings())).map(t=>t.name)):'all';}
+function toolPolicy(key?:string):string {const active=key?activeConversations.get(key):undefined;return getSettings().context.filterTools?JSON.stringify([...socialTools,...legacyTools].filter(t=>toolAvailable(t.name,getSettings())&&(!active||toolAccessVisible(active,getSettings(),t.name))).map(t=>t.name)):'all';}
 
 async function getSession(key: string): Promise<acp.ActiveSession> {
   const existing = sessions.get(key);
-  const policy=toolPolicy(),previous=store.metadata(key),occupancy=contextUsage.get(key);
+  const policy=toolPolicy(key),previous=store.metadata(key),occupancy=contextUsage.get(key);
   const replace=Boolean((existing||previous)&&(previous?.policy!==policy&&(getSettings().context.filterTools||previous?.policy&&previous.policy!=='all')||getSettings().context.rollover&&occupancy&&occupancy.used/occupancy.size*100>=getSettings().context.rolloverPercent));
   if (existing&&!replace) return existing;
 
@@ -324,12 +325,13 @@ function askAdmin(title: string, signal?: AbortSignal): Promise<boolean> {
   if (!settings.approval.adminQq || signal?.aborted) return Promise.resolve(false);
 
   const id = randomBytes(3).toString('hex');
+  const binding=approvalBinding(settings,{title});
   return new Promise<boolean>((resolve) => {
     const finish = (approved: boolean): void => {
       clearTimeout(timer);
       signal?.removeEventListener('abort', cancel);
       pendingApprovals.delete(id);
-      resolve(approved);
+      try{if(approved)binding.assert(getSettings());resolve(approved);}catch{resolve(false);}
     };
     const cancel = (): void => finish(false);
     const timer = setTimeout(() => finish(false), settings.approval.timeoutMs);
@@ -779,11 +781,14 @@ async function main(): Promise<void> {
         return await engine.legacy(call.tool, z.object(def.schema as z.ZodRawShape).strict().parse(call.args), callCtx);
       }
       const validated = QqActionSchema.parse(input);
-      engine.guardTool(callCtx,({send_message:'qq_send_message',like:'qq_like',qzone_post:'qq_qzone_post'} as const)[validated.action]);
+      const toolName=({send_message:'qq_send_message',like:'qq_like',qzone_post:'qq_qzone_post'} as const)[validated.action];
+      engine.guardTool(callCtx,toolName);
+      assertToolAccess(callCtx,getSettings(),toolName,validated);
+      callCtx.authorize=()=>assertToolAccess(callCtx,getSettings(),toolName,validated);
       engine.autonomy.authorize(callCtx,validated.action);
       engine.check(callCtx);
-      if (validated.action === 'like') await engine.target(callCtx, `private:${validated.user_id}`);
-      if (validated.action !== 'qzone_post') await engine.approve(callCtx, validated.action);
+      if (validated.action === 'like') await engine.target(callCtx, `private:${validated.user_id}`,true);
+      if (validated.action !== 'qzone_post') await engine.approve(callCtx, toolName,false,validated);
       const audit = await socialStore.beginAction(callCtx.chat, validated.action);
       let result: unknown;
       try {

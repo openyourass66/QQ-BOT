@@ -95,10 +95,11 @@ test('并发重复评论只提交一次；发送前取消或读取中屏蔽不�
 
 async function engineFixture(run) {
   const root=await mkdtemp(join(tmpdir(),'qq-native-space-')),{state,api,service}=rig(),settings=structuredClone(DEFAULT_SETTINGS),confirmations=[];
+  settings.approval.adminQq=20001;
   const store=new SocialStore(join(root,'social.json'));await store.load();const usage=new DailyUsageStore(join(root,'usage.json'));await usage.load();
   let confirm=async()=>true;
   const engine=new SocialEngine(store,new MediaService(join(root,'media'),()=>settings.social),api,usage,()=>settings,async(text,signal)=>{confirmations.push(text);return confirm(text,signal);},()=>{},()=>{},service);
-  const context={chat:'group:30001',self:10000,user:20001,sent:0,silent:false,signal:signal()},call=(tool,args={},ctx=context)=>engine.execute({action:'social',tool,args},ctx);
+  const context={chat:'group:30001',self:10000,user:20001,origin:'message',sent:0,silent:false,signal:signal()},call=(tool,args={},ctx=context)=>engine.execute({action:'social',tool,args},ctx);
   try {await run({state,settings,usage,engine,confirmations,call,setConfirm:value=>{confirm=value;}});}finally{await rm(root,{recursive:true,force:true,maxRetries:10,retryDelay:100});}
 }
 
