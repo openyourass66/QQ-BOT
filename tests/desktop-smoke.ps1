@@ -1,4 +1,4 @@
-param([string]$Executable = 'QQ-BOT.exe', [switch]$SkipTrayCheck, [switch]$SeparateData)
+param([string]$Executable = 'QQ-BOT.exe', [switch]$SkipTrayCheck, [switch]$SeparateData, [string]$ReleaseDirectory)
 $ErrorActionPreference = 'Stop'
 $projectRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $testRoot = Join-Path ([IO.Path]::GetTempPath()) ('qq-desktop-ui-' + [guid]::NewGuid().ToString('N'))
@@ -13,10 +13,17 @@ function Start-Fixture([string[]]$LaunchArguments) {
     $info.WindowStyle = [Diagnostics.ProcessWindowStyle]::Hidden
     $info.EnvironmentVariables['LOCALAPPDATA'] = Join-Path $testRoot 'local appdata'
     $info.EnvironmentVariables.Remove('BOT_DATA_DIR')
+    foreach ($key in @($info.EnvironmentVariables.Keys)) {
+        if ($key -match '^(BOT_|ONEBOT_|QQ_BOT_|SESSION_STORE$|ADMIN_QQ$|ALLOW_EXEC$)') { $info.EnvironmentVariables.Remove($key) }
+    }
+    if ($ReleaseDirectory) { $info.EnvironmentVariables['PATH'] = (Join-Path $env:WINDIR 'System32') + ';' + (Join-Path $env:WINDIR 'System32/WindowsPowerShell/v1.0') }
     return [Diagnostics.Process]::Start($info)
 }
 try {
     $executablePath = if ([IO.Path]::IsPathRooted($Executable)) { $Executable } else { Join-Path $projectRoot $Executable }
+    if ($ReleaseDirectory) {
+        foreach ($entry in Get-ChildItem -LiteralPath ([IO.Path]::GetFullPath($ReleaseDirectory)) -Force) { Copy-Item -LiteralPath $entry.FullName -Destination $testRoot -Recurse }
+    } else {
     Copy-Item -LiteralPath $executablePath -Destination (Join-Path $testRoot 'QQ-BOT.exe')
     Copy-Item -LiteralPath (Join-Path $projectRoot 'desktop') -Destination $testRoot -Recurse
     Copy-Item -LiteralPath (Join-Path $projectRoot 'dist') -Destination $testRoot -Recurse
@@ -24,7 +31,9 @@ try {
     [void][IO.Directory]::CreateDirectory((Join-Path $testRoot 'scripts'))
     Copy-Item -LiteralPath (Join-Path $projectRoot 'scripts/setup.mjs') -Destination (Join-Path $testRoot 'scripts/setup.mjs')
     Copy-Item -LiteralPath (Join-Path $projectRoot 'scripts/app-paths.mjs') -Destination (Join-Path $testRoot 'scripts/app-paths.mjs')
-    if ($SeparateData) {
+    Copy-Item -LiteralPath (Join-Path $projectRoot 'scripts/component-paths.mjs') -Destination (Join-Path $testRoot 'scripts/component-paths.mjs')
+    }
+    if ($SeparateData -and !$ReleaseDirectory) {
         Copy-Item -LiteralPath (Join-Path $projectRoot '.env.example') -Destination $testRoot
         Copy-Item -LiteralPath (Join-Path $projectRoot 'templates') -Destination $testRoot -Recurse
         [void][IO.Directory]::CreateDirectory((Join-Path $testRoot 'runtime'))
@@ -48,7 +57,7 @@ try {
     $fixtureSocial = @{ version = 1; account = 0; messages = @(); contacts = @(); memories = @(@{ id = 'memory-fixture'; chat = 'private:10001'; user = '10001'; name = 'Fixture friend'; text = 'Does not drink coffee.'; at = 1 }); stickers = $fixtureStickers; tasks = @(); events = @(); actions = @(); turns = @(); profiles = @(); autonomous = $fixtureAutonomous; cognition = $fixtureCognition } | ConvertTo-Json -Depth 6
     [IO.File]::WriteAllText((Join-Path $fixtureDataRoot 'data/social.json'), $fixtureSocial, [Text.UTF8Encoding]::new($false))
     # Use the installed dependencies while keeping settings and persona isolated.
-    New-Item -ItemType Junction -Path (Join-Path $testRoot 'node_modules') -Target (Join-Path $projectRoot 'node_modules') | Out-Null
+    if (!$ReleaseDirectory) { New-Item -ItemType Junction -Path (Join-Path $testRoot 'node_modules') -Target (Join-Path $projectRoot 'node_modules') | Out-Null }
     $smokeArguments = if ($SeparateData) { @('--smoke', '--data-dir', ('"' + $fixtureDataRoot + '"')) } else { @('--smoke') }
     $process = Start-Fixture $smokeArguments
     if (!$process.WaitForExit(30000)) { throw 'Native UI smoke timed out' }

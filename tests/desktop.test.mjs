@@ -73,7 +73,7 @@ test('桌面控制：重复启动、模型重连、完整重启、仅在配置�
   const root = await mkdtemp(join(tmpdir(), 'qq-desktop-host-'));
   for (const dir of ['desktop', 'dist', 'scripts']) await mkdir(join(root, dir));
   await cp(resolve('desktop/host.mjs'), join(root, 'desktop/host.mjs'));
-  for (const file of ['app-paths.mjs', 'setup.mjs']) await cp(resolve('scripts', file), join(root, 'scripts', file));
+  for (const file of ['app-paths.mjs', 'setup.mjs', 'component-paths.mjs']) await cp(resolve('scripts', file), join(root, 'scripts', file));
   await writeFile(join(root, 'desktop/diagnostics.mjs'), "export async function diagnose(){return {ok:true,rows:[]}}; export async function environment(){return {ONEBOT_TOKEN:'secret-test-token'}}; export async function onebotOnline(){return false};");
   await writeFile(join(root, 'dist/bridge.js'), "console.log('bridge-started'); console.log('token=secret-test-token'); process.on('message', m => { if (m === 'shutdown') { console.log('graceful-stop'); process.exit(); } }); setInterval(() => {}, 1000);");
   await writeFile(join(root, 'scripts/napcat-node.mjs'), "console.log('napcat-started'); setInterval(() => {}, 1000);");

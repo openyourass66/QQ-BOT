@@ -3,6 +3,7 @@ import { dirname, join, resolve, parse } from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { diagnose, environment, onebotOnline } from './diagnostics.mjs';
+import { installedComponent } from '../scripts/component-paths.mjs';
 
 const execute = promisify(execFile);
 const isFile = path => stat(path).then(s => s.isFile(), () => false);
@@ -26,6 +27,8 @@ export async function detectEnvironment(root, env, { runningPaths, platform = pr
     ...bases.map(p => join(p, 'DeepSeek Harness', 'resources/runtime/cli/bin/dsh.cmd')),
     ...runningPaths.filter(p => typeof p === 'string' && /harness/i.test(p)).map(p => join(dirname(p), 'resources/runtime/cli/bin/dsh.cmd'))];
   const qq = [env.BOT_QQ_DIR && resolve(root, env.BOT_QQ_DIR), ...runningPaths.filter(p => typeof p === 'string' && /[\\/]QQ\.exe$/i.test(p)).map(p => dirname(p)), ...bases.flatMap(p => [join(p, 'Tencent/QQ'), join(p, 'QQ')])];
+  const managed = await installedComponent('dsh', root);
+  if (managed) dsh.splice(1,0,join(managed.directory,'dsh.cmd'));
   const suggestions = [];
   for (const [key, candidates, check] of [['BOT_DSH_BIN', dsh, isFile], ['BOT_QQ_DIR', qq, isQQ]]) {
     for (const path of [...new Set(candidates.filter(Boolean))]) {

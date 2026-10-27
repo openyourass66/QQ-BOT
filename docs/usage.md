@@ -2,6 +2,8 @@
 
 ## 首次配置与组件安装
 
+Windows x64 可在快速配置第一步点击「准备运行组件」，下载固定版本的 DSH 与 QQ 接入组件，支持进度、取消、重试及 QQ 官方 ZIP 导入。准备完成只填入路径草稿，检查并保存后生效；组件准备不调用模型，也不启动真实 QQ 登录。来源、验证范围及发行目录说明见[组件与打包](components-and-packaging.md)。
+
 在工作总览点击「快速配置」，按检测环境、选择模型、连接 QQ、检查并启动四步操作。随时可返回上一步或切换到全部连接设置；两个入口共用草稿，最后统一保存。默认工作区与配置在缺失时初始化，已有文件不覆盖。
 
 首页引导只在首次配置未完成时显示。检查通过并保存，或 QQ 与模型成功连接后会记住完成状态；后续启动、停止和短暂离线都不会重新显示。需要调整时，可从「连接与运行」手动打开「快速配置」。
@@ -34,7 +36,7 @@ NapCat 的 HTTP 服务与正向 WebSocket 服务通常分别使用 `3000`、`300
 
 可连接外部 OneBot，也可由工作台管理本机 NapCat。OneBot 11 推荐设置 HTTP `http://127.0.0.1:3000`、正向 WebSocket `ws://127.0.0.1:3001`，配置令牌并选择消息段数组格式；项目连接设置须保持一致。
 
-本机 Node 模式需要预先部署官方 NapCat Shell 到 `napcat/shell/`，并将官方 Node 运行适配库 `QQNT.dll` 放入 `napcat/node-runtime/QQNT.dll`。这个库与 QQ 安装目录的同名文件用途不同，不能互换。在「连接与运行」选择 QQ 安装目录与 DSH 启动文件，首次启动按 NapCat 日志完成扫码。
+使用已准备的官方 Windows Node 组件时，运行文件由工作台管理，无需手工寻找 DLL 或提供系统 QQ 安装目录。首次启动仍需按 NapCat 官方流程完成登录和 OneBot 设置。手工模式则需预先部署 Shell 到 `napcat/shell/`，将官方适配库 `QQNT.dll` 放入 `napcat/node-runtime/QQNT.dll`，并选择 QQ 安装目录；这个库不能用 QQ 目录同名文件替代。
 
 `scripts/napcat-node.mjs` 从 `BOT_QQ_DIR` 读取 QQ 版本，复制所需组件到独立 `node-runtime/`，不修改系统 QQ。首次部署复用 Shell 中的账号配置，后续以 `node-runtime/config/` 为准。手动运行 `npm run napcat` 的进程需在原终端停止。
 

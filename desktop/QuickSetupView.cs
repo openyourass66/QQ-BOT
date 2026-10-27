@@ -13,7 +13,7 @@ partial class App
     static Dictionary<string,string> detectionBaseline = new Dictionary<string,string>();
     static readonly string[] quickTitles = { "1 检测环境", "2 选择模型", "3 连接 QQ", "4 检查并启动" };
     static readonly string[] quickDescriptions = {
-        "先选择 QQ 接入方式，再检测 DSH 和 QQ 路径。已有 QQ 服务可跳过本机 NapCat 部署。",
+        "可先准备运行组件，也可检测已安装的 DSH 和 QQ。已有 QQ 服务可跳过本机 QQ 组件。",
         "已有 DSH 模型配置可直接沿用；首次使用建议选择本项目 API Key。Profile 和账号模式需先在 DSH 完成配置或登录。",
         "本机通常使用默认地址，只需核对 NapCat 的端口和令牌。机器人 QQ 可以自动识别，无需手填。",
         "检查当前输入后即可保存并启动。媒体、搜索、人设和行为参数可以稍后在全部设置中调整。"
@@ -42,6 +42,7 @@ partial class App
             ShowQuickStep(Math.Min(3,quickStep+1));
         };
         Find<Button>("DetectEnvironment").Click+=(s,e)=>RequestOnboarding("detect");
+        Find<Button>("PrepareComponents").Click+=(s,e)=>OpenComponents();
         Find<Button>("CheckSetup").Click+=(s,e)=>RequestOnboarding("check");
         Find<Button>("SetupGuide").Click+=(s,e)=>{
             ShowSetupGuide();
@@ -95,6 +96,7 @@ partial class App
         Find<Button>("DetectEnvironment").IsEnabled=editable;
         Find<Button>("CheckSetup").IsEnabled=editable;
         Find<Button>("DetectEnvironment").Visibility=quickStep==0?Visibility.Visible:Visibility.Collapsed;
+        Find<Button>("PrepareComponents").Visibility=quickStep==0?Visibility.Visible:Visibility.Collapsed;
         Find<Button>("CheckSetup").Visibility=quickStep==3?Visibility.Visible:Visibility.Collapsed;
         Find<Button>("SetupGuide").Visibility=quickStep==0||quickStep==3?Visibility.Visible:Visibility.Collapsed;
         Find<StackPanel>("QuickResults").Visibility=quickStep==3?Visibility.Visible:Visibility.Collapsed;
@@ -160,10 +162,10 @@ partial class App
     static Window CreateSetupGuide() {
         var guide=new Window {Title="组件安装指引",Owner=window,Width=640,Height=Math.Min(720,SystemParameters.WorkArea.Height-40),MinWidth=520,MinHeight=500,WindowStartupLocation=WindowStartupLocation.CenterOwner,Resources=window.Resources,Background=window.Background,Foreground=window.Foreground,FontFamily=window.FontFamily,FontSize=13};
         var content=new StackPanel {Margin=new Thickness(24)};
-        content.Children.Add(new TextBlock {Text="准备好组件，再回来自动检测",FontSize=21,FontWeight=FontWeights.SemiBold,TextWrapping=TextWrapping.Wrap,Margin=new Thickness(0,0,0,10)});
-        content.Children.Add(new TextBlock {Text="程序只检查已安装的组件。下面的按钮打开官方说明，由你选择安装；现有账号与配置继续保留。",Foreground=Ink("Muted"),TextWrapping=TextWrapping.Wrap,LineHeight=21,Margin=new Thickness(0,0,0,20)});
+        content.Children.Add(new TextBlock {Text="准备组件与手动安装指引",FontSize=21,FontWeight=FontWeights.SemiBold,TextWrapping=TextWrapping.Wrap,Margin=new Thickness(0,0,0,10)});
+        content.Children.Add(new TextBlock {Text="可在快速配置中点击“准备运行组件”。下面也提供官方说明，适合已有环境或手动安装；现有账号与配置继续保留。",Foreground=Ink("Muted"),TextWrapping=TextWrapping.Wrap,LineHeight=21,Margin=new Thickness(0,0,0,20)});
         AddSetupGuideItem(content,"1 · 模型运行器 DSH","安装 DeepSeek Harness。返回后检测或选择安装目录中的 dsh.cmd；使用已有模型配置或账号登录时，请先在 DSH 完成相应配置。","打开 DSH 官方下载","https://deepseek.com/harness/");
-        AddSetupGuideItem(content,"2 · QQ 与 NapCat","已有 NapCat 服务：先按官方说明启动并登录 QQ，再选择“连接已运行的 QQ 服务”。本机由工作台启动：需要 QQ、napcat/shell/napcat.mjs 及 napcat/node-runtime/QQNT.dll（官方 Node 适配库）。","打开 NapCat 官方安装说明","https://napneko.github.io/guide/boot/Shell","下载 QQ Windows 版","https://im.qq.com/pcqq/");
+        AddSetupGuideItem(content,"2 · QQ 与 NapCat","已有服务：先登录 QQ，再选择“连接已运行的 QQ 服务”。本机受管组件：点击“准备运行组件”，无需选择系统 QQ。手动 Shell 模式仍需 QQ 目录、napcat.mjs 和官方 Node 适配库 QQNT.dll。","打开 NapCat 官方安装说明","https://napneko.github.io/guide/boot/Shell","下载 QQ Windows 版","https://im.qq.com/pcqq/");
         AddSetupGuideItem(content,"3 · 核对两个连接地址","在 NapCat 网络设置启用 HTTP 服务（通常 3000）和正向 WebSocket 服务（通常 3001）。将对应地址及 access_token 填入本工作台；不要选择反向 WebSocket。","查看 NapCat 网络配置","https://napneko.github.io/config/basic");
         var close=new Button {Content="返回快速配置",Style=(Style)window.FindResource("Primary"),HorizontalAlignment=HorizontalAlignment.Right,Margin=new Thickness(0,12,0,0)};close.Click+=(s,e)=>guide.Close();content.Children.Add(close);
         guide.Content=new ScrollViewer {Content=content,Background=window.Background,VerticalScrollBarVisibility=ScrollBarVisibility.Auto};return guide;

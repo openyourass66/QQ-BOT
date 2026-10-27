@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url';
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const files = spawnSync('git', ['ls-files', '-z', '--cached', '--others', '--exclude-standard'], { cwd: root, encoding: 'utf8', windowsHide: true });
 if (files.error || files.status !== 0) throw new Error('隔离测试需要在可读取的 Git 工作区运行');
-const allowed = path => /^(?:src|tests|desktop|scripts|templates|docs)\//.test(path) || ['package.json', 'package-lock.json', 'tsconfig.json', 'README.md', '.env.example', '.gitignore'].includes(path);
+const allowed = path => /^(?:src|tests|desktop|scripts|templates|docs|components)\//.test(path) || ['package.json', 'package-lock.json', 'tsconfig.json', 'README.md', 'LICENSE', '.env.example', '.gitignore'].includes(path);
 const paths = [...new Set(files.stdout.split('\0').filter(path => path && allowed(path)))];
 const tempRoot = await realpath(tmpdir());
 const scratch = await mkdtemp(join(tempRoot, 'qq-bot-check-'));

@@ -18,17 +18,21 @@
     "test": "npm run build && node --test tests/*.test.mjs",
     "test:isolated": "node scripts/test-isolated.mjs",
     "benchmark:store": "npm run build && node --expose-gc scripts/benchmark-store.mjs",
-    "napcat": "node scripts/run.mjs napcat"
+    "napcat": "node scripts/run.mjs napcat",
+    "components": "node scripts/components.mjs",
+    "package:dir": "npm run desktop:build && node scripts/package.mjs"
   },
   "dependencies": {
     "@agentclientprotocol/sdk": "1.4.0",
     "@modelcontextprotocol/sdk": "^1.20.0",
     "ws": "^8.18.0",
+    "yauzl": "3.4.0",
     "zod": "^3.25.0"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
     "@types/ws": "^8.18.0",
     "typescript": "^5.9.0"
-  }
+  },
+  "license": "MIT"
 }

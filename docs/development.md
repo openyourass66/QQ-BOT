@@ -4,6 +4,8 @@
 
 当前已实现范围及验证结果见[实施进展](implementation-status.md)。
 
+固定组件、隔离准备器与内部发行目录构建见[组件与打包](components-and-packaging.md)。`npm run package:dir` 生成内置运行环境的验证目录，不代表完成正式安装器和发布验收。
+
 桌面与正式命令行入口使用 `scripts/app-paths.mjs`、`scripts/run.mjs` 统一运行布局；程序资源从安装目录读取，用户配置与运行文件按选定数据目录解析。入口参数和兼容规则见[运行布局说明](runtime-layout.md)。
 
 ## 模块边界

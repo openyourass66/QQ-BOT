@@ -1,0 +1,54 @@
+{
+  "formatVersion": 1,
+  "platform": "win32-x64",
+  "components": {
+    "node": {
+      "name": "模型运行环境",
+      "version": "24.22.1",
+      "kind": "zip",
+      "url": "https://nodejs.org/dist/v24.22.1/node-v24.22.1-win-x64.zip",
+      "size": 37748064,
+      "sha256": "d2046d28c2c3dcd211ac5145c0bf30e2047ef9dfb306693c8c6e2eccd8b95fa5",
+      "executableSha256": "d702daa815eabbff763c7d3808e235cf031cf2ca70211b56847bc72f51e240e5",
+      "prefix": "node-v24.22.1-win-x64/",
+      "required": [
+        "node.exe",
+        "node_modules/npm/bin/npm-cli.js",
+        "LICENSE"
+      ],
+      "source": "https://nodejs.org/dist/v24.22.1/SHASUMS256.txt"
+    },
+    "dsh": {
+      "name": "模型运行器 DSH",
+      "version": "0.2.1-rc.2",
+      "kind": "npm",
+      "required": [
+        "dsh.cmd",
+        "node_modules/@deepseek-ai/dsh/lib/bin.js"
+      ],
+      "source": "https://registry.npmjs.org/@deepseek-ai%2fdsh/0.2.1-rc.2",
+      "lockSha256": "831154608763b3ada7ff2d482bdd191c537059649cf178eadca310019cdd9475"
+    },
+    "napcat": {
+      "name": "QQ 接入组件",
+      "version": "4.18.41",
+      "nodeVersion": "22.11.0",
+      "licenseSha256": "2bbc0dba0c62fcde4adfe38ebadad0b7d4e23b06b88d9551904bbe07769dc46f",
+      "kind": "zip",
+      "url": "https://github.com/NapNeko/NapCatQQ/releases/download/v4.18.41/NapCat.Shell.Windows.Node.zip",
+      "size": 124089498,
+      "sha256": "51fbb10e7bcd56b0c2a6de86c37811e7518330e48a137ac689ab1e4d8627d3f0",
+      "prefix": "",
+      "required": [
+        "node.exe",
+        "QQNT.dll",
+        "wrapper.node",
+        "package.json",
+        "config.json",
+        "index.js",
+        "napcat/napcat.mjs"
+      ],
+      "source": "https://api.github.com/repos/NapNeko/NapCatQQ/releases/tags/v4.18.41"
+    }
+  }
+}

@@ -15,6 +15,23 @@ const children = new Map();
 const socialRequests = new Map();
 let socialSequence = 0;
 let busy = false, quitting = false, externalNapcat = false;
+let componentWorker;
+async function components(operation, data) {
+  if (componentWorker) throw new Error('组件准备正在进行，请等待完成或取消');
+  if (operation === 'install' && (children.has('bridge') || children.has('napcat'))) throw new Error('请先停止机器人，再准备或修复组件');
+  return new Promise((done,reject)=>{
+    const worker = fork(resolve(root,'desktop/component-worker.mjs'),[],{cwd:dataRoot,silent:true,execArgv:[],windowsHide:true});
+    componentWorker = worker;
+    let replied = false;
+    worker.on('message',message=>{
+      if(message?.type==='progress')emit({...message,type:'component-progress'});
+      if(message?.type==='result'){replied=true;componentWorker=undefined;message.ok?done(message.result):reject(new Error(message.error));}
+    });
+    worker.once('error',error=>{componentWorker=undefined;reject(error);});
+    worker.once('exit',()=>{if(componentWorker===worker)componentWorker=undefined;if(!replied)reject(new Error('组件管理进程已退出，请重试'));});
+    worker.send({action:operation,data});
+  });
+}
 let secrets = [];
 async function refreshSecrets() { const env = await environment(dataRoot); secrets = Object.entries(env).filter(([key, value]) => /TOKEN|SECRET|PASSWORD|API_KEY/i.test(key) && value?.length >= 4).map(([, value]) => value); }
 await refreshSecrets();
@@ -37,7 +54,13 @@ const state = () => emit({ type: 'state', bridge: children.has('bridge'), napcat
 async function launch(name, script) {
   const env = await environment(dataRoot);
   env.BOT_DATA_DIR = dataRoot;
-  const child = fork(resolve(root, script), [], { cwd: dataRoot, env, execArgv: [], silent: true, windowsHide: true });
+  let execPath = process.execPath;
+  if (name === 'napcat') {
+    const { installedComponent } = await import('../scripts/component-paths.mjs');
+    const managed = await installedComponent('napcat',dataRoot,root);
+    if (managed && resolve(dataRoot,env.BOT_NAPCAT_DIR || 'napcat/shell') === join(managed.directory,'napcat')) execPath = join(managed.directory,'node.exe');
+  }
+  const child = fork(resolve(root, script), [], { cwd: dataRoot, env, execPath, execArgv: [], silent: true, windowsHide: true });
   children.set(name, child);
   for (const stream of [child.stdout, child.stderr]) {
     createInterface({ input: stream }).on('line', text => {
@@ -88,6 +111,7 @@ async function check() {
   emit({ type: 'diagnostics', ...result }); return result;
 }
 async function command({ action, data }) {
+  if (action === 'components') { const result = await components(data?.operation, data?.id ? {id:data.id,...(data.archivePath?{archivePath:data.archivePath}:{})} : {}); emit({type:'components',...result}); return; }
   if (action === 'onboarding') { const result = await config(action, data); emit({ type: 'onboarding', ...result }); return; }
   if (action === 'model') { const result = await config(action, data); emit({ type: 'model', ...result }); return; }
   if (action === 'qzone-check') { const result = await config(action,data);emit({type:'qzone-check',...result});return; }
@@ -137,7 +161,15 @@ async function command({ action, data }) {
 }
 const input = createInterface({ input: process.stdin });
 let queue = Promise.resolve();
-input.on('line', line => { queue = queue.then(async () => { let request; try { request = JSON.parse(line); await command(request); } catch (error) { emit({ type: 'error', action: request?.action, text: error.message }); } }); });
-input.on('close', () => { queue.finally(async () => { await stop(); process.exit(); }); });
+const pendingComponents = new Set();
+input.on('line', line => {
+  let request;
+  try { request = JSON.parse(line); } catch { emit({type:'error',text:'控制命令格式无效'}); return; }
+  if (request.action === 'components') pendingComponents.add(request);
+  if (request.action === 'components-cancel' || request.action === 'quit') { for(const pending of pendingComponents)pending.cancelled=true; componentWorker?.send({action:'cancel'},()=>{}); }
+  if (request.action === 'components-cancel') return;
+  queue = queue.then(async () => { try { if(request.action==='components'&&request.cancelled)throw new Error('组件准备已取消'); await command(request); } catch (error) { emit({ type: 'error', action: request?.action, text: error.message }); } finally { pendingComponents.delete(request); } });
+});
+input.on('close', () => { for(const pending of pendingComponents)pending.cancelled=true; componentWorker?.send({action:'cancel'},()=>{}); queue.finally(async () => { await stop(); process.exit(); }); });
 try { for (const text of readFileSync(logPath, 'utf8').trim().split('\n').slice(-100)) if (text) process.stdout.write(JSON.stringify({ type: 'log', text: redact(text), historical: true }) + '\n'); } catch {}
 state();
