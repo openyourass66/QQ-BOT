@@ -1,7 +1,10 @@
 import {parentPort,workerData} from 'node:worker_threads';
 import {DatabaseSync,type SQLInputValue} from 'node:sqlite';
 import {performance} from 'node:perf_hooks';
-import {createHash} from 'node:crypto';
+import {createHash,randomUUID} from 'node:crypto';
+import {openSync,writeSync,fsyncSync,closeSync,linkSync,unlinkSync} from 'node:fs';
+import {isAbsolute} from 'node:path';
+import {rawDataFromRows} from './entity-layout.js';
 import {entityTables,DATABASE_LIMITS,type DatabaseRequest,type EntityRow,type EntityChange} from './database-types.js';
 import type {MessageQuery,MessageRef} from './social-repository.js';
 import type {StoredMessage} from '../qq/social-store.js';
@@ -10,6 +13,8 @@ const port=parentPort!;let db:DatabaseSync;
 const error=(code:string,message:string)=>Object.assign(new Error(message),{code});
 const tableName=(name:string)=>{if(!entityTables.includes(name as never))throw error('DATABASE_REQUEST_INVALID','数据库操作参数无效');return 'entity_'+name;};
 function transaction<T>(fn:()=>T):T {db.exec('BEGIN IMMEDIATE');try{const result=fn();db.exec('COMMIT');return result;}catch(failure){db.exec('ROLLBACK');throw failure;}}
+function readSnapshot<T>(fn:()=>T):T {db.exec('BEGIN');try{const result=fn();db.exec('COMMIT');return result;}catch(failure){db.exec('ROLLBACK');throw failure;}}
+function writeAll(file:number,text:string){const bytes=Buffer.from(text);let offset=0;while(offset<bytes.length){const written=writeSync(file,bytes,offset,bytes.length-offset);if(!written)throw new Error('导出写入中断');offset+=written;}}
 function meta(key:string):unknown {const row=db.prepare('SELECT value FROM runtime_meta WHERE key=?').get(key);return row?JSON.parse(String(row.value)):undefined;}
 function setMeta(key:string,value:unknown){db.prepare('INSERT INTO runtime_meta(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value').run(key,JSON.stringify(value));}
 const revision=()=>Number(meta('revision')??0);
@@ -88,6 +93,18 @@ function execute(request:DatabaseRequest):unknown {
     }
     case 'query-plan':return db.prepare('EXPLAIN QUERY PLAN SELECT payload FROM messages WHERE chat=? ORDER BY at DESC,id DESC LIMIT 100').all(request.chat);
     case 'backup':try{db.prepare('VACUUM INTO ?').run(request.path);return {ok:true};}catch{throw error('DATABASE_BACKUP_FAILED','备份未完成，请检查目标是否已存在、空间和访问权限；当前数据库保持可用。');}
+    case 'export-social':{
+      if(!isAbsolute(request.path))throw error('DATABASE_REQUEST_INVALID','导出目标必须为绝对路径。');
+      const staging=request.path+'.export-'+randomUUID();let descriptor:number|undefined,created=false;
+      try{
+        const metadata=execute({action:'metadata'}) as {rows:EntityRow[]},data=rawDataFromRows(metadata.rows);descriptor=openSync(staging,'wx',0o600);created=true;
+        writeAll(descriptor,'{"messages":[');let count=0;
+        for(const row of db.prepare('SELECT payload FROM messages ORDER BY at,id').iterate()){if(count)writeAll(descriptor,',');writeAll(descriptor,String(row.payload));count++;}
+        const {messages:_,...rest}=data;writeAll(descriptor,'],'+JSON.stringify(rest).slice(1)+'\n');fsyncSync(descriptor);closeSync(descriptor);descriptor=undefined;
+        linkSync(staging,request.path);unlinkSync(staging);created=false;return {messages:count};
+      }catch{throw error('DATABASE_EXPORT_FAILED','导出未完成，请检查目标是否已存在、空间和访问权限；原数据保持不变。');}
+      finally{if(descriptor!==undefined)try{closeSync(descriptor);}catch{}if(created)try{unlinkSync(staging);}catch{}}
+    }
     case 'close':db.close();return {closed:true};
     default:throw error('DATABASE_REQUEST_INVALID','未知数据库操作。');
   }
@@ -109,7 +126,8 @@ try{
   port.on('message',({id,request}:{id:number;request:DatabaseRequest})=>{
     const started=performance.now();
     try{
-      const result=execute(request);if(Buffer.byteLength(JSON.stringify(result))>DATABASE_LIMITS.responseBytes)throw error('DATABASE_RESPONSE_TOO_LARGE','查询结果过大，请缩小查询范围或分页读取。');
+      const reads=['metadata','query-messages','lookup-messages','latest-incoming','integrity','fingerprint','query-plan','export-social'];
+      const result=reads.includes(request.action)?readSnapshot(()=>execute(request)):execute(request);if(Buffer.byteLength(JSON.stringify(result))>DATABASE_LIMITS.responseBytes)throw error('DATABASE_RESPONSE_TOO_LARGE','查询结果过大，请缩小查询范围或分页读取。');
       port.postMessage({id,ok:true,result,elapsedMs:performance.now()-started});if(request.action==='close')port.close();
     }catch(failure){const e=failure as Error&{code?:string;errcode?:number};port.postMessage({id,ok:false,error:{code:e.code?.startsWith('DATABASE_')?e.code:e.errcode===13?'ENOSPC':'DATABASE_OPERATION_FAILED',message:e.code?.startsWith('DATABASE_')?e.message:'数据库操作失败，请保留数据并查看诊断。'}});}
   });

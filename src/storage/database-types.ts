@@ -18,5 +18,6 @@ export type DatabaseRequest=
   |{action:'fingerprint'}
   |{action:'query-plan';chat:string}
   |{action:'backup';path:string}
+  |{action:'export-social';path:string}
   |{action:'close'};
 export const DATABASE_LIMITS={pending:64,pendingBytes:8*1024*1024,requestBytes:2*1024*1024,responseBytes:16*1024*1024,timeoutMs:30000};

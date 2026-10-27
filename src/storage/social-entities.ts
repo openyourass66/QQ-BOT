@@ -2,9 +2,9 @@ import {createHash} from 'node:crypto';
 import {SocialDataSchema,type SocialData} from '../qq/social-store.js';
 import {entityTables,type EntityTable,type EntityRow} from './database-types.js';
 import type {SocialField} from './social-repository.js';
+import {arrayLocations as arrays,rawDataFromRows} from './entity-layout.js';
 
 export const emptySocialData=():SocialData=>SocialDataSchema.parse({version:2,messages:[],contacts:[],memories:[],stickers:[],tasks:[],events:[],actions:[],turns:[]});
-const arrays:Partial<Record<EntityTable,[SocialField,string?]>>={contacts:['contacts'],memories:['memories'],stickers:['stickers'],tasks:['tasks'],events:['events'],actions:['actions'],turns:['turns'],profiles:['profiles'],interests:['autonomous','interests'],thoughts:['autonomous','thoughts'],decisions:['autonomous','decisions'],autonomous_contacts:['autonomous','contacts'],sticker_uses:['autonomous','stickerUses'],posts:['autonomous','posts'],space_comments:['autonomous','spaceComments'],lexicon:['cognition','lexicon'],suppressed:['cognition','suppressed'],learning_jobs:['cognition','jobs']};
 const keyOf=(table:EntityTable,value:any):string=>{
   if(['contacts','profiles','autonomous_contacts'].includes(table))return value.chat;
   if(['posts','space_comments'].includes(table))return value.hash;
@@ -31,15 +31,7 @@ export function entityRows(data:SocialData,fields:SocialField[]=Object.keys(data
   return rows;
 }
 export function dataFromRows(rows:EntityRow[]):SocialData {
-  const data=emptySocialData();
-  for(const row of rows){
-    const location=arrays[row.table];if(location){const list=location[1]?(data[location[0]] as any)[location[1]]:data[location[0]];(list as unknown[]).push(row.value);}
-    else if(row.table==='memory_meta')data.cognition.memories[row.key]=row.value as SocialData['cognition']['memories'][string];
-    else if(row.table==='learning_scopes')data.cognition.scopes[row.key]=row.value as SocialData['cognition']['scopes'][string];
-    else if(row.table==='state'&&row.key==='account')data.account=row.value as number;
-    else if(row.table==='state'&&row.key==='autonomous')Object.assign(data.autonomous,row.value);
-  }
-  return SocialDataSchema.parse(data);
+  return SocialDataSchema.parse(rawDataFromRows(rows));
 }
 export function rowChanges(before:EntityRow[],after:EntityRow[]){
   const key=(row:EntityRow)=>`${row.table}/${row.key}`,previous=new Map(before.map(row=>[key(row),row])),next=new Set(after.map(key));

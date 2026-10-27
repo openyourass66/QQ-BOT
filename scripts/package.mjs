@@ -35,7 +35,7 @@ try {
   await cp(join(root,'desktop/assets'),join(app,'desktop/assets'),{recursive:true});
   await cp(join(root,'desktop/runtime-guard.exe'),join(app,'desktop/runtime-guard.exe'));
   await mkdir(join(app,'scripts'));
-  for(const file of ['app-paths.mjs','setup.mjs','run.mjs','credentials.mjs','env-file.mjs','process-guard.mjs','managed-entry.mjs','supervisor.mjs','bounded-lines.mjs','component-paths.mjs','components.mjs','napcat-node.mjs','qq-runtime.mjs','qq-profile.mjs','runtime-service.mjs','runtime-configuration.mjs','runtime-lease.mjs'])await cp(join(root,'scripts',file),join(app,'scripts',file));
+  for(const file of ['app-paths.mjs','setup.mjs','run.mjs','storage.mjs','credentials.mjs','env-file.mjs','process-guard.mjs','managed-entry.mjs','supervisor.mjs','bounded-lines.mjs','component-paths.mjs','components.mjs','napcat-node.mjs','qq-runtime.mjs','qq-profile.mjs','runtime-service.mjs','runtime-configuration.mjs','runtime-lease.mjs'])await cp(join(root,'scripts',file),join(app,'scripts',file));
   await cp(join(root,'scripts/components'),join(app,'scripts/components'),{recursive:true});
   const manifest={formatVersion:1,appId:'whale-workbench',version:pkg.version,channel:'internal-validation',node:spec.version,nodeArchiveSha256:spec.sha256,componentsCatalogSha256:await sha256(join(root,'components/catalog.json'))};
   await writeFile(join(app,'release-manifest.json'),JSON.stringify(manifest,null,2)+'\n');
