@@ -43,6 +43,7 @@ partial class App
         };
         Find<Button>("DetectEnvironment").Click+=(s,e)=>RequestOnboarding("detect");
         Find<Button>("PrepareComponents").Click+=(s,e)=>OpenComponents();
+        Find<Button>("ConnectManagedQQ").Click+=(s,e)=>OpenQQLogin();
         Find<Button>("CheckSetup").Click+=(s,e)=>RequestOnboarding("check");
         Find<Button>("SetupGuide").Click+=(s,e)=>{
             ShowSetupGuide();
@@ -97,6 +98,7 @@ partial class App
         Find<Button>("CheckSetup").IsEnabled=editable;
         Find<Button>("DetectEnvironment").Visibility=quickStep==0?Visibility.Visible:Visibility.Collapsed;
         Find<Button>("PrepareComponents").Visibility=quickStep==0?Visibility.Visible:Visibility.Collapsed;
+        Find<Button>("ConnectManagedQQ").Visibility=quickStep==2&&RuntimeValue("BOT_ONEBOT_MODE")!="external"?Visibility.Visible:Visibility.Collapsed;
         Find<Button>("CheckSetup").Visibility=quickStep==3?Visibility.Visible:Visibility.Collapsed;
         Find<Button>("SetupGuide").Visibility=quickStep==0||quickStep==3?Visibility.Visible:Visibility.Collapsed;
         Find<StackPanel>("QuickResults").Visibility=quickStep==3?Visibility.Visible:Visibility.Collapsed;

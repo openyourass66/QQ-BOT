@@ -166,6 +166,8 @@ partial class App
     static void Event(string line) {
         var message = json.Deserialize<Dictionary<string, object>>(line);
         string type = (string)message["type"];
+        if(type=="qq-login"){RenderQQLogin(message);return;}
+        if(type=="error"&&message.ContainsKey("action")&&(string)message["action"]=="qq-login")QQLoginError((string)message["text"]);
         if(type=="components"){RenderComponents(message);return;}
         if(type=="component-progress"){RenderComponentProgress(message);return;}
         if(type=="error"&&message.ContainsKey("action")&&(string)message["action"]=="components")ComponentError((string)message["text"]);
@@ -406,7 +408,7 @@ partial class App
             if (smoke && !exiting) {
                 if (DateTime.UtcNow > smokeDeadline) { Environment.ExitCode = 1; File.WriteAllText(Path.Combine(root, "smoke-result.txt"), "FAIL: lifecycle timeout at step "+smokeStep+", socialBusy="+socialBusy+", knowledgeBusy="+knowledgeBusy+", rows="+Find<ListView>("SocialList").Items.Count+", feedback="+Find<TextBlock>("Feedback").Text); exiting = true; Send("quit"); return; }
                 if (smokeStep == 0 && settings != null) {
-                    try { VerifyActivityInteraction(); VerifySettingsInteraction(); VerifyRuntimeInteraction(); VerifyQuickSetupInteraction(); VerifyKnowledgeInteraction(); VerifyComponentInteraction(); } catch(Exception error) { Environment.ExitCode=1;File.WriteAllText(Path.Combine(root,"smoke-result.txt"),"FAIL: "+error.Message);exiting=true;Send("quit");return; }
+                    try { VerifyActivityInteraction(); VerifySettingsInteraction(); VerifyRuntimeInteraction(); VerifyQuickSetupInteraction(); VerifyKnowledgeInteraction(); VerifyComponentInteraction(); VerifyQQLoginInteraction(); } catch(Exception error) { Environment.ExitCode=1;File.WriteAllText(Path.Combine(root,"smoke-result.txt"),"FAIL: "+error.Message);exiting=true;Send("quit");return; }
                     if (fields.Count < 53 || runtimeInputs.Count < 20 || Find<TextBox>("Persona").Text != "测试小鲸人设" || !tray.Registered) { Environment.ExitCode = 1; File.WriteAllText(Path.Combine(root, "smoke-result.txt"), "FAIL: config=" + fields.Count + ", runtime=" + runtimeInputs.Count + ", tray=" + tray.Registered + ", personaLength=" + Find<TextBox>("Persona").Text.Length); exiting = true; Send("quit"); return; }
                     foreach (MainPage page in Enum.GetValues(typeof(MainPage))) Capture(Path.Combine(root,"page-" + (int)page + ".png"), page);
                     ((TextBox)fields["chat.group.prefix"]).Text="native-scope";((TextBox)fields["social.speechVoice"]).Text="native-voice";Find<Button>("SaveSettings").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));

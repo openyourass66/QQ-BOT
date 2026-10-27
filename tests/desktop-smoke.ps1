@@ -58,6 +58,12 @@ try {
     [IO.File]::WriteAllText((Join-Path $fixtureDataRoot 'data/social.json'), $fixtureSocial, [Text.UTF8Encoding]::new($false))
     # Use the installed dependencies while keeping settings and persona isolated.
     if (!$ReleaseDirectory) { New-Item -ItemType Junction -Path (Join-Path $testRoot 'node_modules') -Target (Join-Path $projectRoot 'node_modules') | Out-Null }
+    $fixtureNode = if (Test-Path -LiteralPath (Join-Path $testRoot 'runtime/node.exe')) { Join-Path $testRoot 'runtime/node.exe' } else { (Get-Command node.exe).Source }
+    Push-Location $testRoot
+    try {
+        & $fixtureNode --input-type=module -e "import QR from 'qrcode';import {writeFile} from 'node:fs/promises';await writeFile('qq-login-qr.txt',await QR.toDataURL('https://qq.com/fixture-no-login',{width:256,margin:2}));"
+        if ($LASTEXITCODE -ne 0) { throw 'Fixture QR generation failed' }
+    } finally { Pop-Location }
     $smokeArguments = if ($SeparateData) { @('--smoke', '--data-dir', ('"' + $fixtureDataRoot + '"')) } else { @('--smoke') }
     $process = Start-Fixture $smokeArguments
     if (!$process.WaitForExit(30000)) { throw 'Native UI smoke timed out' }

@@ -136,7 +136,7 @@ test('受管 QQ 组件使用稳定可写目录与回环管理口，不依赖系�
   await writeFile(join(app,'components/catalog.json'),JSON.stringify(catalog));
   const prepared=await prepareComponent({root:app,dataRoot:data,id:'napcat',catalog,platform:'win32',arch:'x64',fetcher:async()=>new Response(bytes),probe:async()=>{}});
   await cp(process.execPath,join(prepared.installed.directory,'node.exe'));
-  for(const name of ['napcat-node.mjs','app-paths.mjs','setup.mjs','component-paths.mjs'])await cp(resolve('scripts',name),join(app,'scripts',name));
+  for(const name of ['napcat-node.mjs','app-paths.mjs','setup.mjs','component-paths.mjs','qq-profile.mjs'])await cp(resolve('scripts',name),join(app,'scripts',name));
   const execute=async()=>{const child=spawn(process.execPath,[join(app,'scripts/napcat-node.mjs')],{env:{...process.env,BOT_DATA_DIR:data,BOT_NAPCAT_DIR:join(prepared.installed.directory,'napcat'),BOT_QQ_DIR:''},stdio:['ignore','pipe','pipe'],windowsHide:true});let out='',error='';child.stdout.on('data',b=>out+=b);child.stderr.on('data',b=>error+=b);assert.equal((await once(child,'exit'))[0],0,error);return JSON.parse(out.trim().split('\n').at(-1));};
   const result=await execute();assert.equal(result.cwd,join(data,'napcat/node-runtime'));assert.equal(result.node,join(prepared.installed.directory,'node.exe'));assert.equal(result.wrapper,join(prepared.installed.directory,'wrapper.node'));
   const config=join(data,'napcat/node-runtime/config/webui.json'),first=await readFile(config,'utf8'),parsed=JSON.parse(first);assert.equal(parsed.host,'127.0.0.1');assert.equal(parsed.token.length,48);

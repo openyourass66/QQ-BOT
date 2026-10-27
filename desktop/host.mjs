@@ -16,6 +16,21 @@ const socialRequests = new Map();
 let socialSequence = 0;
 let busy = false, quitting = false, externalNapcat = false;
 let componentWorker;
+let qqController;
+async function qqLogin(data) {
+  if (!data || !['prepare','status','refresh','connection'].includes(data.operation) || Object.keys(data).some(key=>!['operation','shell','mode'].includes(key))) throw new Error('QQ 登录操作参数无效');
+  if (!qqController) { const {ManagedQQ}=await import('../scripts/qq-runtime.mjs');qqController=new ManagedQQ({root,dataRoot}); }
+  if(data.operation==='connection') {emit({type:'qq-login',...await qqController.connection(data.shell)});return;}
+  if(data.operation==='prepare') {
+    if(children.has('bridge')||children.has('napcat'))throw new Error('请先停止机器人，再创建 QQ 连接；已运行时可直接查看登录状态');
+    if(data.mode==='external')throw new Error('当前使用外部 QQ 服务，请在原服务中完成登录');
+    const result=await config('qq-prepare',{shell:data.shell});
+    await launch('napcat','scripts/napcat-node.mjs',{BOT_NAPCAT_DIR:result.suggestions.BOT_NAPCAT_DIR});
+    emit({type:'qq-login',...result});state();return;
+  }
+  try {emit({type:'qq-login',...await qqController.status({refresh:data.operation==='refresh'})});}
+  catch(error) {emit({type:'qq-login',operation:data.operation,phase:'needs_attention',message:error.message});}
+}
 async function components(operation, data) {
   if (componentWorker) throw new Error('组件准备正在进行，请等待完成或取消');
   if (operation === 'install' && (children.has('bridge') || children.has('napcat'))) throw new Error('请先停止机器人，再准备或修复组件');
@@ -51,8 +66,8 @@ const emit = event => {
   process.stdout.write(JSON.stringify(event) + '\n');
 };
 const state = () => emit({ type: 'state', bridge: children.has('bridge'), napcat: children.has('napcat') || externalNapcat, externalNapcat, busy, paths: layout });
-async function launch(name, script) {
-  const env = await environment(dataRoot);
+async function launch(name, script, overrides = {}) {
+  const env = { ...await environment(dataRoot), ...overrides };
   env.BOT_DATA_DIR = dataRoot;
   let execPath = process.execPath;
   if (name === 'napcat') {
@@ -65,6 +80,7 @@ async function launch(name, script) {
   for (const stream of [child.stdout, child.stderr]) {
     createInterface({ input: stream }).on('line', text => {
       text = text.replace(/\x1b\[[0-9;]*[A-Za-z]/g, '').slice(0, 8000);
+      if(name==='napcat'&&/二维码解码URL|WebUi Token|User Panel Url|[?&](?:token|k)=|[\u2580-\u259f]/i.test(text))text='QQ 登录凭据已隐藏，请在登录窗口操作。';
       emit({ type: 'log', source: name, text: `[${name}] ${text}` });
       if (/EPERM.*cordis\.yml/.test(text)) emit({ type: 'error', text: 'DSH 无法写入 Profile 的 cordis.yml。请关闭占用该文件的程序、检查文件访问权限，再点击“重连模型”。NapCat 会继续保持登录。' });
     });
@@ -111,6 +127,7 @@ async function check() {
   emit({ type: 'diagnostics', ...result }); return result;
 }
 async function command({ action, data }) {
+  if (action === 'qq-login') { await qqLogin(data); return; }
   if (action === 'components') { const result = await components(data?.operation, data?.id ? {id:data.id,...(data.archivePath?{archivePath:data.archivePath}:{})} : {}); emit({type:'components',...result}); return; }
   if (action === 'onboarding') { const result = await config(action, data); emit({ type: 'onboarding', ...result }); return; }
   if (action === 'model') { const result = await config(action, data); emit({ type: 'model', ...result }); return; }

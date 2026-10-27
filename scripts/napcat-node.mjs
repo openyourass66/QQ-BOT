@@ -5,6 +5,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { enterRuntime, prepareRuntime } from './app-paths.mjs';
 import { installedComponent } from './component-paths.mjs';
+import { installQQProfileIsolation } from './qq-profile.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const layout = await prepareRuntime({ root });
@@ -24,6 +25,9 @@ if (managedSelected && resolve(process.execPath).toLowerCase() !== join(managed.
   });
 } else if (managedSelected) {
   const runtime = layout.napcatRuntime;
+  const profile = join(layout.dataRoot,'napcat/qq-profile');
+  await mkdir(profile,{recursive:true,mode:0o700});
+  installQQProfileIsolation(join(managed.directory,'wrapper.node'),profile);
   await mkdir(join(runtime,'config'),{recursive:true});
   try { await writeFile(join(runtime,'config/webui.json'),JSON.stringify({host:'127.0.0.1',port:6099,token:randomBytes(24).toString('hex')},null,2)+'\n',{flag:'wx'}); }
   catch(error){if(error.code!=='EEXIST')throw error;}

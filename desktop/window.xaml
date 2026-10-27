@@ -188,7 +188,7 @@
       <Border x:Name="QuickSetupPanel" Style="{StaticResource Surface}" Padding="18" Margin="0,0,0,14" Visibility="Collapsed"><StackPanel>
        <WrapPanel x:Name="QuickSteps" Margin="0,0,0,12"/>
        <TextBlock x:Name="QuickNotice" Text="先完成基础连接，媒体、搜索和高级参数可以稍后配置。" Foreground="{StaticResource Muted}" FontSize="12" TextWrapping="Wrap" LineHeight="20"/>
-       <WrapPanel Margin="0,12,0,0"><Button x:Name="PrepareComponents" Content="准备运行组件" Margin="0,0,8,8"/><Button x:Name="DetectEnvironment" Content="自动检测本机环境" Margin="0,0,8,8"/><Button x:Name="CheckSetup" Content="检查当前配置" Margin="0,0,8,8"/><Button x:Name="SetupGuide" Content="查看安装指引" Style="{StaticResource Quiet}" Margin="0,0,0,8"/></WrapPanel>
+       <WrapPanel Margin="0,12,0,0"><Button x:Name="PrepareComponents" Content="准备运行组件" Margin="0,0,8,8"/><Button x:Name="DetectEnvironment" Content="自动检测本机环境" Margin="0,0,8,8"/><Button x:Name="ConnectManagedQQ" Content="配置并登录 QQ" Margin="0,0,8,8"/><Button x:Name="CheckSetup" Content="检查当前配置" Margin="0,0,8,8"/><Button x:Name="SetupGuide" Content="查看安装指引" Style="{StaticResource Quiet}" Margin="0,0,0,8"/></WrapPanel>
        <StackPanel x:Name="QuickResults"/>
       </StackPanel></Border>
       <StackPanel x:Name="RuntimeFields"/>

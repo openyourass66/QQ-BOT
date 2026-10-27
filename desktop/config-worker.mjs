@@ -30,6 +30,11 @@ process.once('message', async ({ action, data }) => {
       const values = parseEnv(env);
       result = { settings: await settings.loadSettings(), settingsPath: settings.getSettingsPath(), env, runtimeFields: describeEnv(env), persona, personaPath, knowledge: library, needsSetup: !values.BOT_DSH_BIN || values.BOT_DSH_BIN === 'dsh.cmd' };
     }
+    else if (action === 'qq-prepare') {
+      if(data?.shell!==undefined&&typeof data.shell!=='string')throw new Error('QQ 组件路径无效');
+      const {ManagedQQ}=await import('../scripts/qq-runtime.mjs');
+      result=await new ManagedQQ({root:programRoot,dataRoot:process.cwd()}).prepare(data?.shell);
+    }
     else if (action === 'onboarding') {
       if (!['detect','check'].includes(data?.operation)) throw new Error('连接配置格式无效：未知快速配置操作');
       const env = mergeRuntimeEnv(await read('.env'), data.runtime || {});
