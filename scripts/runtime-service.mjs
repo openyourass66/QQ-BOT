@@ -11,7 +11,8 @@ export async function createRuntimeService({root,layout,onEvent,onFatal=()=>{}})
 const lease=await acquireRuntimeLease(root,layout.dataRoot);
 try {
 const dataRoot = layout.dataRoot;
-const configuration = new RuntimeConfiguration(dataRoot);
+const protectedCredentials=process.platform==='win32'&&['installed','portable'].includes(layout.mode);
+const configuration = new RuntimeConfiguration(dataRoot,{protectedCredentials});
 const logDir = layout.logDir; mkdirSync(logDir, { recursive: true });
 const logPath = join(logDir, 'console.log');
 const children = new Map();
@@ -51,7 +52,7 @@ async function components(operation, data) {
   });
 }
 let secrets = [];
-async function refreshSecrets() { const env = await environment(dataRoot); secrets = Object.entries(env).filter(([key, value]) => /TOKEN|SECRET|PASSWORD|API_KEY/i.test(key) && value?.length >= 4).map(([, value]) => value); }
+async function refreshSecrets() { const env = await environment(dataRoot,{allowUnavailable:true}); secrets = Object.entries(env).filter(([key, value]) => /TOKEN|SECRET|PASSWORD|API_KEY/i.test(key) && value?.length >= 4).map(([, value]) => value); }
 await refreshSecrets();
 const redact = text => {
   for (const secret of secrets) text = text.split(secret).join('[已隐藏]');
@@ -72,6 +73,7 @@ const state = () => emit({ type: 'state', bridge: children.has('bridge'), napcat
 async function launch(name, script, overrides = {}) {
   if(!lease.held)throw new Error('运行管理实例锁已失效');
   const env = { ...await environment(dataRoot), ...overrides };
+  if(name==='napcat')for(const key of ['QQ_BOT_DEEPSEEK_API_KEY','BOT_MEDIA_API_KEY','BOT_LEARNING_API_KEY'])delete env[key];
   env.BOT_DATA_DIR = dataRoot;
   let execPath = process.execPath;
   if (name === 'napcat') {
@@ -115,7 +117,7 @@ async function stopOne(name) {
 async function stop() { await stopOne('bridge'); await stopOne('napcat'); externalNapcat = false; }
 async function config(action, data) {
   return new Promise((done, reject) => {
-    const worker = fork(resolve(root, 'desktop/config-worker.mjs'), [], { cwd: dataRoot, silent: true, execArgv: [], windowsHide: true });
+    const worker = fork(resolve(root, 'desktop/config-worker.mjs'), [], { cwd: dataRoot, silent: true, execArgv: [], windowsHide: true,env:{...process.env,BOT_CREDENTIAL_MODE:protectedCredentials?'dpapi':'compatible'} });
     const timeout = setTimeout(() => { worker.kill(); reject(new Error('配置操作超时，请重试')); }, action === 'qzone-check' ? 30000 : action === 'model' ? 25000 : 10000);
     let replied = false;
     worker.once('message', result => { replied = true; clearTimeout(timeout); result.ok ? done(result.result) : reject(new Error(result.error)); });

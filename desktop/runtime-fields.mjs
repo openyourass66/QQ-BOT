@@ -1,5 +1,6 @@
 import { parseEnv } from 'node:util';
 import { readChatModelConfig, defaultChatBaseUrl, defaultChatModel, normalizeChatBaseUrl } from '../dist/agent/chat-model.js';
+import {replaceEnvAssignments} from '../scripts/env-file.mjs';
 
 export const chatRuntimeKeys = new Set(['BOT_CHAT_MODE', 'BOT_CHAT_MODEL', 'BOT_CHAT_BASE_URL', 'QQ_BOT_DEEPSEEK_API_KEY']);
 export const initialDefaultKeys = new Set(['ADMIN_QQ','GROUP_PREFIX','GROUP_COOLDOWN_MS','GROUP_CONTEXT_LINES','REPLY_CHUNK_SIZE','MIN_DELAY_MS','MAX_DELAY_MS','ALLOW_EXEC']);
@@ -27,19 +28,16 @@ export const runtimeFields = [
 export function mergeRuntimeEnv(original, data) {
   if (!data || typeof data !== 'object' || Array.isArray(data)) throw new Error('连接配置格式无效');
   const allowed = new Set(runtimeFields.map(field => field[1]));
-  let text = original;
+  const changes={};
   for (const [key, input] of Object.entries(data)) {
     const value = key === 'BOT_CHAT_BASE_URL' && typeof input === 'string' && input.trim() ? normalizeChatBaseUrl(input) : input;
     if (!allowed.has(key) || typeof value !== 'string' || /[\r\n\0"]/u.test(value)) throw new Error('连接配置格式无效：输入不可包含换行或双引号');
     const quote = value.includes("'") ? '"' : "'";
     const line = `${key}=${quote}${value}${quote}`;
     if (parseEnv(line)[key] !== value) throw new Error('连接配置格式无效：无法原样保存该字段的引号或转义字符');
-    const pattern = new RegExp(`^(?:export\\s+)?${key}\\s*=.*$`, 'gm');
-    if (!value && ['BOT_USAGE_STORE', 'BOT_GROUP_CONTEXT_STORE', 'BOT_DSH_HOME'].includes(key)) { text = text.replace(pattern, ''); continue; }
-    if (pattern.test(text)) text = text.replace(pattern, () => line);
-    else text += `\n${line}`;
+    changes[key]=!value&&['BOT_USAGE_STORE','BOT_GROUP_CONTEXT_STORE','BOT_DSH_HOME'].includes(key)?null:line;
   }
-  return text;
+  return replaceEnvAssignments(original,changes);
 }
 
 export function validateRuntimeEnv(data) {

@@ -667,7 +667,7 @@ function spawnDsh(patch?: string,policyNonce?:string): ReturnType<typeof spawn> 
   // 不继承当前桌面进程的 DSH_*（尤其 DSH_PROFILE=desktop、DSH_SESSION_ID）。
   const env: NodeJS.ProcessEnv = {};
   for (const [key, value] of Object.entries(process.env)) {
-    if (!key.startsWith('DSH_')) env[key] = value;
+    if (!key.startsWith('DSH_')&&!['ONEBOT_TOKEN','BOT_MEDIA_API_KEY','BOT_LEARNING_API_KEY','BOT_ACTION_TOKEN','BOT_ACTION_URL','BOT_ACTION_CONTEXT'].includes(key)) env[key] = value;
   }
   if (config.dsh.home) env.DSH_HOME = config.dsh.home;
   if(policyNonce)env.BOT_DSH_POLICY_NONCE=policyNonce;

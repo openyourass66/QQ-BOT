@@ -4,6 +4,7 @@ import {join} from 'node:path';
 import {parseEnv} from 'node:util';
 import {runtimeFields,mergeRuntimeEnv,validateRuntimeEnv} from '../desktop/runtime-fields.mjs';
 import {acquireDataResources} from '../dist/core/resource-lock.js';
+import {protectEnvironmentText} from './credentials.mjs';
 
 const editable=new Set(['BOT_ONEBOT_MODE','BOT_CHAT_MODE','BOT_CHAT_MODEL','BOT_CHAT_BASE_URL','BOT_LEARNING_BASE_URL','BOT_LEARNING_MODEL','BOT_MEDIA_BASE_URL','ONEBOT_HTTP_URL','ONEBOT_WS_URL','BOT_SELF_ID','TURN_TIMEOUT_MS','QUEUE_PER_CONVERSATION','QUEUE_TOTAL','MAX_CONCURRENT_TURNS','INGRESS_PER_CONVERSATION','INGRESS_TOTAL','INGRESS_MAX_BYTES','BATCH_MAX_BYTES']);
 const secretKeys=new Set(runtimeFields.filter(field=>field[4]==='secret').map(field=>field[1]));
@@ -26,7 +27,7 @@ export function configurationFields(text) {
 /** 修订号对完整原文做 HMAC；浏览器无法借修订号猜测短密钥。 */
 export class RuntimeConfiguration {
   #key=randomBytes(32);
-  constructor(dataRoot){this.path=join(dataRoot,'.env');}
+  constructor(dataRoot,{protectedCredentials=false}={}){this.path=join(dataRoot,'.env');this.dataRoot=dataRoot;this.protectedCredentials=protectedCredentials;}
   async #raw(){
     const info=await lstat(this.path);
     if(!info.isFile()||info.isSymbolicLink()||info.nlink!==1||info.size>262144)throw new ConfigurationError('连接配置文件不可读取',409);
@@ -58,6 +59,7 @@ export class RuntimeConfiguration {
       let next;
       try{next=mergeRuntimeEnv(before,changes);if(secret?.operation!=='clear')validateRuntimeEnv(next);}catch{throw new ConfigurationError('连接配置无效，请检查地址、模式与数值范围；原配置已保留。');}
       if(Buffer.byteLength(next)>262144)throw new ConfigurationError('连接配置过大');
+      next=await protectEnvironmentText(this.dataRoot,next,before,{protectedMode:this.protectedCredentials});
       if(next!==before){
         temporary=this.path+'.'+randomBytes(12).toString('hex')+'.tmp';
         const file=await open(temporary,'wx',0o600);

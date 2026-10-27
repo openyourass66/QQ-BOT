@@ -35,6 +35,8 @@ try {
     Copy-Item -LiteralPath (Join-Path $projectRoot 'scripts/runtime-service.mjs') -Destination (Join-Path $testRoot 'scripts/runtime-service.mjs')
     Copy-Item -LiteralPath (Join-Path $projectRoot 'scripts/runtime-configuration.mjs') -Destination (Join-Path $testRoot 'scripts/runtime-configuration.mjs')
     Copy-Item -LiteralPath (Join-Path $projectRoot 'scripts/runtime-lease.mjs') -Destination (Join-Path $testRoot 'scripts/runtime-lease.mjs')
+    Copy-Item -LiteralPath (Join-Path $projectRoot 'scripts/credentials.mjs') -Destination (Join-Path $testRoot 'scripts/credentials.mjs')
+    Copy-Item -LiteralPath (Join-Path $projectRoot 'scripts/env-file.mjs') -Destination (Join-Path $testRoot 'scripts/env-file.mjs')
     }
     if ($SeparateData -and !$ReleaseDirectory) {
         Copy-Item -LiteralPath (Join-Path $projectRoot '.env.example') -Destination $testRoot

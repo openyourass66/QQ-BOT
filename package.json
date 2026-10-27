@@ -15,7 +15,7 @@
     "mcp": "node scripts/run.mjs mcp",
     "mock": "node scripts/dev/mock-onebot.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "npm run build && node --test tests/*.test.mjs",
+    "test": "npm run build && node --test --test-concurrency=2 tests/*.test.mjs",
     "test:isolated": "node scripts/test-isolated.mjs",
     "benchmark:store": "npm run build && node --expose-gc scripts/benchmark-store.mjs",
     "napcat": "node scripts/run.mjs napcat",

@@ -59,6 +59,7 @@
 /send-test.mjs
 
 # 日志与系统文件
+/.credentials/
 *.log
 *.log.*
 .DS_Store

@@ -146,6 +146,7 @@ partial class App
                 }
                 holder.Children.Add(input);editor.Children.Add(holder);
                 var error=new TextBlock {Foreground=Ink("Danger"),FontSize=10,Margin=new Thickness(0,5,0,0),TextWrapping=TextWrapping.Wrap,Visibility=Visibility.Collapsed};runtimeErrors[key]=error;editor.Children.Add(error);
+                if(field.ContainsKey("credentialUnavailable")&&(bool)field["credentialUnavailable"]){error.Text="此凭据无法在当前 Windows 用户下解密，请重新输入后保存。";error.Visibility=Visibility.Visible;}
                 Grid.SetColumn(editor,1);row.Children.Add(editor);content.Children.Add(row);runtimeRows[row]=key;
             }
             if(group.Key=="模型选择")BuildChatModelActions(content);

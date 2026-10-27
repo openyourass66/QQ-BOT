@@ -93,7 +93,7 @@ test('命令行从任意工作目录启动发行入口，按选定数据目录�
     const app = join(root, 'app with spaces'), data = join(root, '用户 data');
     await mkdir(join(app, 'scripts'), { recursive: true }); await mkdir(join(app, 'dist'));
     await mkdir(join(app, 'templates')); await mkdir(data);
-    for (const file of ['app-paths.mjs','setup.mjs','run.mjs']) await cp(resolve('scripts', file), join(app, 'scripts', file));
+    for (const file of ['app-paths.mjs','setup.mjs','run.mjs','credentials.mjs','env-file.mjs']) await cp(resolve('scripts', file), join(app, 'scripts', file));
     await writeFile(join(app, 'package.json'), '{"type":"module"}');
     await writeFile(join(app, 'release-manifest.json'), manifest);
     await writeFile(join(app, '.env.example'), 'BOT_CHAT_MODE=profile\n');

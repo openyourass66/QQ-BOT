@@ -6,6 +6,7 @@ import { readChatModelConfig } from '../dist/agent/chat-model.js';
 import { readJsonLimited } from '../dist/services/read-json.js';
 import WebSocket from 'ws';
 import { installedComponent } from '../scripts/component-paths.mjs';
+import { resolveCredentialEnv } from '../scripts/credentials.mjs';
 
 export async function probeSocket(env) {
   let url;
@@ -20,8 +21,8 @@ export async function probeSocket(env) {
   });
 }
 
-export async function environment(root) {
-  return { ...process.env, ...parseEnv(await readFile(join(root, '.env'), 'utf8').catch(e => { if (e.code === 'ENOENT') return ''; throw e; })) };
+export async function environment(root,options) {
+  return resolveCredentialEnv(root,{ ...process.env, ...parseEnv(await readFile(join(root, '.env'), 'utf8').catch(e => { if (e.code === 'ENOENT') return ''; throw e; })) },options);
 }
 export async function resolveExecutable(root, value, env) {
   if (!value) return '';

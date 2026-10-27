@@ -4,6 +4,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { diagnose, environment, onebotOnline } from './diagnostics.mjs';
 import { installedComponent } from '../scripts/component-paths.mjs';
+import { resolveCredentialEnv } from '../scripts/credentials.mjs';
 
 const execute = promisify(execFile);
 const isFile = path => stat(path).then(s => s.isFile(), () => false);
@@ -39,7 +40,7 @@ export async function detectEnvironment(root, env, { runningPaths, platform = pr
 }
 
 export async function checkSetup(root, draft, { dataRoot = root } = {}) {
-  const env = { ...await environment(dataRoot), ...draft };
+  const env = await resolveCredentialEnv(dataRoot,{ ...await environment(dataRoot), ...draft });
   const external = env.BOT_ONEBOT_MODE === 'external' || env.BOT_ONEBOT_MODE !== 'managed' && await onebotOnline(root, env);
   const result = await diagnose(root, { dataRoot, externalOnebot: external, env, probeConnection: true });
   return { operation: 'check', ...result, message: result.ok ? '基础检查通过。可保存并启动；QQ 登录和模型实际连接以运行状态为准。' : '请处理标记为“需处理”的项目，再重新检查。' };

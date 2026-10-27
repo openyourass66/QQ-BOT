@@ -36,7 +36,8 @@ try {
   code = await run(['scripts/build.mjs']);
   if (code === 0) {
     const tests = paths.filter(path => /^tests\/[^/]+\.test\.mjs$/.test(path)).sort();
-    code = await run(['--test', ...process.argv.slice(2), ...tests]);
+    const args=process.argv.slice(2),concurrency=args.some(value=>/^--test-concurrency(?:=|$)/.test(value))?[]:['--test-concurrency=2'];
+    code = await run(['--test',...concurrency,...args,...tests]);
   }
 } finally {
   const actual = await realpath(scratch);

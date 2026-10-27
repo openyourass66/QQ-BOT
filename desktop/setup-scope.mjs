@@ -1,4 +1,5 @@
 import { OneBotHttp } from '../dist/qq/onebot.js';
+import { resolveCredentialEnv } from '../scripts/credentials.mjs';
 
 const id = value => /^(?:0|[1-9]\d{0,15})$/.test(String(value)) && Number.isSafeInteger(Number(value)) ? String(value) : undefined;
 const fail = text => { throw new Error('配置格式无效：' + text); };
@@ -9,6 +10,7 @@ export function scopeBaseline(settings) {
 
 // 只读取当前连接的实际账号与联系人，不启动模型，不发送消息。
 export async function listSetupContacts(env) {
+  env=await resolveCredentialEnv(process.cwd(),env);
   const url = new URL(env.ONEBOT_HTTP_URL || 'http://127.0.0.1:3000');
   if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.search || url.hash) fail('QQ HTTP 地址无效');
   const bot = new OneBotHttp(url.href.replace(/\/+$/, ''), env.ONEBOT_TOKEN || '');
