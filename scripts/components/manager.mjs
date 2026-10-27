@@ -6,6 +6,7 @@ import { parseEnv } from 'node:util';
 import { componentCatalog, componentState, installedComponent, previousComponentDirectory, specHash, programRoot } from '../component-paths.mjs';
 import { extractZip, obtainArchive, sha256 } from './archive.mjs';
 import { verifyAcp } from './acp-probe.mjs';
+import { restrictedToolPatches } from '../../dist/agent/chat-model.js';
 
 function inside(root, path) {
   const rel = relative(root, path);
@@ -138,8 +139,10 @@ export async function prepareComponent({ id, archivePath, root = programRoot, da
         } else if (component === 'dsh') {
           const version = await runChild(join(node.directory,'node.exe'),[join(payload,'node_modules/@deepseek-ai/dsh/lib/bin.js'),'--version'],{cwd:stage,env:childEnvironment(join(node.directory,'node.exe'),stage),signal,timeout:15000});
           if (!version.includes(spec.version)) throw new Error('DSH 运行版本与清单不一致');
-          await verifyAcp({node:join(node.directory,'node.exe'),entry:join(payload,'node_modules/@deepseek-ai/dsh/lib/bin.js'),cwd:stage,env:childEnvironment(join(node.directory,'node.exe'),stage),signal});
+          const policyPatch=join(stage,'tool-policy.json');await writeFile(policyPatch,JSON.stringify(restrictedToolPatches()));
+          await verifyAcp({node:join(node.directory,'node.exe'),entry:join(payload,'node_modules/@deepseek-ai/dsh/lib/bin.js'),cwd:stage,env:childEnvironment(join(node.directory,'node.exe'),stage),signal,patch:policyPatch});
           await runChild(join(node.directory,'node.exe'),[join(root,'scripts/components/mcp-probe.mjs'),payload,root],{cwd:stage,env:childEnvironment(join(node.directory,'node.exe'),stage),signal,timeout:20000});
+          await runChild(join(node.directory,'node.exe'),[join(root,'scripts/components/tool-policy-probe.mjs'),payload,root],{cwd:stage,env:childEnvironment(join(node.directory,'node.exe'),stage),signal,timeout:20000});
         } else if (component === 'napcat') {
           const version = await runChild(join(payload,'node.exe'),['--version'],{cwd:stage,env:childEnvironment(join(payload,'node.exe'),stage),signal,timeout:15000});
           if (version.trim() !== `v${spec.nodeVersion}`) throw new Error('QQ 组件的独立运行环境版本不符');

@@ -2,6 +2,8 @@ import { createInterface } from 'node:readline';
 import { appendFileSync } from 'node:fs';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
+import { apply as applyNativePolicy } from '../../dist/security/dsh-policy.js';
+applyNativePolicy({tools:{guard(){}}});
 let sessions=0,turns=0;
 const servers=new Map();
 const record=event=>appendFileSync(process.env.INTELLIGENCE_EVENTS,JSON.stringify(event)+'\n');

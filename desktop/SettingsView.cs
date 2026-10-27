@@ -113,7 +113,7 @@ partial class App
         new FieldSpec("chat.delay.chunkSize", "额度与节奏", "回复节奏", "长消息分段", "超过这个长度时分条发送。", "字", 100, 4000, 100),
         new FieldSpec("identity.name", "身份与审批", "小鲸的身份", "机器人名称", "群友在句首叫这个名字，也能唤起小鲸。"),
         new FieldSpec("approval.adminQq", "身份与审批", "审批接收人", "管理员 QQ", "接收 QQ 动作和工作区操作的审批；0 表示未设置。", "", 0, 9007199254740991),
-        new FieldSpec("approval.allowExec", "身份与审批", "工作区审批", "自动执行命令", "独立于 QQ 动作的自主开关，控制 DSH 命令执行。"),
+        new FieldSpec("approval.allowExec", "身份与审批", "工作区审批", "旧版命令执行设置", "当前受限运行模式关闭本地命令和文件工具；保留旧值用于兼容，不能用它开放权限。"),
         new FieldSpec("approval.timeoutMs", "身份与审批", "审批接收人", "审批等待时间", "QQ 动作和工作区操作共用；超时后取消本次审批。", "毫秒", 5000, 600000, 5000),
         new FieldSpec("social.retentionDays", "记录保留", "消息记录", "消息保留时间", "过期消息会在后续保存时淘汰。", "天", 1, 365),
         new FieldSpec("social.messagesPerChat", "记录保留", "消息记录", "每会话消息上限", "保留最近的消息，不影响独立存储的长期记忆。", "条", 80, 20000, 100)
@@ -200,6 +200,7 @@ partial class App
             if(list) { row.ColumnDefinitions[1].Width=new GridLength(0);Grid.SetColumnSpan(copy,2);outer.Children.Add(row);text.TextWrapping=TextWrapping.Wrap;text.AcceptsReturn=true;text.MinHeight=52;text.VerticalContentAlignment=VerticalAlignment.Top;text.Margin=new Thickness(0,8,0,3);outer.Children.Add(text); }
         }
         System.Windows.Automation.AutomationProperties.SetName(input,spec.Title);System.Windows.Automation.AutomationProperties.SetAutomationId(input,"Setting-"+spec.Path);fields[spec.Path]=input;
+        if(spec.Path=="approval.allowExec")input.IsEnabled=false;
         if(!list) {
             if(compact&&numeric){row.ColumnDefinitions[1].Width=new GridLength(0);Grid.SetColumnSpan(copy,2);outer.Children.Add(row);holder.Margin=new Thickness(0,9,0,2);outer.Children.Add(holder);}
             else {Grid.SetColumn(holder,1);row.Children.Add(holder);outer.Children.Add(row);}

@@ -3,6 +3,8 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { appendFileSync } from 'node:fs';
 import { mockStickerAnalysis } from '../helpers/sticker-review.mjs';
+import { apply as applyNativePolicy } from '../../dist/security/dsh-policy.js';
+if(process.env.FAKE_OMIT_NATIVE_POLICY!=='1')applyNativePolicy({tools:{guard(){}}});
 
 let nextSession = 0;
 let nextGroupTurn = 0;

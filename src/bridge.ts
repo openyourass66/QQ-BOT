@@ -23,6 +23,7 @@ import { RecentMessages, splitForQq } from './core/message-utils.js';
 import { GroupContextStore, groupTrigger, formatGroupEntry } from './qq/group-context.js';
 import { parseApprovalReply, permissionOutcome } from './core/permissions.js';
 import { assertToolAccess, toolAccessVisible, approvalBinding } from './security/tool-policy.js';
+import { nativeToolDenial } from './security/dsh-policy.js';
 import { DailyUsageStore } from './core/usage.js';
 import { QqActionPolicy } from './qq/qq-actions.js';
 import { startActionServer, type ActionServer } from './services/action-server.js';
@@ -80,7 +81,7 @@ const queue = new ConversationQueue({
 });
 const turnSignals = new Map<string, AbortSignal>();
 const sessionContexts = new Map<string, string>();
-const toolCalls = new Map<string, { title: string; kind: string; signal: AbortSignal }>();
+const toolCalls = new Map<string, { title: string; kind: string; signal: AbortSignal; arguments?:unknown }>();
 const activeGroupTurns = new Map<number, { seq: number; userId: number }>();
 const seen = new RecentMessages();
 const lastBusyNotice = new Map<string, number>();
@@ -252,6 +253,7 @@ async function runTurn(key: string, prompt: string): Promise<string> {
               title: update.title,
               kind: String(update.kind ?? 'other'),
               signal: controller.signal,
+              arguments: update.rawInput,
             });
             log('info', `[tool] ${update.title}`);
           }
@@ -290,8 +292,6 @@ async function runTurn(key: string, prompt: string): Promise<string> {
   }
 }
 
-const SAFE_KINDS = new Set(['read', 'search', 'fetch', 'think']);
-
 async function decidePermission(params: {
   toolCall: { toolCallId: string };
   options: Array<{ optionId: string; kind: string }>;
@@ -305,11 +305,7 @@ async function decidePermission(params: {
   } else if (kind === undefined) {
     // 审批请求只带 toolCallId；类型缺失时无法判断风险，默认拒绝。
     log('warn', `[approval] unknown tool call ${params.toolCall.toolCallId} -> reject`);
-  } else if (kind === 'execute') {
-    allowed = getSettings().approval.allowExec || (await askAdmin(`要执行命令：${call?.title ?? ''}`, call?.signal));
-  } else if (kind === 'edit' || kind === 'move') {
-    allowed = await askAdmin(`要修改或移动文件：${call?.title ?? ''}`, call?.signal);
-  } else if (SAFE_KINDS.has(kind)) {
+  } else if (call && nativeToolDenial({name:call.title,arguments:call.arguments})===undefined) {
     allowed = true;
   } else {
     log('warn', `[approval] denied kind=${kind} ${call?.title ?? ''}`);
@@ -666,7 +662,7 @@ async function onNotice(event: Record<string, unknown>): Promise<void> {
   } finally { lease.release(); }
 }
 
-function spawnDsh(patch?: string): ReturnType<typeof spawn> {
+function spawnDsh(patch?: string,policyNonce?:string): ReturnType<typeof spawn> {
   if (!/^[\w-]+$/.test(config.dsh.profile)) throw new Error('BOT_DSH_PROFILE 只允许字母、数字、下划线和短横线');
   // 不继承当前桌面进程的 DSH_*（尤其 DSH_PROFILE=desktop、DSH_SESSION_ID）。
   const env: NodeJS.ProcessEnv = {};
@@ -674,6 +670,7 @@ function spawnDsh(patch?: string): ReturnType<typeof spawn> {
     if (!key.startsWith('DSH_')) env[key] = value;
   }
   if (config.dsh.home) env.DSH_HOME = config.dsh.home;
+  if(policyNonce)env.BOT_DSH_POLICY_NONCE=policyNonce;
   const args = ['--profile', config.dsh.profile, ...(patch ? ['--patch', patch] : [])];
 
   if (process.platform === 'win32') {
@@ -697,7 +694,11 @@ function spawnDsh(patch?: string): ReturnType<typeof spawn> {
 }
 
 function startBridge(patch?: string): void {
-  const child = spawnDsh(patch);
+  const policyNonce=randomBytes(24).toString('hex');
+  const child = spawnDsh(patch,policyNonce);
+  let policyBuffer='';
+  let policyActivated:()=>void=()=>{};
+  const policyReady=new Promise<void>(resolve=>{policyActivated=resolve;});
   dshChild = child;
   child.on('error', (error) => {
     readyReject?.(error);
@@ -705,10 +706,13 @@ function startBridge(patch?: string): void {
   });
 
   child.stderr?.on('data', (chunk: Buffer) => {
-    process.stderr.write(`[dsh] ${chunk.toString()}`);
+    policyBuffer+=chunk.toString();
+    for(;;){const end=policyBuffer.indexOf('\n');if(end<0)break;const line=policyBuffer.slice(0,end).replace(/\r$/,'');policyBuffer=policyBuffer.slice(end+1);if(line===`[whale-policy] ${policyNonce}`){status.nativeToolsRestricted=true;policyActivated();}else process.stderr.write(`[dsh] ${line}\n`);}
+    if(policyBuffer.length>16000){process.stderr.write('[dsh] '+policyBuffer.slice(0,16000)+'\n');policyBuffer='';}
   });
   child.on('exit', (code) => {
     status.acpConnected = false;
+    status.nativeToolsRestricted = false;
     acpCtx = undefined;
     readyReject?.(new Error(`DSH 已退出 (${code})`));
     if (stopping) return;
@@ -732,6 +736,7 @@ function startBridge(patch?: string): void {
         protocolVersion: acp.PROTOCOL_VERSION,
         clientCapabilities: { fs: { readTextFile: false, writeTextFile: false } },
       });
+      try{await withTimeout(policyReady,5000);}catch{throw new Error('受限工具策略未加载，拒绝开放模型；请使用已验证的模型运行组件');}
       status.acpConnected = true;
       log('info', `[acp] connected to ${init.agentInfo?.name ?? 'agent'} (protocol ${init.protocolVersion})`);
       readyResolve?.();
