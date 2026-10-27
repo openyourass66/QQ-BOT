@@ -1,6 +1,7 @@
 # 依赖与构建产物
 /node_modules/
 /dist/
+/web/dist/
 /release/
 /user-data/
 /desktop/bin/

@@ -161,4 +161,4 @@ dist/                   自动生成的 JavaScript 与调试映射（Git 忽略�
 
 项目代码采用 [MIT 许可证](LICENSE)。第三方组件与依赖继续遵守各自许可，NapCat 的个人非商业使用与组件获取方式见[组件说明](docs/components-and-packaging.md)。
 
-服务器运行与浏览器管理见[云端控制台方案](docs/cloud-console-plan.md)。该部分尚未实现，当前内部发行包只用于 Windows 验证。
+服务器运行与浏览器管理见[云端控制台方案](docs/cloud-console-plan.md)，私有只读预览见[当前使用说明](docs/cloud-console.md)。Linux 发行及完整网页操作仍在开发，当前内部发行包只用于 Windows 验证。
