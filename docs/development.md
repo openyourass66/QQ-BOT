@@ -10,6 +10,8 @@
 
 ## 模块边界
 
+运行管理核心在 `scripts/runtime-service.mjs`，桌面标准输入/输出入口位于 `desktop/host.mjs`。其它管理入口应复用核心并增加自身认证及 DTO 边界，不能公开核心的通用命令通道或原始 `.env`。管理实例租约由 `scripts/runtime-lease.mjs` 持有，与业务数据锁分别保护。
+
 `src/bridge.ts` 与 `src/mcp-qq.ts` 保留稳定入口。内部模块按职责划分：
 
 | 目录 | 主要模块 | 职责 |

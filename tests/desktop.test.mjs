@@ -1,3 +1,4 @@
+import {copyRuntimeHost} from './helpers/runtime.mjs';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { fork, spawn } from 'node:child_process';
@@ -72,7 +73,7 @@ test('桌面配置：中文往返、完整设置校验、无效保存保留文�
 test('桌面控制：重复启动、模型重连、完整重启、仅在配置保存成功后重启和退出清理', async () => {
   const root = await mkdtemp(join(tmpdir(), 'qq-desktop-host-'));
   for (const dir of ['desktop', 'dist', 'scripts']) await mkdir(join(root, dir));
-  await cp(resolve('desktop/host.mjs'), join(root, 'desktop/host.mjs'));
+  await copyRuntimeHost(root);
   for (const file of ['app-paths.mjs', 'setup.mjs', 'component-paths.mjs']) await cp(resolve('scripts', file), join(root, 'scripts', file));
   await writeFile(join(root, 'desktop/diagnostics.mjs'), "export async function diagnose(){return {ok:true,rows:[]}}; export async function environment(){return {ONEBOT_TOKEN:'secret-test-token'}}; export async function onebotOnline(){return false};");
   await writeFile(join(root, 'dist/bridge.js'), "console.log('bridge-started'); console.log('token=secret-test-token'); process.on('message', m => { if (m === 'shutdown') { console.log('graceful-stop'); process.exit(); } }); setInterval(() => {}, 1000);");

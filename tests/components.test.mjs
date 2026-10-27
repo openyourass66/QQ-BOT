@@ -1,3 +1,4 @@
+import {copyRuntimeHost} from './helpers/runtime.mjs';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, readFile, writeFile, mkdir, rm, readdir } from 'node:fs/promises';
@@ -112,7 +113,7 @@ test('组件 ACP 探测只初始化协议；提前退出明确失败，不发送
 
 test('桌面组件取消与退出不被安装队列阻塞，同批到达的取消也能生效',()=>fixture(async root=>{
   for(const dir of ['desktop','scripts'])await mkdir(join(root,dir));
-  await cp(resolve('desktop/host.mjs'),join(root,'desktop/host.mjs'));
+  await copyRuntimeHost(root);
   for(const file of ['app-paths.mjs','setup.mjs'])await cp(resolve('scripts',file),join(root,'scripts',file));
   await writeFile(join(root,'desktop/diagnostics.mjs'),"export async function environment(){return {}};export async function diagnose(){return {ok:true,rows:[]}};export async function onebotOnline(){return false};");
   await writeFile(join(root,'desktop/component-worker.mjs'),"process.on('message',m=>{if(m.action==='cancel')process.send({type:'result',ok:false,error:'fixture-cancelled'},()=>process.disconnect());else process.send({type:'progress',id:'dsh',phase:'installing'});});");

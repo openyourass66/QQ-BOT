@@ -1,3 +1,4 @@
+import {copyRuntimeHost} from './helpers/runtime.mjs';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
@@ -22,7 +23,7 @@ test('诊断复用外部 OneBot 时不强制要求本机 QQ/NapCat 安装',async
 test('保存并重启检查失败时报告失败，保留原进程；恢复检查后才报告完成', {timeout:20000},async()=>{
   const root=await mkdtemp(join(tmpdir(),'qq-restart-audit-'));
   for(const name of ['desktop','dist','scripts'])await mkdir(join(root,name));
-  await cp(resolve('desktop/host.mjs'),join(root,'desktop/host.mjs'));
+  await copyRuntimeHost(root);
   for (const file of ['app-paths.mjs','setup.mjs','component-paths.mjs']) await cp(resolve('scripts',file),join(root,'scripts',file));
   await writeFile(join(root,'desktop/diagnostics.mjs'),`import {existsSync} from 'node:fs';export async function diagnose(root){return {ok:!existsSync(root+'/fail'),rows:[]}};export async function environment(){return {}};export async function onebotOnline(){return true};`);
   await writeFile(join(root,'desktop/config-worker.mjs'),`process.once('message',()=>process.send({ok:true,result:{restartAction:'restartBridge'}},()=>process.disconnect()));`);

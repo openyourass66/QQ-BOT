@@ -1,3 +1,4 @@
+import {copyRuntimeHost} from './helpers/runtime.mjs';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, writeFile, readFile, rm, cp } from 'node:fs/promises';
@@ -72,7 +73,7 @@ test('显式连接已有 QQ 服务时不会误启动本机 NapCat，即使外部
   let child;
   try {
     for (const dir of ['desktop','scripts','dist']) await mkdir(join(root, dir));
-    await cp(resolve('desktop/host.mjs'), join(root, 'desktop/host.mjs'));
+    await copyRuntimeHost(root);
     for (const file of ['app-paths.mjs', 'setup.mjs', 'component-paths.mjs']) await cp(resolve('scripts', file), join(root, 'scripts', file));
     await writeFile(join(root, 'desktop/diagnostics.mjs'), "export async function diagnose(){return {ok:true,rows:[]}};export async function environment(){return {BOT_ONEBOT_MODE:'external'}};export async function onebotOnline(){return false}");
     await writeFile(join(root, 'scripts/napcat-node.mjs'), "console.log('unexpected-napcat-start');setInterval(()=>{},1000)");
