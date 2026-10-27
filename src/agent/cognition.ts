@@ -79,7 +79,7 @@ export class Cognition {
     const task=this.reviewNow(chat,signal);this.running=task.finally(()=>{this.running=undefined;});return this.running;
   }
   private async reviewNow(chat:string,signal:AbortSignal):Promise<void> {
-    const data=await this.store.context(chat),s=this.settings();
+    const data=this.store.view('memories','cognition'),s=this.settings();data.messages=await this.store.messages(chat,2000);
     const messages=data.messages.filter(m=>m.chat===chat&&!m.self&&!m.recalled&&!s.social.blockedUsers.includes(String(m.user))&&m.segments.every(v=>['text','at','reply','face'].includes(v.type))&&!unsafe(m.text)&&!quotedOrOptOut(m.text)).slice(-80);
     if(!messages.length)throw new Error('当前会话没有可整理的有效文字消息');
     await this.run({chat,messages,memories:data.memories.filter(m=>m.chat===chat&&!s.social.blockedUsers.includes(m.user)),revision:cognitionRevision(data,chat)},signal);

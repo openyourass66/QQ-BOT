@@ -66,14 +66,16 @@ process.once('message', async ({ action, data }) => {
       const paths = dataPaths();
       dataLease = await acquireDataResources(mutableDataResources(paths));
       await settings.loadSettings();
-      const { SocialStore } = await import('../dist/qq/social-store.js');
+      const { SqliteSocialStore } = await import('../dist/storage/sqlite-social-store.js');
       const { MediaService } = await import('../dist/services/media.js');
       const { socialAdmin } = await import('../dist/qq/social-admin.js');
-      const store = new SocialStore(paths.social); await store.load();
+      const store = new SqliteSocialStore(paths.social,{onMigrationProgress:process.env.BOT_CONFIG_PROGRESS==='1'?progress=>process.send?.({type:'storage-progress',...progress}):undefined}); await store.load();
+      try {
       const media = new MediaService(paths.media, () => settings.getSettings().social);
       const { DailyUsageStore } = await import('../dist/core/usage.js');
       const usage = new DailyUsageStore(paths.usage); await usage.load();
       result = await socialAdmin(data, store, media, undefined, usage);
+      } finally {await store.close();}
     }
     else if (action === 'model') {
       if (!['list', 'test'].includes(data?.operation)) throw new Error('连接配置格式无效：未知模型操作');
@@ -146,7 +148,7 @@ process.once('message', async ({ action, data }) => {
     process.send({ ok: true, result }, () => process.disconnect());
   } catch (e) {
     const error = e.issues ? e.issues.map(issue => `${issue.path.join('.')}: ${issue.message}`).join('；')
-      : e.code === 'BOT_RESOURCE_LOCKED' || /工作区已变更|协议无效|配置格式无效|^Windows 凭据|^管理操作失败：|^空间连接检查失败：/.test(e.message) ? e.message : '配置操作失败，请检查文件格式与访问权限；原有文件保留。';
+      : e.code === 'BOT_RESOURCE_LOCKED' || e.code?.startsWith('DATABASE_') || /工作区已变更|协议无效|配置格式无效|^Windows 凭据|^管理操作失败：|^空间连接检查失败：/.test(e.message) ? e.message : '配置操作失败，请检查文件格式与访问权限；原有文件保留。';
     process.send({ ok: false, error }, () => process.disconnect());
   } finally {
     configurationLease?.release();

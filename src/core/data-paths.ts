@@ -19,6 +19,7 @@ export function mutableDataResources(paths: ReturnType<typeof dataPaths>) {
     { path: paths.groupContext, label: '群聊上下文' },
     { path: paths.usage, label: '每日额度' },
     { path: paths.social, label: '社交存档' },
+    { path: paths.social+'.sqlite', label: '社交数据库' },
     { path: paths.media, label: '媒体目录' },
   ];
 }

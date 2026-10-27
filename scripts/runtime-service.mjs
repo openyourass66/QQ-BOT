@@ -148,13 +148,13 @@ async function stopOne(name) {
 }
 async function stop() { await stopOne('bridge'); await stopOne('napcat'); externalNapcat = false; }
 async function config(action, data) {
-  const worker=await processGuard.fork('desktop/config-worker.mjs',{cwd:dataRoot,env:{...process.env,BOT_CREDENTIAL_MODE:protectedCredentials?'dpapi':'compatible'}});
+  const worker=await processGuard.fork('desktop/config-worker.mjs',{cwd:dataRoot,env:{...process.env,BOT_CREDENTIAL_MODE:protectedCredentials?'dpapi':'compatible',BOT_CONFIG_PROGRESS:'1'}});
   if(closing){await processGuard.terminate(worker);throw new Error('运行管理服务正在关闭');}
   configWorkers.add(worker);worker.once('exit',()=>configWorkers.delete(worker));
   return new Promise((done, reject) => {
-    const timeout = setTimeout(() => { void processGuard.terminate(worker); reject(new Error('配置操作超时，请重试')); }, action === 'qzone-check' ? 30000 : action === 'model' ? 25000 : 10000);
+    const timeout = setTimeout(() => { void processGuard.terminate(worker); reject(new Error('配置操作超时，请重试')); }, action === 'social' ? 120000 : action === 'qzone-check' ? 30000 : action === 'model' ? 25000 : 10000);
     let replied = false;
-    worker.once('message', result => { replied = true; clearTimeout(timeout); result.ok ? done(result.result) : reject(new Error(result.error)); });
+    worker.on('message', result => { if(result?.type==='storage-progress'){emit(result);return;}if(replied)return;replied = true; clearTimeout(timeout); result.ok ? done(result.result) : reject(new Error(result.error)); });
     worker.once('error', error => { clearTimeout(timeout); reject(error); });
     worker.once('exit', () => { clearTimeout(timeout); if (!replied) reject(new Error('配置读取失败，请检查构建文件与配置格式')); });
     worker.send({ action, data });

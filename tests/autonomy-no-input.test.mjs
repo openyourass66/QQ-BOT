@@ -1,3 +1,4 @@
+import {readSocialData} from './helpers/social-data.mjs';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
@@ -25,7 +26,7 @@ test('没有新消息和用户指令时，真实后台链路自行触发语音�
   const ws=new WebSocketServer({port:0,host:'127.0.0.1'});if(!ws.address())await once(ws,'listening');
   const clock=join(root,'clock'),events=join(root,'events.jsonl'),comments=join(root,'comments.jsonl');
   const until=async predicate=>{const end=Date.now()+9000;while(!await predicate()){if(Date.now()>end)throw new Error('自主触发等待超时：'+output.slice(-1000));await new Promise(done=>setTimeout(done,25));}};
-  const data=async()=>JSON.parse(await readFile(join(root,'social.json'),'utf8'));
+  const data=async()=>await readSocialData(join(root,'social.json'));
   try{
     await writeFile(clock,String(now));await writeFile(comments,'');
     const at=now-3*3600000;

@@ -185,6 +185,7 @@ partial class App
         if (type == "log") {
             logs.Enqueue((string)message["text"]); while (logs.Count > 1500) logs.Dequeue();
         } else if (type == "error") { Find<TabControl>("Tabs").IsEnabled = true; SetSocialBusy(false); string text = (string)message["text"];if(message.ContainsKey("action")&&new[]{"knowledge","memory"}.Contains(message["action"] as string)){SetKnowledgeBusy(false);KnowledgeError(text);} Feedback(text); Find<TextBlock>("LastError").Text = text; Find<Border>("ErrorBanner").Visibility = Visibility.Visible; logs.Enqueue("[error] " + text); }
+        else if (type == "storage-progress") { Feedback("正在准备历史记录："+message["completed"]+" / "+message["total"]+"；校验完成后继续，原文件保留。"); }
         else if (type == "saved") {
             Find<TabControl>("Tabs").IsEnabled = true;
             string section = (string)message["section"];

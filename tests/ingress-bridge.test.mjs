@@ -1,3 +1,4 @@
+import {readSocialData} from './helpers/social-data.mjs';
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { spawn } from 'node:child_process';
@@ -70,7 +71,7 @@ async function fixture(settings = {}, limits = {}) {
     notice(event) { socket.send(JSON.stringify({ post_type: 'notice', notice_type: 'group_increase', self_id: 10000, user_id: 20001, ...event })); },
     burst(send) { socket._socket.cork(); try { send(); } finally { socket._socket.uncork(); } },
     prompts: async () => readFile(promptsPath, 'utf8').then(raw => raw.trim().split('\n').filter(Boolean).map(JSON.parse), () => []),
-    archive: async () => JSON.parse(await readFile(join(root, 'social.json'), 'utf8')),
+    archive: async () => await readSocialData(join(root,'social.json')),
   };
 }
 

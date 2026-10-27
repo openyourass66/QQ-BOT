@@ -1,3 +1,4 @@
+import {readSocialData} from './helpers/social-data.mjs';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
@@ -28,7 +29,7 @@ async function scenario(fail,learning=false,changePolicy=false) {
   const wrapper=join(root,process.platform==='win32'?'intelligence dsh.cmd':'intelligence-dsh'),fake=resolve('tests/fixtures/intelligence-dsh.mjs');
   await writeFile(wrapper,process.platform==='win32'?`@echo off\r\n"${process.execPath}" "${fake}" %*\r\n`:`#!/bin/sh\nexec "${process.execPath}" "${fake}" "$@"\n`,{mode:0o700});
   const wait=async predicate=>{const until=Date.now()+10000;while(Date.now()<until){if(await predicate())return;await new Promise(done=>setTimeout(done,40));}throw new Error('fixture timeout: '+output.slice(-1400));};
-  const data=async name=>JSON.parse(await readFile(join(root,name),'utf8'));
+  const data=async name=>name==='social.json'?readSocialData(join(root,name)):JSON.parse(await readFile(join(root,name),'utf8'));
   try{
     child=spawn(process.execPath,[resolve('dist/bridge.js')],{env:{...process.env,BOT_CHAT_MODE:'profile',BOT_DSH_BIN:wrapper,BOT_DSH_PROFILE:'acp',BOT_WORKSPACE:root,BOT_SETTINGS_FILE:settingsPath,
       ONEBOT_HTTP_URL:`http://127.0.0.1:${http.address().port}`,ONEBOT_WS_URL:`ws://127.0.0.1:${ws.address().port}`,

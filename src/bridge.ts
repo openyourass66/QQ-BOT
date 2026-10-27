@@ -29,7 +29,7 @@ import { DailyUsageStore } from './core/usage.js';
 import { QqActionPolicy } from './qq/qq-actions.js';
 import { startActionServer, type ActionServer } from './services/action-server.js';
 import { z } from 'zod';
-import { SocialStore } from './qq/social-store.js';
+import {SqliteSocialStore} from './storage/sqlite-social-store.js';
 import type {SocialRepository} from './storage/social-repository.js';
 import { SocialEngine } from './qq/social-engine.js';
 import type { AutonomousTurn } from './agent/autonomous-state.js';
@@ -51,7 +51,8 @@ const store = new SessionStore(sessionStorePath);
 const groupContext = new GroupContextStore(paths.groupContext, Date.now,
   (error) => log('error', `[context] 保存失败：${String(error)}`));
 const usage = new DailyUsageStore(paths.usage);
-const socialStore:SocialRepository = new SocialStore(paths.social);
+const socialStore:SocialRepository = new SqliteSocialStore(paths.social,{onMigrationProgress:({stage,completed,total})=>log('info',`[storage] ${stage} ${completed}/${total}`)});
+socialStore.onFailure=error=>{if(!stopping){reportFatal(error);void shutdown(1);}};
 const media = new MediaService(paths.media, () => getSettings().social);
 const shutdownSignal = new AbortController();
 const activeConversations = new Map<string, ToolContext>();
@@ -897,6 +898,7 @@ async function shutdown(code = 0): Promise<void> {
       await Promise.all([actionServer?.close(), stopChild(), queue.drain(), ingress.drain()]);
       await engine.cognition.flush();
       await Promise.all([usage.flush(), store.flush(), groupContext.flush(), socialStore.flush(), flushSettings()]);
+      await socialStore.close?.();
     })(), 5000);
   } catch (error) {
     log('error', `[shutdown] ${String(error)}`);

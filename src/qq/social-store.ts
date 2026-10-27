@@ -26,8 +26,8 @@ export type StoredMessage = z.infer<typeof message>;
 export type ScheduledTask = z.infer<typeof task>;
 
 export class SocialStore implements SocialRepository {
-  private data: SocialData = schema.parse({ version: 2, messages: [], contacts: [], memories: [], stickers: [], tasks: [], events: [], actions: [], turns: [] });
-  private chain: Promise<unknown> = Promise.resolve();
+  protected data: SocialData = schema.parse({ version: 2, messages: [], contacts: [], memories: [], stickers: [], tasks: [], events: [], actions: [], turns: [] });
+  protected chain: Promise<unknown> = Promise.resolve();
   constructor(readonly path: string) {}
   async load(): Promise<void> {
     let found=false;
@@ -43,22 +43,7 @@ export class SocialStore implements SocialRepository {
     }
     catch (e) { if (found || (e as NodeJS.ErrnoException).code !== 'ENOENT') throw e; }
     // A process crash during a send has an unknown outcome; never repeat it automatically.
-    await this.update(d => {
-      for(const job of d.cognition.jobs) if(job.state==='running'){job.state='unknown';job.summary='上次分析中断，已保留处理游标，不自动重复提交';}
-      for (const item of d.actions) if (item.state === 'running') item.state = 'unknown';
-      for (const item of d.tasks) if (item.state === 'running') { item.state = 'unknown'; item.error = '上次执行中断，请核对聊天记录后再安排'; }
-      for (const item of d.autonomous.thoughts) if(item.state==='running'){
-        item.state='unknown';item.result='上次执行中断，结果待核对，不自动重试';
-        if(item.kind==='chat'){
-          let c=d.autonomous.contacts.find(c=>c.chat===item.chat);
-          if(!c){c={chat:item.chat,incomingAt:0,proactiveAt:0,unanswered:0,attemptAt:0};d.autonomous.contacts.push(c);}
-          c.unanswered=1;c.attemptAt=Date.now();
-        }
-      }
-      d.autonomous.contacts=d.autonomous.contacts.slice(-5000);
-      for (const item of d.autonomous.posts) if(item.state==='running')item.state='unknown';
-      for (const item of d.autonomous.spaceComments) if(item.state==='running')item.state='unknown';
-    });
+    await this.update(d => recoverInterrupted(d));
   }
   snapshot(): SocialData { return structuredClone(this.data); }
   view(...fields:SocialField[]):SocialData {
@@ -66,23 +51,23 @@ export class SocialStore implements SocialRepository {
     for(const field of fields)Object.assign(result,{[field]:structuredClone(this.data[field])});
     return result;
   }
-  context(chat:string):SocialData {
+  context(chat:string):SocialData|Promise<SocialData> {
     const data=this.view('memories','cognition');data.memories=data.memories.filter(m=>m.chat===chat);
     data.cognition.memories=Object.fromEntries(data.memories.filter(m=>data.cognition.memories[m.id]).map(m=>[m.id,data.cognition.memories[m.id]]));
     data.cognition.lexicon=data.cognition.lexicon.filter(l=>l.chat===chat);data.cognition.suppressed=data.cognition.suppressed.filter(s=>s.chat===chat);
     data.cognition.scopes=Object.fromEntries(Object.entries(data.cognition.scopes).filter(([key])=>key===chat));data.cognition.jobs=data.cognition.jobs.filter(j=>j.chat===chat);
     data.messages=structuredClone(this.data.messages.filter(m=>m.chat===chat));return data;
   }
-  queryMessages(query:MessageQuery):{rows:StoredMessage[];total:number} {
+  queryMessages(query:MessageQuery):{rows:StoredMessage[];total:number}|Promise<{rows:StoredMessage[];total:number}> {
     const {chat,ids,after,incomingOnly,excludeUsers=[],ascending=false}=query;
     const limit=Math.min(20000,Math.max(1,query.limit??100)),offset=Math.max(0,query.offset??0),text=query.query?.toLocaleLowerCase();
     const rows=this.data.messages.filter(m=>(chat===undefined||m.chat===chat)&&(!ids||ids.includes(m.id))&&(after===undefined||m.at>=after)&&(!incomingOnly||!m.self&&!m.recalled)&&!excludeUsers.includes(String(m.user))&&(!text||`${m.name} ${m.text} ${m.chat}`.toLocaleLowerCase().includes(text))).sort((a,b)=>ascending?a.at-b.at:b.at-a.at);
     return {rows:structuredClone(rows.slice(offset,offset+limit)),total:rows.length};
   }
-  latestIncoming(excludeUsers:string[]=[]):StoredMessage[] {
+  latestIncoming(excludeUsers:string[]=[]):StoredMessage[]|Promise<StoredMessage[]> {
     const rows=new Map<string,StoredMessage>();for(const m of this.data.messages)if(!m.self&&!m.recalled&&!excludeUsers.includes(String(m.user))&&(!rows.has(m.chat)||rows.get(m.chat)!.at<=m.at))rows.set(m.chat,m);return structuredClone([...rows.values()]);
   }
-  lookupMessages(refs:MessageRef[]):StoredMessage[]{const keys=new Set(refs.map(r=>`${r.chat}/${r.id}`));return structuredClone(this.data.messages.filter(m=>keys.has(`${m.chat}/${m.id}`)));}
+  lookupMessages(refs:MessageRef[]):StoredMessage[]|Promise<StoredMessage[]>{const keys=new Set(refs.map(r=>`${r.chat}/${r.id}`));return structuredClone(this.data.messages.filter(m=>keys.has(`${m.chat}/${m.id}`)));}
   updateWithMessages<T>(_chat:string,_ids:number[],fn:(draft:SocialData)=>T):Promise<T>{return this.update(fn);}
   profile(chat: string): SocialData['profiles'][number] | undefined { return structuredClone(this.data.profiles.find(p => p.chat === chat)); }
   memories(chat: string): SocialData['memories'] { return structuredClone(this.data.memories.filter(m => m.chat === chat)); }
@@ -135,11 +120,11 @@ export class SocialStore implements SocialRepository {
       d.contacts = d.contacts.slice(-5000);
     });
   }
-  messages(chat: string, limit = 30, offset = 0, query = ''): StoredMessage[] {
+  messages(chat: string, limit = 30, offset = 0, query = ''): StoredMessage[]|Promise<StoredMessage[]> {
     const all = this.data.messages.filter(m => m.chat === chat && (!query || m.text.includes(query)));
     return structuredClone(all.slice(Math.max(0, all.length - offset - limit), Math.max(0, all.length - offset)));
   }
-  message(chat: string, id: number): StoredMessage {
+  message(chat: string, id: number): StoredMessage|Promise<StoredMessage> {
     const found = this.data.messages.find(m => m.chat === chat && m.id === id);
     if (!found) throw new Error('当前会话找不到该消息，请先查询近期消息，使用返回的真实消息编号');
     return structuredClone(found);
@@ -174,3 +159,20 @@ export class SocialStore implements SocialRepository {
   }
 }
 export {schema as SocialDataSchema};
+
+export function recoverInterrupted(d:SocialData,now=Date.now()):void {
+      for(const job of d.cognition.jobs) if(job.state==='running'){job.state='unknown';job.summary='上次分析中断，已保留处理游标，不自动重复提交';}
+      for (const item of d.actions) if (item.state === 'running') item.state = 'unknown';
+      for (const item of d.tasks) if (item.state === 'running') { item.state = 'unknown'; item.error = '上次执行中断，请核对聊天记录后再安排'; }
+      for (const item of d.autonomous.thoughts) if(item.state==='running'){
+        item.state='unknown';item.result='上次执行中断，结果待核对，不自动重试';
+        if(item.kind==='chat'){
+          let c=d.autonomous.contacts.find(c=>c.chat===item.chat);
+          if(!c){c={chat:item.chat,incomingAt:0,proactiveAt:0,unanswered:0,attemptAt:0};d.autonomous.contacts.push(c);}
+          c.unanswered=1;c.attemptAt=now;
+        }
+      }
+      d.autonomous.contacts=d.autonomous.contacts.slice(-5000);
+      for (const item of d.autonomous.posts) if(item.state==='running')item.state='unknown';
+      for (const item of d.autonomous.spaceComments) if(item.state==='running')item.state='unknown';
+}

@@ -10,6 +10,8 @@ type Awaitable<T>=T|Promise<T>;
 export interface SocialRepository {
   readonly path:string;
   load():Promise<void>;
+  close?():Promise<void>;
+  onFailure?:(error:Error)=>void;
   view(...fields:SocialField[]):SocialData;
   context(chat:string):Awaitable<SocialData>;
   queryMessages(query:MessageQuery):Awaitable<{rows:StoredMessage[];total:number}>;

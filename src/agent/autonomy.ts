@@ -255,7 +255,7 @@ export class Autonomy {
         const current=data.autonomous.thoughts.find(x=>x.id===t.id);if(!current||current.state!=='pending')throw new Error('想法状态已变化');current.state='running';data.autonomous.lastDecisionAt=now;
         if(t.kind==='qzone')data.autonomous.lastQzoneAttempt=now;
         if(t.kind==='qzone-comment'){data.autonomous.lastCommentAttempt=now;data.autonomous.commentCursor++;}
-        if(t.chat&&!data.autonomous.contacts.some(c=>c.chat===t.chat)){data.autonomous.contacts.push({chat:t.chat,incomingAt:data.messages.find(m=>m.chat===t.chat&&m.id===t.messageId)?.at??0,proactiveAt:0,unanswered:0,attemptAt:0});data.autonomous.contacts=data.autonomous.contacts.slice(-5000);}
+        if(t.chat&&!data.autonomous.contacts.some(c=>c.chat===t.chat)){data.autonomous.contacts.push({chat:t.chat,incomingAt:referenced.find(m=>m.chat===t.chat&&m.id===t.messageId)?.at??0,proactiveAt:0,unanswered:0,attemptAt:0});data.autonomous.contacts=data.autonomous.contacts.slice(-5000);}
       });
       const a:AutonomousTurn={kind:t.kind,thoughtId:t.id,effects:new Set(),messages:0,reason:'',...(t.targetUser?{targetUser:t.targetUser}:{})};let failure='',busy=false;
       try {
