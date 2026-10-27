@@ -160,3 +160,5 @@ dist/                   自动生成的 JavaScript 与调试映射（Git 忽略�
 - 自动测试使用隔离数据与模拟服务；不能据此判断真实 QQ 接口、付费服务可达性或模型理解质量。
 
 项目代码采用 [MIT 许可证](LICENSE)。第三方组件与依赖继续遵守各自许可，NapCat 的个人非商业使用与组件获取方式见[组件说明](docs/components-and-packaging.md)。
+
+服务器运行与浏览器管理见[云端控制台方案](docs/cloud-console-plan.md)。该部分尚未实现，当前内部发行包只用于 Windows 验证。
