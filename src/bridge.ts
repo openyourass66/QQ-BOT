@@ -25,7 +25,7 @@ import { parseApprovalReply, permissionOutcome } from './core/permissions.js';
 import { assertToolAccess, toolAccessVisible, approvalBinding } from './security/tool-policy.js';
 import { nativeToolDenial } from './security/dsh-policy.js';
 import { classifyRuntimeFailure } from './core/runtime-failure.js';
-import { DailyUsageStore } from './core/usage.js';
+import {SqliteDailyUsageStore} from './storage/sqlite-usage-store.js';
 import { QqActionPolicy } from './qq/qq-actions.js';
 import { startActionServer, type ActionServer } from './services/action-server.js';
 import { z } from 'zod';
@@ -50,7 +50,8 @@ const sessionStorePath = paths.sessions;
 const store = new SessionStore(sessionStorePath);
 const groupContext = new GroupContextStore(paths.groupContext, Date.now,
   (error) => log('error', `[context] 保存失败：${String(error)}`));
-const usage = new DailyUsageStore(paths.usage);
+const usage = new SqliteDailyUsageStore(paths.usage);
+usage.onFailure=error=>{if(!stopping){reportFatal(error);void shutdown(1);}};
 const socialStore:SocialRepository = new SqliteSocialStore(paths.social,{onMigrationProgress:({stage,completed,total})=>log('info',`[storage] ${stage} ${completed}/${total}`)});
 socialStore.onFailure=error=>{if(!stopping){reportFatal(error);void shutdown(1);}};
 const media = new MediaService(paths.media, () => getSettings().social);
@@ -898,7 +899,7 @@ async function shutdown(code = 0): Promise<void> {
       await Promise.all([actionServer?.close(), stopChild(), queue.drain(), ingress.drain()]);
       await engine.cognition.flush();
       await Promise.all([usage.flush(), store.flush(), groupContext.flush(), socialStore.flush(), flushSettings()]);
-      await socialStore.close?.();
+      await Promise.all([socialStore.close?.(),usage.close()]);
     })(), 5000);
   } catch (error) {
     log('error', `[shutdown] ${String(error)}`);

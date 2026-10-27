@@ -24,10 +24,10 @@ export function shanghaiDate(now: Date): string {
 /** 由桥接进程统一写入；不同 MCP 子进程共享同一份额度。 */
 export class DailyUsageStore {
   private readonly queue = new ConversationQueue();
-  private data: Usage = { version: 1, date: '', counters: {} };
-  private readonly path: string;
+  protected data: Usage = { version: 1, date: '', counters: {} };
+  protected readonly path: string;
 
-  constructor(path: string, private readonly now: () => Date = () => new Date()) {
+  constructor(path: string, protected readonly now: () => Date = () => new Date()) {
     this.path = resolve(path);
   }
 
@@ -79,3 +79,4 @@ export class DailyUsageStore {
     await this.queue.drain();
   }
 }
+export {UsageSchema};

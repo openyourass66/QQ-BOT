@@ -1,11 +1,16 @@
 import type {StoredMessage} from '../qq/social-store.js';
 import type {MessageQuery,MessageRef} from './social-repository.js';
+import type {Quota} from '../core/usage.js';
 
 export const entityTables=['contacts','memories','stickers','tasks','events','actions','turns','profiles','interests','thoughts','decisions','autonomous_contacts','sticker_uses','posts','space_comments','memory_meta','lexicon','suppressed','learning_scopes','learning_jobs','state'] as const;
 export type EntityTable=typeof entityTables[number];
 export type EntityRow={table:EntityTable;key:string;ordinal:number;value:unknown};
 export type EntityChange={table:EntityTable;key:string;ordinal?:number;value?:unknown};
-export type DatabaseRequest=
+export type UsageDatabaseRequest=
+  |{action:'usage-import';date:string;counters:Record<string,number>;final?:boolean}
+  |{action:'usage-summary';date:string}
+  |{action:'usage-consume';date:string;quotas:Quota[];reservationId:string;at:number};
+export type DatabaseRequest=UsageDatabaseRequest
   |{action:'metadata'}
   |{action:'import';rows:Array<EntityRow|{table:'messages';key:string;ordinal:number;value:StoredMessage}>}
   |{action:'complete-import';source:Record<string,unknown>}

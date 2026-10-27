@@ -33,7 +33,7 @@ test('资源路径统一解析，独立覆盖的额度和存档仍纳入保护',
   assert.equal(paths.groupContext, join(root, 'custom/group-context.json'));
   assert.equal(paths.media, join(root, 'custom/media'));
   assert.equal(paths.usage, join(root, 'shared/usage.json'));
-  assert.equal(mutableDataResources(paths).length, 6);
+  assert.equal(mutableDataResources(paths).length, 7);
 });
 
 test('资源锁去重、处理目录联接与路径大小写，释放可重复调用', async () => {

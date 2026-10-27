@@ -46,7 +46,7 @@ export async function ensureSocialDatabase(path:string,onProgress?:(progress:Mig
     }await flush();await client.open();
     await onProgress?.({stage:'verify',completed,total});const check=await client.call<{check:string[]}>({action:'integrity'}),actual=await client.call<{sha256:string}>({action:'fingerprint'});
     if(check.check.join(',')!=='ok'||actual.sha256!==fingerprint)throw failure('DATABASE_INVALID','迁移完整性校验未通过，原文件与备份保留。');
-    await client.call({action:'complete-import',source:{formatVersion:1,file:basename(path),sha256,normalizedSha256:fingerprint,migratedAt:new Date().toISOString()}});await client.close();
+    await client.call({action:'complete-import',source:{kind:'social',formatVersion:1,file:basename(path),sha256,normalizedSha256:fingerprint,migratedAt:new Date().toISOString()}});await client.close();
     if(raw?digest(await readFile(path))!==sha256:await stat(path).then(()=>true,error=>{if(error.code!=='ENOENT')throw error;return false;}))throw failure('DATABASE_INVALID','迁移期间原文件发生变化，已取消切换，请停止其他写入者后重试。');
     await onProgress?.({stage:'activate',completed,total});const handle=await open(staging,'r+');try{await handle.sync();}finally{await handle.close();}
     // 同目录硬链接提供不覆盖的发布；数据库连接全部关闭后才激活。

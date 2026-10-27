@@ -72,9 +72,11 @@ process.once('message', async ({ action, data }) => {
       const store = new SqliteSocialStore(paths.social,{onMigrationProgress:process.env.BOT_CONFIG_PROGRESS==='1'?progress=>process.send?.({type:'storage-progress',...progress}):undefined}); await store.load();
       try {
       const media = new MediaService(paths.media, () => settings.getSettings().social);
-      const { DailyUsageStore } = await import('../dist/core/usage.js');
-      const usage = new DailyUsageStore(paths.usage); await usage.load();
+      const { SqliteDailyUsageStore } = await import('../dist/storage/sqlite-usage-store.js');
+      const usage = new SqliteDailyUsageStore(paths.usage);
+      try {await usage.load();
       result = await socialAdmin(data, store, media, undefined, usage);
+      } finally {await usage.close();}
       } finally {await store.close();}
     }
     else if (action === 'model') {

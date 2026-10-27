@@ -23,6 +23,7 @@ export class SqliteSocialStore extends SocialStore {
     client.onFailure=error=>this.onFailure?.(error);client.onMeasurement=(action,elapsed)=>this.onMeasurement?.(action,elapsed);
     try{
       const metadata=await client.call<{revision:number;initialized:boolean;source:Record<string,unknown>;rows:EntityRow[]}>({action:'metadata'});
+      if(metadata.source?.kind&&metadata.source.kind!=='social'||!metadata.rows.some(row=>row.table==='state'&&row.key==='account'))throw Object.assign(new Error('社交数据库类型无效，请保留文件并核对路径配置。'),{code:'DATABASE_INVALID'});
       if(!metadata.initialized)throw Object.assign(new Error('数据库迁移尚未完成，原文件保留。'),{code:'DATABASE_NOT_INITIALIZED'});
       await verifyMigrationSource(this.path,metadata.source);this.data=dataFromRows(metadata.rows);this.positions=new Map(metadata.rows.map(row=>[entityIdentity(row),row.ordinal]));this.revision=metadata.revision;this.loaded=true;
       await this.update(d=>recoverInterrupted(d));
