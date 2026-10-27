@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { SocialStore } from './social-store.js';
+import type {SocialRepository,SocialField} from '../storage/social-repository.js';
 import { MediaService } from '../services/media.js';
 import { socialTools } from './social-tools.js';
 import { legacyTools } from './legacy-tools.js';
@@ -19,7 +19,7 @@ const requestSchema = z.object({
   probability: z.number().int().min(0).max(100).default(10), keywords: z.string().max(1000).default(''), proactive: z.boolean().default(true),
 }).strict().refine(value => value.op === 'profile' || value.text.length <= 2000, { message: '记忆内容最多 2000 字', path: ['text'] });
 
-export async function socialAdmin(input: unknown, store: SocialStore, media: MediaService,
+export async function socialAdmin(input: unknown, store: SocialRepository, media: MediaService,
   live?: { refresh(): Promise<void>; reset(chat: string): Promise<void>; review?(chat:string):Promise<void>; usage?: DailyUsageStore; stickers?: { sync(): Promise<unknown>;collect(id:string):Promise<void>;remove(id:string):Promise<void> } }, offlineUsage?: DailyUsageStore): Promise<unknown> {
   const a = requestSchema.parse(input);
   if(a.op==='review_memory'){if(!live?.review)throw new Error('请启动机器人后整理当前会话');await live.review(a.chat);}
@@ -73,7 +73,7 @@ export async function socialAdmin(input: unknown, store: SocialStore, media: Med
     await store.update(d => { const m = d.memories.find(m => m.id === a.id); if (!m) throw new Error('记忆不存在'); if (a.expectedText !== undefined && m.text !== a.expectedText) throw new Error('记忆已被其他操作修改，请刷新后核对；当前编辑仍保留'); reviseMemory(d,m.id,a.text); });
   }
   if(a.op==='delete'&&a.section==='stickers') {
-    const item=store.snapshot().stickers.find(s=>s.id===a.id);if(!item)throw new Error('表情不存在');
+    const item=store.view('stickers').stickers.find(s=>s.id===a.id);if(!item)throw new Error('表情不存在');
     if(item.qq) {if(!live?.stickers)throw new Error('请启动机器人后从 QQ 收藏中移除表情');await live.stickers.remove(a.id);}
     else await store.update(d=>{d.stickers=d.stickers.filter(s=>s.id!==a.id);});
   }
@@ -85,7 +85,11 @@ export async function socialAdmin(input: unknown, store: SocialStore, media: Med
     else if(a.section==='interests'){if(!d.autonomous.interests.some(i=>i.id===a.id))throw new Error('兴趣不存在');d.autonomous.interests=d.autonomous.interests.filter(i=>i.id!==a.id);}
     else throw new Error('该列表不支持删除');
   });
-  const data = store.snapshot(), s = getSettings();
+  const sectionField:Record<string,SocialField>={thoughts:'autonomous',interests:'autonomous',decisions:'autonomous',lexicon:'cognition',learning:'cognition'};
+  const field=sectionField[a.section]??(!['messages','capabilities'].includes(a.section)?a.section as SocialField:undefined);
+  const data = store.view('contacts','profiles','turns',...(field?[field]:[]),...(a.section==='memories'?['cognition' as const]:[])), s = getSettings();
+  const archive=a.section==='messages'?await store.queryMessages({chat:a.chat||undefined,query:a.query,limit:200}):undefined;
+  if(archive)data.messages=archive.rows.slice().reverse();
   type Row = { id: string; chat: string; name: string; summary: string; status: string; time: string; detail: string; text: string };
   const date = (at: number) => at ? new Date(at).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false }) : '';
   const rows: Row[] = [];
@@ -157,5 +161,5 @@ export async function socialAdmin(input: unknown, store: SocialStore, media: Med
     {key:'learning',label:'后台学习',limit:s.learning.dailyCalls},
     ...data.contacts.filter(c=>c.chat.startsWith('group:')).map(c=>({key:c.chat,label:c.name+' 主动消息与提醒',limit:s.chat.group.proactive.perGroupPerDay})),
   ]);
-  return { op: a.op, section: a.section, rows: rows.slice(0,200), total: rows.length, profiles: data.profiles, socialSettings: s.social, settingsPath:getSettingsPath(), quotas:quotas?{...quotas,live:!!live}:null, note, usage: { turns: data.turns.length, tokensKnown: data.turns.filter(t => t.inputTokens !== null).length } };
+  return { op: a.op, section: a.section, rows: rows.slice(0,200), total: archive?.total??rows.length, profiles: data.profiles, socialSettings: s.social, settingsPath:getSettingsPath(), quotas:quotas?{...quotas,live:!!live}:null, note, usage: { turns: data.turns.length, tokensKnown: data.turns.filter(t => t.inputTokens !== null).length } };
 }

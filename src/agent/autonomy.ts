@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
-import type { SocialStore, SocialData } from '../qq/social-store.js';
+import type { SocialData } from '../qq/social-store.js';
+import type {SocialRepository} from '../storage/social-repository.js';
 import type { BotSettings } from '../core/settings.js';
 import type { ToolContext } from '../qq/social-tools.js';
 import type { Thought, AutonomousTurn } from './autonomous-state.js';
@@ -30,10 +31,10 @@ export class Autonomy {
   private running=false;
   private nextScanAt=0;
   private scanInterval=0;
-  constructor(private store:SocialStore,private settings:()=>BotSettings,private usage:DailyUsageStore,private now=()=>Date.now(),private media?:MediaService){}
+  constructor(private store:SocialRepository,private settings:()=>BotSettings,private usage:DailyUsageStore,private now=()=>Date.now(),private media?:MediaService){}
   private enabled():boolean {const s=this.settings();return s.social.autonomousEnabled&&s.social.proactiveEnabled&&!quietTime(s,this.now());}
   view(ctx:ToolContext):unknown {
-    const d=this.store.snapshot().autonomous,scope=['qzone','qzone-comment'].includes(ctx.autonomous?.kind??'')?'':ctx.chat;
+    const d=this.store.view('autonomous').autonomous,scope=['qzone','qzone-comment'].includes(ctx.autonomous?.kind??'')?'':ctx.chat;
     const s=this.settings();
     return {enabled:s.social.autonomousEnabled,backgroundEnabled:this.enabled(),backgroundReason:!s.social.proactiveEnabled?'后台自主活动已关闭':!s.social.autonomousEnabled?'持续兴趣与想法已关闭':quietTime(s,this.now())?'当前为安静时段':this.usage.used('autonomous-decisions')>=s.social.autonomousDecisionsPerDay?'今日后台判断额度已用完':'按时独立判断，无需新消息或被 @',publicInterests:s.social.personalInterests,
       interests:d.interests.filter(i=>i.chat===scope).slice(-30),
@@ -48,7 +49,7 @@ export class Autonomy {
     const a=ctx.autonomous;if(!a||tool==='qq_finish')return;
     if(a.failure&&!['qq_self_state','qq_report'].includes(tool))throw new Error('上一个自主动作结果待核对，本轮停止追加操作');
     if(!this.enabled())throw new Error('自主任务已关闭或已进入安静时段');
-    const thought=this.store.snapshot().autonomous.thoughts.find(t=>t.id===a.thoughtId);
+    const thought=this.store.view('autonomous').autonomous.thoughts.find(t=>t.id===a.thoughtId);
     if(!thought||thought.state!=='running'||thought.expires<=this.now())throw new Error('这条自主想法已取消、过期或停止执行');
     const s=this.settings();
     if(!['qzone','qzone-comment'].includes(a.kind)&&(!allowedChat(s.social,ctx.chat,ctx.user)||this.store.profile(ctx.chat)?.proactive===false))throw new Error('该会话不允许自主活动');
@@ -71,7 +72,7 @@ export class Autonomy {
     if(postId&&ctx.autonomous.spacePost?.id!==postId)throw new Error('本次自主评论只能针对已提供的那条真实动态');
     if(postId&&ctx.autonomous.effects.has('qzone-comment'))throw new Error('本次自主机会已经发表评论');
   }
-  spaceCommentSeen(url:string):boolean {const hash=digest(url);return this.store.snapshot().autonomous.spaceComments.some(item=>item.hash===hash&&this.now()-item.at<30*24*hour);}
+  spaceCommentSeen(url:string):boolean {const hash=digest(url);return this.store.view('autonomous').autonomous.spaceComments.some(item=>item.hash===hash&&this.now()-item.at<30*24*hour);}
   async reserveSpaceComment(ctx:ToolContext,url:string):Promise<void> {
     if(ctx.autonomous?.kind==='qzone-comment')this.authorize(ctx,'qq_qzone_comment');const hash=digest(url);
     await this.store.update(d=>{const previous=d.autonomous.spaceComments.find(item=>item.hash===hash);if(ctx.autonomous?.kind==='qzone-comment'&&previous&&this.now()-previous.at<30*24*hour)throw new Error('这条动态已经评论或结果待核对，不会自主重复评论');if(previous){previous.at=this.now();previous.state='running';}else d.autonomous.spaceComments.push({hash,at:this.now(),state:'running'});d.autonomous.spaceComments=d.autonomous.spaceComments.slice(-500);});
@@ -80,9 +81,9 @@ export class Autonomy {
     const hash=digest(url);await this.store.update(d=>{const item=d.autonomous.spaceComments.find(item=>item.hash===hash);if(item){item.state=success?'success':'unknown';item.at=this.now();}else if(success){d.autonomous.spaceComments.push({hash,at:this.now(),state:'success'});d.autonomous.spaceComments=d.autonomous.spaceComments.slice(-500);}});
     if(ctx.autonomous?.kind==='qzone-comment'){if(success)ctx.autonomous.effects.add('qzone-comment');else ctx.autonomous.failure='空间评论结果待核对，不自动重发';}
   }
-  private evidence(ctx:ToolContext,id:number|undefined,image=false) {
+  private async evidence(ctx:ToolContext,id:number|undefined,image=false) {
     if(id===undefined)throw new Error('请用实际收到的消息编号作为依据');
-    const m=this.store.message(ctx.chat,id);
+    const m=await this.store.message(ctx.chat,id);
     if(m.self||m.recalled||this.settings().social.blockedUsers.includes(String(m.user)))throw new Error('不能用自己、已撤回或已屏蔽的消息作为依据');
     if(image&&!m.segments.some(s=>s.type==='image'))throw new Error('收藏想法需要实际图片消息');
     return m;
@@ -90,7 +91,7 @@ export class Autonomy {
   async interest(ctx:ToolContext,a:{topic:string;reason:string;strength:number;message_id?:number}):Promise<unknown> {
     if(!this.settings().social.autonomousEnabled)throw new Error('兴趣与想法已关闭');
     const publicTask=ctx.autonomous?.kind==='qzone',scope=publicTask?'':ctx.chat;
-    if(!publicTask)this.evidence(ctx,a.message_id);
+    if(!publicTask)await this.evidence(ctx,a.message_id);
     return this.store.update(d=>{
       const old=d.autonomous.interests.find(i=>i.chat===scope&&i.topic.toLocaleLowerCase()===a.topic.toLocaleLowerCase());
       if(old){
@@ -110,7 +111,7 @@ export class Autonomy {
       if(!a.summary)throw new Error('请填写想法内容');
       if((a.kind==='qzone')!==(scope===''))throw new Error('空间创作与聊天想法使用独立上下文');
       if(!scope&&a.message_id!==undefined)throw new Error('独立空间想法不能引用聊天消息');
-      if(scope)this.evidence(ctx,a.message_id,a.kind==='collect');
+      if(scope)await this.evidence(ctx,a.message_id,a.kind==='collect');
       if(a.delay_minutes*minute>=a.expires_hours*hour)throw new Error('执行时间必须早于过期时间');
     }
     return this.store.update(d=>{
@@ -131,7 +132,7 @@ export class Autonomy {
   }
   async observe(chat:string,id:number):Promise<void> {
     if(!this.settings().social.autonomousEnabled)return;
-    const m=this.store.snapshot().messages.find(m=>m.chat===chat&&m.id===id);if(!m||m.self||m.recalled)return;
+    const m=(await this.store.queryMessages({chat,ids:[id],limit:1})).rows[0];if(!m||m.self||m.recalled)return;
     await this.store.update(d=>{
       let c=d.autonomous.contacts.find(c=>c.chat===chat);
       if(!c){c={chat,incomingAt:m.at,proactiveAt:0,unanswered:0,attemptAt:0};d.autonomous.contacts.push(c);d.autonomous.contacts=d.autonomous.contacts.slice(-5000);}
@@ -162,7 +163,7 @@ export class Autonomy {
     await this.store.update(d=>{for(const t of d.autonomous.thoughts)if(t.chat===ctx.chat&&t.kind==='collect'&&t.messageId===messageId&&t.state==='pending'){t.state='done';t.result='已在对话中完成 QQ 收藏';}});
   }
   stickerRecency(chat:string):Map<string,number> {
-    const used=new Map<string,number>();for(const s of this.store.snapshot().autonomous.stickerUses)if(s.chat===chat)used.set(s.stickerId,Math.max(s.at,used.get(s.stickerId)??0));return used;
+    const used=new Map<string,number>();for(const s of this.store.view('autonomous').autonomous.stickerUses)if(s.chat===chat)used.set(s.stickerId,Math.max(s.at,used.get(s.stickerId)??0));return used;
   }
   lastSticker(chat:string,id:string):number {return this.stickerRecency(chat).get(id)??0;}
   async usedSticker(chat:string,id:string):Promise<void> {await this.store.update(d=>{d.autonomous.stickerUses.push({chat,stickerId:id,at:this.now()});d.autonomous.stickerUses=d.autonomous.stickerUses.slice(-1000);});}
@@ -194,19 +195,20 @@ export class Autonomy {
   async tick(signal:AbortSignal,wake:(t:Thought,a:AutonomousTurn)=>Promise<void|boolean>,canWake:(t:Thought)=>boolean=()=>true,prepare?:(t:Thought,a:AutonomousTurn)=>Promise<boolean>):Promise<void> {
     if(this.running||signal.aborted||!this.enabled())return;
     const s=this.settings(),now=this.now(),interval=s.social.proactiveIntervalMinutes*minute,scanEvery=Math.min(interval,minute);
-    const before=this.store.snapshot();
+    const before=this.store.view('autonomous');
     if(now-before.autonomous.lastDecisionAt<30000)return;
     if(this.scanInterval!==interval){this.scanInterval=interval;this.nextScanAt=0;}
     this.running=true;
     try {
       if(now>=this.nextScanAt&&now-before.autonomous.lastScanAt>=scanEvery) {
         this.nextScanAt=now+scanEvery;
+        const incoming=await this.store.latestIncoming(s.social.blockedUsers);
         await this.store.update(d=>{
           d.autonomous.lastScanAt=now;prune(d,now);
           const incomingByChat=new Map<string,SocialData['messages'][number]>(),keys=new Set(d.autonomous.thoughts.map(t=>t.key));
           let pending=d.autonomous.thoughts.filter(t=>['pending','running'].includes(t.state)).length;
           const cooldown=s.social.autonomousChatCooldownMinutes*minute;
-          for(let index=d.messages.length-1;index>=0;index--){const m=d.messages[index];if(!incomingByChat.has(m.chat)&&!m.self&&!m.recalled&&!s.social.blockedUsers.includes(String(m.user)))incomingByChat.set(m.chat,m);}
+          for(const m of incoming)incomingByChat.set(m.chat,m);
           for(const contact of d.contacts.filter(c=>c.at&&allowedChat(s.social,c.chat)).sort((a,b)=>b.at-a.at)) {
             const incoming=incomingByChat.get(contact.chat);
             if(!incoming||incoming.at+7*24*hour<=now)continue;
@@ -233,12 +235,14 @@ export class Autonomy {
         });
       }
       if(this.usage.used('autonomous-decisions')>=s.social.autonomousDecisionsPerDay||this.usage.used('social-actions')>=s.social.actionsPerDay)return;
-      const d=this.store.snapshot(),eligible=d.autonomous.thoughts.filter(t=>{
+      const d=this.store.view('autonomous','contacts','profiles','account');
+      const referenced=await this.store.lookupMessages(d.autonomous.thoughts.filter(t=>t.messageId!==undefined).map(t=>({chat:t.chat,id:t.messageId!})));
+      const eligible=d.autonomous.thoughts.filter(t=>{
         if(t.state!=='pending'||t.due>now||t.expires<=now||!canWake(t))return false;
         if(t.kind==='qzone')return s.social.autoQzoneEnabled&&s.features.qzone.enabled&&now-d.autonomous.lastQzoneAttempt>=s.social.qzoneIntervalHours*hour&&this.usage.used('autonomous-qzone')<s.social.autoQzonePerDay&&this.usage.used('qzone')<s.features.qzone.dailyLimit;
         if(t.kind==='qzone-comment')return s.social.autoQzoneCommentEnabled&&s.features.qzone.browseEnabled&&s.features.qzone.commentsEnabled&&!!t.targetUser&&allowedChat(s.social,`private:${t.targetUser}`)&&(!s.social.autoQzoneCommentUsers.length||s.social.autoQzoneCommentUsers.includes(String(t.targetUser)))&&this.store.profile(`private:${t.targetUser}`)?.proactive!==false&&now-d.autonomous.lastCommentAttempt>=s.social.qzoneCommentIntervalMinutes*minute&&this.usage.used('qzone-comments')<s.features.qzone.commentDailyLimit;
         if(!allowedChat(s.social,t.chat)||this.store.profile(t.chat)?.proactive===false)return false;
-        if(t.messageId!==undefined){const m=d.messages.find(m=>m.chat===t.chat&&m.id===t.messageId);if(!m||m.recalled||m.self||s.social.blockedUsers.includes(String(m.user)))return false;}
+        if(t.messageId!==undefined){const m=referenced.find(m=>m.chat===t.chat&&m.id===t.messageId);if(!m||m.recalled||m.self||s.social.blockedUsers.includes(String(m.user)))return false;}
         const c=d.autonomous.contacts.find(c=>c.chat===t.chat);
         if(t.kind==='collect')return s.social.autoCollectStickers&&s.social.stickersEnabled&&this.usage.used('autonomous-collections')<s.social.autoCollectPerDay;
         if(t.chat.startsWith('group:')&&(!s.chat.group.proactive.enabled||this.usage.used('group:'+t.chat.split(':')[1])>=s.chat.group.proactive.perGroupPerDay))return false;

@@ -7,6 +7,7 @@ import { segmentsToText } from './onebot.js';
 import { StoredStickerAnalysisSchema } from './sticker-review.js';
 import { AutonomousStateSchema } from '../agent/autonomous-state.js';
 import { CognitionStateSchema, MemoryMetaSchema } from '../agent/cognition-state.js';
+import type {SocialRepository,SocialField,MessageQuery,MessageRef} from '../storage/social-repository.js';
 
 const segment = z.object({ type: z.string(), data: z.record(z.string(), z.unknown()) });
 const message = z.object({ chat: z.string(), id: z.number().int().safe(), user: z.number().int().safe(), name: z.string(), at: z.number(), text: z.string(), segments: z.array(segment), self: z.boolean(), recalled: z.boolean().default(false) });
@@ -24,7 +25,7 @@ export type SocialData = z.infer<typeof schema>;
 export type StoredMessage = z.infer<typeof message>;
 export type ScheduledTask = z.infer<typeof task>;
 
-export class SocialStore {
+export class SocialStore implements SocialRepository {
   private data: SocialData = schema.parse({ version: 2, messages: [], contacts: [], memories: [], stickers: [], tasks: [], events: [], actions: [], turns: [] });
   private chain: Promise<unknown> = Promise.resolve();
   constructor(readonly path: string) {}
@@ -60,6 +61,29 @@ export class SocialStore {
     });
   }
   snapshot(): SocialData { return structuredClone(this.data); }
+  view(...fields:SocialField[]):SocialData {
+    const result=schema.parse({version:2,messages:[],contacts:[],memories:[],stickers:[],tasks:[],events:[],actions:[],turns:[]});
+    for(const field of fields)Object.assign(result,{[field]:structuredClone(this.data[field])});
+    return result;
+  }
+  context(chat:string):SocialData {
+    const data=this.view('memories','cognition');data.memories=data.memories.filter(m=>m.chat===chat);
+    data.cognition.memories=Object.fromEntries(data.memories.filter(m=>data.cognition.memories[m.id]).map(m=>[m.id,data.cognition.memories[m.id]]));
+    data.cognition.lexicon=data.cognition.lexicon.filter(l=>l.chat===chat);data.cognition.suppressed=data.cognition.suppressed.filter(s=>s.chat===chat);
+    data.cognition.scopes=Object.fromEntries(Object.entries(data.cognition.scopes).filter(([key])=>key===chat));data.cognition.jobs=data.cognition.jobs.filter(j=>j.chat===chat);
+    data.messages=structuredClone(this.data.messages.filter(m=>m.chat===chat));return data;
+  }
+  queryMessages(query:MessageQuery):{rows:StoredMessage[];total:number} {
+    const {chat,ids,after,incomingOnly,excludeUsers=[],ascending=false}=query;
+    const limit=Math.min(20000,Math.max(1,query.limit??100)),offset=Math.max(0,query.offset??0),text=query.query?.toLocaleLowerCase();
+    const rows=this.data.messages.filter(m=>(chat===undefined||m.chat===chat)&&(!ids||ids.includes(m.id))&&(after===undefined||m.at>=after)&&(!incomingOnly||!m.self&&!m.recalled)&&!excludeUsers.includes(String(m.user))&&(!text||`${m.name} ${m.text} ${m.chat}`.toLocaleLowerCase().includes(text))).sort((a,b)=>ascending?a.at-b.at:b.at-a.at);
+    return {rows:structuredClone(rows.slice(offset,offset+limit)),total:rows.length};
+  }
+  latestIncoming(excludeUsers:string[]=[]):StoredMessage[] {
+    const rows=new Map<string,StoredMessage>();for(const m of this.data.messages)if(!m.self&&!m.recalled&&!excludeUsers.includes(String(m.user))&&(!rows.has(m.chat)||rows.get(m.chat)!.at<=m.at))rows.set(m.chat,m);return structuredClone([...rows.values()]);
+  }
+  lookupMessages(refs:MessageRef[]):StoredMessage[]{const keys=new Set(refs.map(r=>`${r.chat}/${r.id}`));return structuredClone(this.data.messages.filter(m=>keys.has(`${m.chat}/${m.id}`)));}
+  updateWithMessages<T>(_chat:string,_ids:number[],fn:(draft:SocialData)=>T):Promise<T>{return this.update(fn);}
   profile(chat: string): SocialData['profiles'][number] | undefined { return structuredClone(this.data.profiles.find(p => p.chat === chat)); }
   memories(chat: string): SocialData['memories'] { return structuredClone(this.data.memories.filter(m => m.chat === chat)); }
   contacts(): SocialData['contacts'] { return structuredClone(this.data.contacts); }
@@ -149,3 +173,4 @@ export class SocialStore {
     });
   }
 }
+export {schema as SocialDataSchema};

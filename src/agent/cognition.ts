@@ -3,7 +3,8 @@ import { z } from 'zod';
 import { MemoryMetaSchema } from './cognition-state.js';
 import type { BotSettings } from '../core/settings.js';
 import { allowedChat } from '../qq/social-settings.js';
-import type { SocialData, SocialStore, StoredMessage } from '../qq/social-store.js';
+import type { SocialData, StoredMessage } from '../qq/social-store.js';
+import type {SocialRepository} from '../storage/social-repository.js';
 import type { DailyUsageStore } from '../core/usage.js';
 
 const evidence = z.object({messageId:z.number().int().safe(),quote:z.string().trim().min(2).max(500)}).strict();
@@ -69,15 +70,19 @@ export function forgetMemory(data:SocialData,id:string,now=Date.now()):void {
 /** Analysis returns proposals only. The single store writer validates a fresh snapshot before committing. */
 export class Cognition {
   private running?:Promise<void>;
-  constructor(readonly store:SocialStore,private settings:()=>BotSettings,private usage:DailyUsageStore,private analyze:Analyze,
+  constructor(readonly store:SocialRepository,private settings:()=>BotSettings,private usage:DailyUsageStore,private analyze:Analyze,
     private available:()=>string=()=>'',private now:()=>number=Date.now) {}
   availability():string {return this.available();}
-  review(chat:string,signal:AbortSignal):Promise<void> {
+  async review(chat:string,signal:AbortSignal):Promise<void> {
     if(this.running)throw new Error('已有资料整理正在执行，请稍后再试');
-    const data=this.store.snapshot(),s=this.settings();
+    // 先占用整理槽，再异步读取，避免同时请求越过单任务检查。
+    const task=this.reviewNow(chat,signal);this.running=task.finally(()=>{this.running=undefined;});return this.running;
+  }
+  private async reviewNow(chat:string,signal:AbortSignal):Promise<void> {
+    const data=await this.store.context(chat),s=this.settings();
     const messages=data.messages.filter(m=>m.chat===chat&&!m.self&&!m.recalled&&!s.social.blockedUsers.includes(String(m.user))&&m.segments.every(v=>['text','at','reply','face'].includes(v.type))&&!unsafe(m.text)&&!quotedOrOptOut(m.text)).slice(-80);
     if(!messages.length)throw new Error('当前会话没有可整理的有效文字消息');
-    this.running=this.run({chat,messages,memories:data.memories.filter(m=>m.chat===chat&&!s.social.blockedUsers.includes(m.user)),revision:cognitionRevision(data,chat)},signal).finally(()=>{this.running=undefined;});return this.running;
+    await this.run({chat,messages,memories:data.memories.filter(m=>m.chat===chat&&!s.social.blockedUsers.includes(m.user)),revision:cognitionRevision(data,chat)},signal);
   }
   tick(signal:AbortSignal,busy:()=>boolean):Promise<void> {
     if(this.running||signal.aborted||busy())return Promise.resolve();
@@ -86,13 +91,13 @@ export class Cognition {
   async flush():Promise<void> {await this.running;}
   private async scan(signal:AbortSignal,busy:()=>boolean):Promise<void> {
     const s=this.settings(),cfg=s.learning;if((!cfg.memory&&!cfg.lexicon)||!cfg.dailyCalls||this.usage.used('learning')>=cfg.dailyCalls||this.available())return;
-    const data=this.store.snapshot(),now=this.now();
+    const data=this.store.view('memories','cognition'),now=this.now();
     for(const chat of cfg.chats) {
       if(busy()||signal.aborted)return;
       if(!allowedChat(s.social,chat)||!cfg.memory&&!chat.startsWith('group:'))continue;
       const scope=data.cognition.scopes[chat]??{cursor:0,cursorIds:[],lastAttempt:0};
       if(now-scope.lastAttempt<cfg.intervalMinutes*60000)continue;
-      const all=data.messages.filter(m=>m.chat===chat&&!m.self&&!m.recalled&&!s.social.blockedUsers.includes(String(m.user)));
+      const all=(await this.store.queryMessages({chat,incomingOnly:true,excludeUsers:s.social.blockedUsers,after:scope.cursor,ascending:true,limit:20000})).rows;
       if(!all.length||now-all.at(-1)!.at<cfg.idleMinutes*60000)continue;
       const messages=all.filter(m=>(m.at>scope.cursor||m.at===scope.cursor&&!scope.cursorIds.includes(m.id))&&m.segments.every(v=>['text','at','reply','face'].includes(v.type))&&!unsafe(m.text)&&!quotedOrOptOut(m.text)).slice(0,Math.max(80,cfg.minMessages));
       if(messages.length<cfg.minMessages)continue;
@@ -115,7 +120,7 @@ export class Cognition {
     });
     try {
       const analyzed=await this.analyze(batch,signal),proposal=LearningProposalSchema.parse('proposal' in analyzed?analyzed.proposal:analyzed);signal.throwIfAborted();
-      await this.store.update(d=>{
+      await this.store.updateWithMessages(batch.chat,batch.messages.map(m=>m.id),d=>{
         const job=d.cognition.jobs.find(j=>j.id===id)!;
         if('proposal' in analyzed&&analyzed.usage){job.inputTokens=analyzed.usage.inputTokens;job.outputTokens=analyzed.usage.outputTokens;}
         const s=this.settings();
