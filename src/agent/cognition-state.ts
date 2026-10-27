@@ -20,10 +20,10 @@ export const LexiconSchema = z.object({
   history:z.array(z.object({text:z.string(),at:z.number(),reason:z.string()})).max(10).default([]),
 });
 export const CognitionStateSchema = z.object({
-  memories:z.record(MemoryMetaSchema).default({}),
+  memories:z.record(z.string(), MemoryMetaSchema).prefault({}),
   lexicon:z.array(LexiconSchema).max(3000).default([]),
   suppressed:z.array(z.object({chat:z.string(),hash:z.string(),at:z.number()})).max(10000).default([]),
-  scopes:z.record(z.object({cursor:z.number().default(0),cursorIds:z.array(z.number().int().safe()).max(20000).default([]),lastAttempt:z.number().default(0)})).default({}),
+  scopes:z.record(z.string(), z.object({cursor:z.number().default(0),cursorIds:z.array(z.number().int().safe()).max(20000).default([]),lastAttempt:z.number().default(0)})).prefault({}),
   jobs:z.array(z.object({id:z.string(),chat:z.string(),at:z.number(),state:z.enum(['running','completed','failed','unknown','discarded']),summary:z.string(),sources:z.array(z.number().int().safe()),inputTokens:z.number().int().nonnegative().optional(),outputTokens:z.number().int().nonnegative().optional()})).max(200).default([]),
-}).default({});
+}).prefault({});
 export type MemoryMeta = z.infer<typeof MemoryMetaSchema>;

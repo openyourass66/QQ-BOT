@@ -4,7 +4,7 @@ import { z } from 'zod';
 
 const StoreSchema = z.object({
   version: z.literal(1),
-  sessions: z.record(z.object({ sessionId: z.string().min(1), updatedAt: z.number().finite(), policy:z.string().optional(), generation:z.number().int().positive().optional() })),
+  sessions: z.record(z.string(), z.object({ sessionId: z.string().min(1), updatedAt: z.number().finite(), policy:z.string().optional(), generation:z.number().int().positive().optional() })),
 });
 
 type StoreShape = {

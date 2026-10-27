@@ -91,6 +91,17 @@ test('组件子进程不继承项目密钥、DSH 会话和用户 npm 配置',()=
   finally{for(const key of Object.keys(process.env))if(!(key in saved))delete process.env[key];Object.assign(process.env,saved);}
 });
 
+test('组件清单升级后仍识别旧受管路径供替换，修复不重置 DSH 登录目录',()=>fixture(async root=>{
+  const app=join(root,'app'),data=join(root,'data');await mkdir(join(app,'components'),{recursive:true});await mkdir(data);
+  const bytes=zip([{name:'dsh.cmd',data:'fixture-entry'}]);
+  const catalog={formatVersion:1,platform:'win32-x64',components:{node:{version:'1'},napcat:{version:'1'},dsh:{...spec(bytes),version:'1.0.0',name:'old-build',kind:'zip',prefix:'',required:['dsh.cmd']}}};
+  const file=join(app,'components/catalog.json');await writeFile(file,JSON.stringify(catalog));
+  const options={root:app,dataRoot:data,id:'dsh',catalog,platform:'win32',arch:'x64',fetcher:async()=>new Response(bytes),probe:async()=>{}};
+  const first=await prepareComponent(options);assert.ok(first.suggestions.some(item=>item.key==='BOT_DSH_HOME'));
+  catalog.components.dsh.name='security-update';await writeFile(file,JSON.stringify(catalog));assert.equal(await installedComponent('dsh',data,app),undefined);
+  const second=await prepareComponent(options);assert.equal(second.suggestions[0].previous,join(first.installed.directory,'dsh.cmd'));assert.ok(!second.suggestions.some(item=>item.key==='BOT_DSH_HOME'));
+}));
+
 test('固定内置 Node 可离线复用，不重复下载，并核对二进制摘要',()=>fixture(async root=>{
   const app=join(root,'app'),data=join(root,'data');await mkdir(join(app,'components'),{recursive:true});await mkdir(join(app,'runtime'));await mkdir(data);
   const binary=Buffer.from('trusted-node'),archive=zip([{name:'node.exe',data:'download-node'}]);

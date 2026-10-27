@@ -13,7 +13,7 @@ export const LearningSettingsSchema = z.object({
   memoryChars: z.number().int().min(0).max(6000).default(1800),
   lexiconCount: z.number().int().min(0).max(10).default(4),
   lexiconChars: z.number().int().min(0).max(2000).default(400),
-}).default({});
+}).prefault({});
 
 export const ContextSettingsSchema = z.object({
   backgroundChars: z.number().int().min(500).max(12000).default(3000),
@@ -22,4 +22,4 @@ export const ContextSettingsSchema = z.object({
   rollover: z.boolean().default(false),
   toolsPerTurn: z.number().int().min(1).max(200).default(80),
   filterTools: z.boolean().default(false),
-}).default({});
+}).prefault({});

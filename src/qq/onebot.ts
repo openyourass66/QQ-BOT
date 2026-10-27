@@ -54,7 +54,7 @@ const MessageSchema = z.object({
   user_id: z.number().int().positive().safe(),
   message_id: z.number().int().safe(),
   raw_message: z.string().default(''),
-  message: z.union([z.array(z.object({ type: z.string(), data: z.record(z.unknown()) })), z.string().transform(parseCqMessage)]),
+  message: z.union([z.array(z.object({ type: z.string(), data: z.record(z.string(), z.unknown()) })), z.string().transform(parseCqMessage)]),
   sender: z.object({
     user_id: z.number().int().positive().safe().optional(),
     nickname: z.string().default(''),

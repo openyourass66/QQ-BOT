@@ -18,9 +18,9 @@ const GroupSchema = z
         enabled: z.boolean().default(false),
         perGroupPerDay: z.number().int().min(0).max(20).default(1),
       })
-      .default({}),
+      .prefault({}),
   })
-  .default({});
+  .prefault({});
 
 const SettingsSchema = z
   .object({
@@ -31,7 +31,7 @@ const SettingsSchema = z
       .object({
         name: z.string().min(1).max(32).default('小深'),
       })
-      .default({}),
+      .prefault({}),
     chat: z
       .object({
         privateAutoReply: z.boolean().default(true),
@@ -42,16 +42,16 @@ const SettingsSchema = z
             maxMs: z.number().int().min(0).max(20000).default(config.bot.maxDelayMs),
             chunkSize: z.number().int().min(100).max(4000).default(config.bot.chunkSize),
           })
-          .default({}),
+          .prefault({}),
       })
-      .default({}),
+      .prefault({}),
     approval: z
       .object({
         adminQq: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).default(config.bot.adminQq),
         allowExec: z.boolean().default(config.bot.allowExec),
         timeoutMs: z.number().int().min(5000).max(600000).default(90000),
       })
-      .default({}),
+      .prefault({}),
     features: z
       .object({
         qzone: z
@@ -64,18 +64,18 @@ const SettingsSchema = z
             commentDailyLimit: z.number().int().min(0).max(50).default(5),
             commentRequireConfirm: z.boolean().default(true),
           })
-          .default({}),
+          .prefault({}),
       })
-      .default({}),
+      .prefault({}),
     budgets: z
       .object({
         proactiveMessagesPerDay: z.number().int().min(0).max(100).default(5),
         remindersPerDay: z.number().int().min(0).max(100).default(5),
         likesPerDay: z.number().int().min(0).max(200).default(20),
       })
-      .default({}),
+      .prefault({}),
   })
-  .default({})
+  .prefault({})
   .refine(value=>value.context.warningPercent<value.context.rolloverPercent,{
     message:'会话更换比例应大于上下文提醒比例',path:['context','rolloverPercent'],
   })

@@ -8,14 +8,14 @@ import { StoredStickerAnalysisSchema } from './sticker-review.js';
 import { AutonomousStateSchema } from '../agent/autonomous-state.js';
 import { CognitionStateSchema, MemoryMetaSchema } from '../agent/cognition-state.js';
 
-const segment = z.object({ type: z.string(), data: z.record(z.unknown()) });
+const segment = z.object({ type: z.string(), data: z.record(z.string(), z.unknown()) });
 const message = z.object({ chat: z.string(), id: z.number().int().safe(), user: z.number().int().safe(), name: z.string(), at: z.number(), text: z.string(), segments: z.array(segment), self: z.boolean(), recalled: z.boolean().default(false) });
 const contact = z.object({ chat: z.string(), name: z.string(), at: z.number() });
 const memory = z.object({ id: z.string(), chat: z.string(), user: z.string(), name: z.string(), text: z.string(), at: z.number() });
 const qqSticker = z.object({ resId: z.string().min(1), emojiId: z.string(), md5: z.string().regex(/^[a-f0-9]{32}$/), url: z.string(), cachePath: z.string(), description: z.string() });
 const sticker = z.object({ id: z.string(), file: z.string(), note: z.string(), tags: z.array(z.string()), uses: z.number(), at: z.number(), analysis: StoredStickerAnalysisSchema.optional(), md5: z.string().regex(/^[a-f0-9]{32}$/).optional(), qq: qqSticker.optional(), qqPresent: z.boolean().default(false) });
 const task = z.object({ id: z.string(), chat: z.string(), creator: z.string(), text: z.string(), due: z.number(), interval: z.number().default(0), state: z.enum(['pending', 'blocked', 'running', 'sent', 'failed', 'unknown', 'cancelled']), error: z.string().default(''), retryAt: z.number().default(0) });
-const event = z.object({ id: z.string(), chat: z.string(), type: z.string(), at: z.number(), data: z.record(z.unknown()), handled: z.boolean().default(false) });
+const event = z.object({ id: z.string(), chat: z.string(), type: z.string(), at: z.number(), data: z.record(z.string(), z.unknown()), handled: z.boolean().default(false) });
 const action = z.object({ id: z.string(), chat: z.string(), tool: z.string(), at: z.number(), state: z.enum(['running', 'success', 'failed', 'unknown']), summary: z.string() });
 const turn = z.object({ id: z.string(), chat: z.string(), at: z.number(), duration: z.number(), input: z.string(), output: z.string(), tools: z.array(z.string()), error: z.string(), inputTokens: z.number().nullable(), outputTokens: z.number().nullable(), contextUsed:z.number().nonnegative().optional(),contextSize:z.number().positive().optional(),generation:z.number().optional() });
 const profile = z.object({ chat: z.string().regex(/^(group|private):\d+$/), persona: z.string().max(10000), responseMode: z.enum(['inherit','mention','keywords','probability','all']).default('inherit'), keywords: z.array(z.string().max(64)).max(100).default([]), probability: z.number().int().min(0).max(100).default(10), proactive: z.boolean().default(true) });

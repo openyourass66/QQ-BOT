@@ -27,7 +27,7 @@
         "node_modules/@deepseek-ai/dsh/lib/bin.js"
       ],
       "source": "https://registry.npmjs.org/@deepseek-ai%2fdsh/0.2.1-rc.2",
-      "lockSha256": "831154608763b3ada7ff2d482bdd191c537059649cf178eadca310019cdd9475"
+      "lockSha256": "661ed9122b224e2be08d256cf76ca57eb98044674639963ba282050afd035415"
     },
     "napcat": {
       "name": "QQ 接入组件",

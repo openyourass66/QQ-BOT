@@ -3,7 +3,7 @@ import { randomBytes } from 'node:crypto';
 import { cp, readFile, writeFile, mkdir, lstat, rename, rm, realpath } from 'node:fs/promises';
 import { join, resolve, relative, isAbsolute, dirname, delimiter } from 'node:path';
 import { parseEnv } from 'node:util';
-import { componentCatalog, componentState, installedComponent, specHash, programRoot } from '../component-paths.mjs';
+import { componentCatalog, componentState, installedComponent, previousComponentDirectory, specHash, programRoot } from '../component-paths.mjs';
 import { extractZip, obtainArchive, sha256 } from './archive.mjs';
 import { verifyAcp } from './acp-probe.mjs';
 
@@ -66,7 +66,7 @@ export async function prepareComponent({ id, archivePath, root = programRoot, da
   const env = { ...process.env, ...parseEnv(text) };
   const lease = await acquireDataResources([...mutableDataResources(dataPaths(env, dataRoot)), {path:base,label:'组件安装'}], signal);
   try {
-    const previous = await installedComponent(id, dataRoot, root);
+    const previous = await previousComponentDirectory(id, dataRoot, root);
     await directory(join(base,'.staging'));
     const install = async (component, localArchive) => {
       const spec = catalog.components[component];
@@ -139,6 +139,7 @@ export async function prepareComponent({ id, archivePath, root = programRoot, da
           const version = await runChild(join(node.directory,'node.exe'),[join(payload,'node_modules/@deepseek-ai/dsh/lib/bin.js'),'--version'],{cwd:stage,env:childEnvironment(join(node.directory,'node.exe'),stage),signal,timeout:15000});
           if (!version.includes(spec.version)) throw new Error('DSH 运行版本与清单不一致');
           await verifyAcp({node:join(node.directory,'node.exe'),entry:join(payload,'node_modules/@deepseek-ai/dsh/lib/bin.js'),cwd:stage,env:childEnvironment(join(node.directory,'node.exe'),stage),signal});
+          await runChild(join(node.directory,'node.exe'),[join(root,'scripts/components/mcp-probe.mjs'),payload,root],{cwd:stage,env:childEnvironment(join(node.directory,'node.exe'),stage),signal,timeout:20000});
         } else if (component === 'napcat') {
           const version = await runChild(join(payload,'node.exe'),['--version'],{cwd:stage,env:childEnvironment(join(payload,'node.exe'),stage),signal,timeout:15000});
           if (version.trim() !== `v${spec.nodeVersion}`) throw new Error('QQ 组件的独立运行环境版本不符');
@@ -158,7 +159,7 @@ export async function prepareComponent({ id, archivePath, root = programRoot, da
       }
     };
     const installed = await install(id, archivePath);
-    const suggestions = id === 'dsh' ? [{key:'BOT_DSH_BIN',value:join(installed.directory,'dsh.cmd'),previous:previous?join(previous.directory,'dsh.cmd'):''},{key:'BOT_DSH_HOME',value:join(dataRoot,'dsh')}] : id === 'napcat' ? [{key:'BOT_NAPCAT_DIR',value:join(installed.directory,'napcat'),previous:previous?join(previous.directory,'napcat'):''}] : [];
+    const suggestions = id === 'dsh' ? [{key:'BOT_DSH_BIN',value:join(installed.directory,'dsh.cmd'),previous:previous?join(previous,'dsh.cmd'):''},...(!previous?[{key:'BOT_DSH_HOME',value:join(dataRoot,'dsh')}]:[])] : id === 'napcat' ? [{key:'BOT_NAPCAT_DIR',value:join(installed.directory,'napcat'),previous:previous?join(previous,'napcat'):''}] : [];
     return { installed, suggestions, rows:await listComponents({root,dataRoot,platform,arch}) };
   } finally { lease.release(); }
 }

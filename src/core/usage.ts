@@ -7,7 +7,7 @@ import { ConversationQueue } from './runtime.js';
 const UsageSchema = z.object({
   version: z.literal(1),
   date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
-  counters: z.record(z.number().int().nonnegative().safe()),
+  counters: z.record(z.string(), z.number().int().nonnegative().safe()),
 });
 
 type Usage = z.infer<typeof UsageSchema>;

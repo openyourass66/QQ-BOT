@@ -17,7 +17,7 @@ const EntrySchema = z.object({
   targetUserId: z.number().int().positive().safe().optional(),
 });
 type Entry = z.infer<typeof EntrySchema>;
-const FileSchema = z.object({ version: z.literal(1), groups: z.record(z.array(EntrySchema).max(80)) });
+const FileSchema = z.object({ version: z.literal(1), groups: z.record(z.string(), z.array(EntrySchema).max(80)) });
 const DAY = 86_400_000;
 
 /** 按机器人账号和群隔离，保留最近一天、每群 80 条、最多 100 个群的对话。 */

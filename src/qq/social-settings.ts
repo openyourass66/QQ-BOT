@@ -42,7 +42,7 @@ export const SocialSettingsSchema = z.object({
   speechModel: z.string().max(128).default(''),
   speechVoice: z.string().max(64).default('alloy'),
   videoFrames: z.number().int().min(1).max(12).default(4),
-}).default({});
+}).prefault({});
 export type SocialSettings = z.infer<typeof SocialSettingsSchema>;
 
 export function allowedChat(s: SocialSettings, chat: string, user?: number | string): boolean {

@@ -4,5 +4,11 @@
   "version": "0.2.0",
   "dependencies": {
     "@deepseek-ai/dsh": "0.2.1-rc.2"
+  },
+  "overrides": {
+    "zod": "4.6.7",
+    "undici": "8.12.2",
+    "fflate": "0.8.3",
+    "@modelcontextprotocol/client": "2.3.0"
   }
 }
