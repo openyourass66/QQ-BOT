@@ -42,6 +42,7 @@ partial class App
     static Dictionary<string, object> settings;
     static Queue<string> logs = new Queue<string>();
     static bool exiting, paused, dirty, loading, hostFailed;
+    static string runtimePhase="stopped", runtimeFailure="";
     static HashSet<string> dirtySections = new HashSet<string>();
     static string personaPath;
     static NativeTray tray;
@@ -234,9 +235,11 @@ partial class App
             Find<TextBlock>("DiagnosticSummary").Text = (bool)message["ok"] ? "启动检查通过" : "有项目需要处理";
         } else if (type == "state") {
             bool bridge = (bool)message["bridge"], napcat = (bool)message["napcat"], busy = (bool)message["busy"];
+            runtimePhase=message.ContainsKey("phase")?Convert.ToString(message["phase"]):"";runtimeFailure="";
+            if(message.ContainsKey("supervision"))foreach(var entry in ((Dictionary<string,object>)message["supervision"]).Values){var item=entry as Dictionary<string,object>;if(item!=null&&item.ContainsKey("failure")&&Convert.ToString(item["phase"])=="needs_attention"){var failure=item["failure"] as Dictionary<string,object>;if(failure!=null)runtimeFailure=Convert.ToString(failure["message"]);}}
             Find<TextBlock>("State").Text = busy ? "小鲸正在安排工作…" : bridge && napcat ? "小鲸已出发，等待连接就绪" : bridge || napcat ? "部分进程运行中，请查看日志" : "小鲸休息中，随时可以出发";
             runtimeBusy=busy;
-            Find<Button>("Start").IsEnabled = !busy && !(bridge && napcat); Find<Button>("Stop").IsEnabled = !busy && (bridge || napcat); Find<Button>("Restart").IsEnabled = !busy; Find<Button>("RestartBot").IsEnabled = !busy && (bridge || napcat); Find<Button>("RestartBot").Content=busy?"正在处理…":"重新启动";UpdateConnectionEditing();
+            Find<Button>("Start").IsEnabled = !busy && !(bridge && napcat) && runtimePhase!="recovering"; Find<Button>("Stop").IsEnabled = !busy && (bridge || napcat || runtimePhase=="recovering"); Find<Button>("Restart").IsEnabled = !busy; Find<Button>("RestartBot").IsEnabled = !busy && (bridge || napcat || runtimePhase=="needs_attention"); Find<Button>("RestartBot").Content=busy?"正在处理…":"重新启动";UpdateConnectionEditing();
             if (!bridge) Find<TextBlock>("Stats").Text = "桥接已停止 · NapCat " + (napcat ? "运行中" : "已停止");
             Find<TextBlock>("NapcatState").Text = napcat ? (message.ContainsKey("externalNapcat") && (bool)message["externalNapcat"] ? "复用外部 NapCat" : "NapCat 运行中") : "NapCat 等待启动";
             if (!bridge) { Find<TextBlock>("ModelState").Text = "未连接"; Find<TextBlock>("QqState").Text = napcat ? "等待桥接" : "未连接"; }
@@ -246,6 +249,7 @@ partial class App
                 Find<System.Windows.Shapes.Ellipse>("ConnectionDot").Fill = (Brush)new BrushConverter().ConvertFromString("#98A5BC");
                 Find<Border>("ConnectionPill").Background = (Brush)new BrushConverter().ConvertFromString("#EDF1F7");
             }
+            ApplyRuntimePhase();
         } else if (type == "status") {
             bool online = (bool)message["qqOnline"] && (bool)message["wsConnected"] && (bool)message["acpConnected"];
             if(online)CompleteSetup();
@@ -265,7 +269,17 @@ partial class App
             Find<Border>("ConnectionPill").Background = (Brush)new BrushConverter().ConvertFromString(online ? "#EAF5F0" : "#FCF5E9");
             var elapsed = TimeSpan.FromMilliseconds(Math.Max(0, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() - Convert.ToInt64(message["startedAt"])));
             Find<TextBlock>("Uptime").Text = "运行 " + (int)elapsed.TotalHours + elapsed.ToString(@"\:mm\:ss");
+            ApplyRuntimePhase();
         }
+    }
+    static void ApplyRuntimePhase() {
+        string label=runtimePhase=="recovering"?"正在恢复":runtimePhase=="needs_attention"?"需要处理":runtimePhase=="waiting_login"?"等待 QQ 登录":runtimePhase=="connecting"?"正在连接":null;
+        if(label==null)return;
+        Find<TextBlock>("State").Text=runtimePhase=="recovering"?"进程意外退出，正在等待自动恢复，可点击停止取消。":runtimePhase=="needs_attention"?(runtimeFailure.Length>0?runtimeFailure:"运行需要处理，请查看启动诊断后重试。"):runtimePhase=="waiting_login"?"等待 QQ 登录，请打开登录窗口完成操作。":"正在连接 QQ 与模型服务…";
+        Find<TextBlock>("ConnectionBadge").Text=label;
+        Find<TextBlock>("ConnectionBadge").Foreground=(Brush)new BrushConverter().ConvertFromString("#97733F");
+        Find<System.Windows.Shapes.Ellipse>("ConnectionDot").Fill=Find<TextBlock>("ConnectionBadge").Foreground;
+        Find<Border>("ConnectionPill").Background=(Brush)new BrushConverter().ConvertFromString("#FCF5E9");
     }
     static string QuoteArgument(string value) {
         var text = new StringBuilder("\"");
@@ -410,7 +424,11 @@ partial class App
             if (smoke && !exiting) {
                 if (DateTime.UtcNow > smokeDeadline) { Environment.ExitCode = 1; File.WriteAllText(Path.Combine(root, "smoke-result.txt"), "FAIL: lifecycle timeout at step "+smokeStep+", socialBusy="+socialBusy+", knowledgeBusy="+knowledgeBusy+", rows="+Find<ListView>("SocialList").Items.Count+", feedback="+Find<TextBlock>("Feedback").Text); exiting = true; Send("quit"); return; }
                 if (smokeStep == 0 && settings != null) {
-                    try { VerifyActivityInteraction(); VerifySettingsInteraction(); VerifyRuntimeInteraction(); VerifyQuickSetupInteraction(); VerifyScopeInteraction(); VerifyKnowledgeInteraction(); VerifyComponentInteraction(); VerifyQQLoginInteraction(); } catch(Exception error) { Environment.ExitCode=1;File.WriteAllText(Path.Combine(root,"smoke-result.txt"),"FAIL: "+error.Message);exiting=true;Send("quit");return; }
+                    try { VerifyActivityInteraction(); VerifySettingsInteraction(); VerifyRuntimeInteraction(); VerifyQuickSetupInteraction(); VerifyScopeInteraction(); VerifyKnowledgeInteraction(); VerifyComponentInteraction(); VerifyQQLoginInteraction();
+                        Event("{\"type\":\"state\",\"bridge\":false,\"napcat\":false,\"busy\":false,\"phase\":\"recovering\"}");if(Find<TextBlock>("ConnectionBadge").Text!="正在恢复"||!Find<Button>("Stop").IsEnabled)throw new Exception("恢复等待期间不能取消");
+                        Event("{\"type\":\"state\",\"bridge\":false,\"napcat\":true,\"busy\":false,\"phase\":\"needs_attention\"}");if(Find<TextBlock>("ConnectionBadge").Text!="需要处理"||!Find<Button>("Start").IsEnabled)throw new Exception("待处理状态不能重新启动");
+                        Event("{\"type\":\"state\",\"bridge\":false,\"napcat\":false,\"busy\":false,\"phase\":\"stopped\"}");
+                    } catch(Exception error) { Environment.ExitCode=1;File.WriteAllText(Path.Combine(root,"smoke-result.txt"),"FAIL: "+error.Message);exiting=true;Send("quit");return; }
                     if (fields.Count < 53 || runtimeInputs.Count < 20 || Find<TextBox>("Persona").Text != "测试小鲸人设" || !tray.Registered) { Environment.ExitCode = 1; File.WriteAllText(Path.Combine(root, "smoke-result.txt"), "FAIL: config=" + fields.Count + ", runtime=" + runtimeInputs.Count + ", tray=" + tray.Registered + ", personaLength=" + Find<TextBox>("Persona").Text.Length); exiting = true; Send("quit"); return; }
                     foreach (MainPage page in Enum.GetValues(typeof(MainPage))) Capture(Path.Combine(root,"page-" + (int)page + ".png"), page);
                     ((TextBox)fields["chat.group.prefix"]).Text="native-scope";((TextBox)fields["social.speechVoice"]).Text="native-voice";Find<Button>("SaveSettings").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));

@@ -53,3 +53,34 @@ test('管理宿主被强制结束后，租约随 IPC 断开释放，不依赖删
     await replacement.close();
   } finally {if(child.exitCode===null&&child.signalCode===null){const exited=once(child,'exit');child.kill();await exited;}}
 }));
+
+test('桥接异常退出后单独恢复，QQ 进程保留；等待登录与就绪状态按实际连接报告',{timeout:20000},()=>fixture(async({createRuntimeService,...options})=>{
+  const marker=join(options.layout.dataRoot,'attempts');
+  await writeFile(join(options.root,'scripts/napcat-node.mjs'),"console.log('napcat-once');process.on('message',()=>{});setInterval(()=>{},1000);");
+  await writeFile(join(options.root,'dist/bridge.js'),`import{readFileSync,writeFileSync}from'node:fs';let n=0;try{n=Number(readFileSync(${JSON.stringify(marker)},'utf8'))}catch{}writeFileSync(${JSON.stringify(marker)},String(n+1));process.on('message',m=>{if(m==='shutdown')process.exit()});process.send({type:'status',acpConnected:true,qqOnline:false,wsConnected:true});if(!n)setTimeout(()=>{process.send({type:'fatal',failure:{code:'MODEL_EXITED',recoverable:true,message:'模型退出'}});process.exit(1)},100);else setTimeout(()=>process.send({type:'status',acpConnected:true,qqOnline:true,wsConnected:true}),100);setInterval(()=>{},1000);`);
+  const events=[],service=await createRuntimeService({...options,onEvent:event=>events.push(event)});
+  try{
+    await service.receive({action:'start'});await until(()=>events.some(e=>e.phase==='waiting_login'));await until(()=>events.some(e=>e.phase==='recovering'));await until(()=>events.some(e=>e.phase==='ready'));
+    assert.equal(await readFile(marker,'utf8'),'2');assert.equal(events.filter(e=>e.text?.includes('[napcat] napcat-once')).length,1);
+    await service.receive({action:'restartBridge'});await until(()=>events.filter(e=>e.phase==='ready').length>=2);assert.equal(await readFile(marker,'utf8'),'3');
+    await service.receive({action:'stop'});assert.equal(events.filter(e=>e.type==='state').at(-1).phase,'stopped');
+  }finally{await service.close();}
+}));
+
+test('损坏数据转为待处理且不自动重启；手动处理后可以重新启动',{timeout:15000},()=>fixture(async({createRuntimeService,...options})=>{
+  const entry=join(options.root,'dist/bridge.js');await writeFile(entry,"process.send({type:'fatal',failure:{code:'DATA_INVALID',recoverable:false,message:'数据需要恢复'}});setTimeout(()=>process.exit(1),50);");
+  const events=[],service=await createRuntimeService({...options,onEvent:event=>events.push(event)});
+  try{
+    await service.receive({action:'start'});await until(()=>events.some(e=>e.phase==='needs_attention'));await new Promise(done=>setTimeout(done,1300));assert.equal(events.filter(e=>e.type==='state').at(-1).supervision.bridge.failure.code,'DATA_INVALID');assert.ok(!events.some(e=>e.phase==='recovering'));
+    await writeFile(entry,"process.on('message',m=>{if(m==='shutdown')process.exit()});process.send({type:'status',acpConnected:true,qqOnline:true,wsConnected:true});setInterval(()=>{},1000);");
+    await service.receive({action:'start'});await until(()=>events.some(e=>e.phase==='ready'));
+  }finally{await service.close();}
+}));
+
+test('停止命令立即取消退避中的恢复，不产生新的业务进程',{timeout:15000},()=>fixture(async({createRuntimeService,...options})=>{
+  const marker=join(options.layout.dataRoot,'started');await writeFile(join(options.root,'dist/bridge.js'),`import{appendFileSync}from'node:fs';appendFileSync(${JSON.stringify(marker)},'x');setTimeout(()=>process.exit(1),50);`);
+  const events=[],service=await createRuntimeService({...options,onEvent:event=>events.push(event)});
+  try{
+    await service.receive({action:'start'});await until(()=>events.some(e=>e.phase==='recovering'));await service.receive({action:'stop'});await new Promise(done=>setTimeout(done,1400));assert.equal(await readFile(marker,'utf8'),'x');assert.equal(events.filter(e=>e.type==='state').at(-1).phase,'stopped');
+  }finally{await service.close();}
+}));

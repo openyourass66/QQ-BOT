@@ -60,6 +60,7 @@
 
 # 日志与系统文件
 /.credentials/
+/desktop/runtime-guard.exe
 *.log
 *.log.*
 .DS_Store

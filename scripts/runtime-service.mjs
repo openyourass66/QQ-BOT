@@ -1,25 +1,32 @@
-import { fork, spawn } from 'node:child_process';
-import { createInterface } from 'node:readline';
 import { resolve, join } from 'node:path';
 import { mkdirSync, appendFileSync, existsSync, statSync, renameSync, readFileSync, rmSync } from 'node:fs';
 import { diagnose, environment, onebotOnline } from '../desktop/diagnostics.mjs';
 import { acquireRuntimeLease } from './runtime-lease.mjs';
 import { RuntimeConfiguration } from './runtime-configuration.mjs';
+import { ProcessGuard } from './process-guard.mjs';
+import { ProcessSupervisor } from './supervisor.mjs';
+import { consumeLines } from './bounded-lines.mjs';
+import { classifyRuntimeFailure } from '../dist/core/runtime-failure.js';
 
 export const runtimeActions=new Set(["qq-login","components","components-cancel","onboarding","model","qzone-check","knowledge","social","memory","settings-status","load","settings","env","runtime","connection","persona","diagnose","start","restart","restartBridge","stop","quit"]);
 export async function createRuntimeService({root,layout,onEvent,onFatal=()=>{}}) {
 const lease=await acquireRuntimeLease(root,layout.dataRoot);
+let processGuard;
 try {
 const dataRoot = layout.dataRoot;
+processGuard=new ProcessGuard({root,dataRoot});
 const protectedCredentials=process.platform==='win32'&&['installed','portable'].includes(layout.mode);
 const configuration = new RuntimeConfiguration(dataRoot,{protectedCredentials});
 const logDir = layout.logDir; mkdirSync(logDir, { recursive: true });
 const logPath = join(logDir, 'console.log');
 const children = new Map();
+const desired=new Set(),launchPlans=new Map(),expectedExits=new WeakSet(),failures=new WeakMap(),configWorkers=new Set();
+let supervisor,lastBridgeStatus;
 const socialRequests = new Map();
 let socialSequence = 0;
 let busy = false, quitting = false, externalNapcat = false;
 let componentWorker;
+let componentCancelEpoch=0;
 let qqController;
 async function qqLogin(data) {
   if (!data || !['prepare','status','refresh','connection'].includes(data.operation) || Object.keys(data).some(key=>!['operation','shell','mode'].includes(key))) throw new Error('QQ 登录操作参数无效');
@@ -38,8 +45,10 @@ async function qqLogin(data) {
 async function components(operation, data) {
   if (componentWorker) throw new Error('组件准备正在进行，请等待完成或取消');
   if (operation === 'install' && (children.has('bridge') || children.has('napcat'))) throw new Error('请先停止机器人，再准备或修复组件');
+  const epoch=componentCancelEpoch;
+  const worker = await processGuard.fork('desktop/component-worker.mjs',{cwd:dataRoot});
+  if(epoch!==componentCancelEpoch){await processGuard.terminate(worker);throw new Error('组件准备已取消');}
   return new Promise((done,reject)=>{
-    const worker = fork(resolve(root,'desktop/component-worker.mjs'),[],{cwd:dataRoot,silent:true,execArgv:[],windowsHide:true});
     componentWorker = worker;
     let replied = false;
     worker.on('message',message=>{
@@ -52,7 +61,7 @@ async function components(operation, data) {
   });
 }
 let secrets = [];
-async function refreshSecrets() { const env = await environment(dataRoot,{allowUnavailable:true}); secrets = Object.entries(env).filter(([key, value]) => /TOKEN|SECRET|PASSWORD|API_KEY/i.test(key) && value?.length >= 4).map(([, value]) => value); }
+async function refreshSecrets() { const env = await environment(dataRoot,{allowUnavailable:true}); secrets = Object.entries(env).filter(([key, value]) => /TOKEN|SECRET|PASSWORD|API_KEY/i.test(key) && value?.length >= 4).flatMap(([, value]) => [value,...value.split(/\r?\n/).filter(part=>part.length>=4)]); }
 await refreshSecrets();
 const redact = text => {
   for (const secret of secrets) text = text.split(secret).join('[已隐藏]');
@@ -69,9 +78,20 @@ const emit = event => {
   }
   onEvent(event);
 };
-const state = () => emit({ type: 'state', bridge: children.has('bridge'), napcat: children.has('napcat') || externalNapcat, externalNapcat, busy, paths: layout });
-async function launch(name, script, overrides = {}) {
+const state = () => {
+  const supervision=supervisor?.snapshot()??{},phases=Object.values(supervision).map(item=>item.phase);
+  const phase=phases.includes('needs_attention')?'needs_attention':phases.includes('recovering')?'recovering':supervision.bridge?.phase==='ready'?'ready':phases.includes('waiting_login')?'waiting_login':phases.includes('connecting')?'connecting':'stopped';
+  emit({ type: 'state', bridge: children.has('bridge'), napcat: children.has('napcat') || externalNapcat, externalNapcat, busy, paths: layout,phase,supervision });
+};
+supervisor=new ProcessSupervisor({onChange:()=>state(),recover:async name=>{
+  const task=queue.then(async()=>{if(closing||quitting||!lease.held||!desired.has(name)){supervisor.stopped(name);return;}if(children.has(name))return;const plan=launchPlans.get(name);if(!plan)throw new Error('缺少受管启动配置');await launch(name,plan.script,plan.overrides,true);});
+  queue=task.catch(()=>{});return task;
+}});
+async function launch(name, script, overrides = {}, recovering=false) {
+  desired.add(name);launchPlans.set(name,{script,overrides});supervisor.starting(name,{manual:!recovering,waitingLogin:name==='napcat'});
+  try {
   if(!lease.held)throw new Error('运行管理实例锁已失效');
+  if(closing)throw new Error('运行管理服务正在关闭');
   const env = { ...await environment(dataRoot), ...overrides };
   if(name==='napcat')for(const key of ['QQ_BOT_DEEPSEEK_API_KEY','BOT_MEDIA_API_KEY','BOT_LEARNING_API_KEY'])delete env[key];
   env.BOT_DATA_DIR = dataRoot;
@@ -81,10 +101,10 @@ async function launch(name, script, overrides = {}) {
     const managed = await installedComponent('napcat',dataRoot,root);
     if (managed && resolve(dataRoot,env.BOT_NAPCAT_DIR || 'napcat/shell') === join(managed.directory,'napcat')) execPath = join(managed.directory,'node.exe');
   }
-  const child = fork(resolve(root, script), [], { cwd: dataRoot, env, execPath, execArgv: [], silent: true, windowsHide: true });
+  const child = await processGuard.fork(script,{cwd:dataRoot,env,execPath});
   children.set(name, child);
   for (const stream of [child.stdout, child.stderr]) {
-    createInterface({ input: stream }).on('line', text => {
+    consumeLines(stream, text => {
       text = text.replace(/\x1b\[[0-9;]*[A-Za-z]/g, '').slice(0, 8000);
       if(name==='napcat'&&/二维码解码URL|WebUi Token|User Panel Url|[?&](?:token|k)=|[\u2580-\u259f]/i.test(text))text='QQ 登录凭据已隐藏，请在登录窗口操作。';
       emit({ type: 'log', source: name, text: `[${name}] ${text}` });
@@ -93,32 +113,46 @@ async function launch(name, script, overrides = {}) {
   }
   child.on('message', message => {
     if (name !== 'bridge') return;
-    if (message?.type === 'status') emit(message);
+    if (message?.type === 'fatal'){failures.set(child,message.failure);return;}
+    if (message?.type === 'status'&&!expectedExits.has(child)&&children.get(name)===child) {lastBridgeStatus=message;supervisor.status('bridge',{ready:message.acpConnected&&message.qqOnline&&message.wsConnected,waitingLogin:message.acpConnected&&!message.qqOnline});if(children.has('napcat'))supervisor.status('napcat',{ready:message.qqOnline,waitingLogin:!message.qqOnline});emit(message);}
     if (message?.type === 'social-result') { const pending = socialRequests.get(message.id); if (pending) { socialRequests.delete(message.id); clearTimeout(pending.timer); message.error ? pending.reject(new Error(message.error)) : pending.done(message.result); } }
   });
   child.on('error', error => emit({ type: 'error', text: `${name} 启动失败：${error.code || error.message}` }));
-  child.on('exit', (code, signal) => { if (children.get(name) === child) children.delete(name); emit({ type: code ? 'error' : 'log', text: `[${name}] 已退出，代码 ${code ?? signal}` }); state(); });
+  child.once('close', (code, signal) => {
+    if(children.get(name)!==child)return;children.delete(name);
+    emit({type:expectedExits.has(child)?'log':'error',text:`[${name}] 已退出，代码 ${code??signal}`});
+    if(name==='bridge'){
+      for(const request of socialRequests.values()){clearTimeout(request.timer);request.reject(new Error('桥接已退出，请等待恢复后重试'));}socialRequests.clear();
+      if(lastBridgeStatus)emit({...lastBridgeStatus,acpConnected:false,wsConnected:false});
+    }
+    if(expectedExits.has(child)||closing||!desired.has(name))supervisor.stopped(name);else supervisor.exited(name,failures.get(child)??classifyRuntimeFailure(undefined));state();
+  });
+  }catch(error){error.runtimeComponent=name;throw error;}
 }
 async function killTree(child) {
   if (child.exitCode !== null || child.signalCode !== null || !child.pid) return;
-  if (process.platform === 'win32') await new Promise(done => { const p = spawn('taskkill', ['/pid', String(child.pid), '/t', '/f'], { windowsHide: true, stdio: 'ignore' }); p.on('error', done); p.on('exit', done); });
-  else child.kill('SIGKILL');
+  await processGuard.terminate(child);
 }
 async function stopOne(name) {
+  desired.delete(name);supervisor.stopped(name);
   const child = children.get(name); if (!child) return;
+  expectedExits.add(child);
   if (name === 'bridge' && child.connected) child.send('shutdown', () => {});
   else await killTree(child);
   await new Promise(done => {
     if (child.exitCode !== null || child.signalCode !== null) return done();
-    const timer = setTimeout(done, 7000); child.once('exit', () => { clearTimeout(timer); done(); });
+    const timer = setTimeout(done, 7000); child.once('close', () => { clearTimeout(timer); done(); });
   });
   await killTree(child);
+  if(children.get(name)===child)children.delete(name);
 }
 async function stop() { await stopOne('bridge'); await stopOne('napcat'); externalNapcat = false; }
 async function config(action, data) {
+  const worker=await processGuard.fork('desktop/config-worker.mjs',{cwd:dataRoot,env:{...process.env,BOT_CREDENTIAL_MODE:protectedCredentials?'dpapi':'compatible'}});
+  if(closing){await processGuard.terminate(worker);throw new Error('运行管理服务正在关闭');}
+  configWorkers.add(worker);worker.once('exit',()=>configWorkers.delete(worker));
   return new Promise((done, reject) => {
-    const worker = fork(resolve(root, 'desktop/config-worker.mjs'), [], { cwd: dataRoot, silent: true, execArgv: [], windowsHide: true,env:{...process.env,BOT_CREDENTIAL_MODE:protectedCredentials?'dpapi':'compatible'} });
-    const timeout = setTimeout(() => { worker.kill(); reject(new Error('配置操作超时，请重试')); }, action === 'qzone-check' ? 30000 : action === 'model' ? 25000 : 10000);
+    const timeout = setTimeout(() => { void processGuard.terminate(worker); reject(new Error('配置操作超时，请重试')); }, action === 'qzone-check' ? 30000 : action === 'model' ? 25000 : 10000);
     let replied = false;
     worker.once('message', result => { replied = true; clearTimeout(timeout); result.ok ? done(result.result) : reject(new Error(result.error)); });
     worker.once('error', error => { clearTimeout(timeout); reject(error); });
@@ -169,7 +203,7 @@ async function command({ action, data }) {
   try {
     if (['start', 'restart', 'restartBridge'].includes(action)) {
       const diagnostics = await check();
-      if (!diagnostics.ok) { emit({ type: 'error', text: '启动检查未通过，请打开“启动诊断”修复红色项目。' }); return {ok:false}; }
+      if (!diagnostics.ok) { supervisor.attention('bridge',{code:'DIAGNOSTICS_FAILED',recoverable:false,message:'启动检查未通过，请先修复诊断项目。'});emit({ type: 'error', text: '启动检查未通过，请打开“启动诊断”修复红色项目。' }); return {ok:false}; }
       if (action === 'restart') await stop();
       if (action === 'restartBridge') await stopOne('bridge');
       if (!children.has('napcat')) {
@@ -187,28 +221,30 @@ async function command({ action, data }) {
 
 const pendingComponents = new Set();
 let queue=Promise.resolve(),closing=false,closeTask;
-const cancelComponents=()=>{for(const pending of pendingComponents)pending.cancelled=true;componentWorker?.send({action:'cancel'},()=>{});};
+const cancelComponents=()=>{componentCancelEpoch++;for(const pending of pendingComponents)pending.cancelled=true;componentWorker?.send({action:'cancel'},()=>{});};
 function receive(request) {
   const refused=text=>{emit({type:'error',text});return Promise.reject(new Error(text));};
   if(!request||typeof request!=='object'||Array.isArray(request)||!runtimeActions.has(request.action))return refused('未知运行管理操作');
   if(closing)return refused('运行管理服务正在关闭');
+  if(['stop','quit','restart','restartBridge'].includes(request.action))for(const name of request.action==='restartBridge'?['bridge']:['bridge','napcat']){desired.delete(name);supervisor.stopped(name);}
   if(request.action==='components')pendingComponents.add(request);
   if(request.action==='components-cancel'||request.action==='quit')cancelComponents();
   if(request.action==='components-cancel')return Promise.resolve();
   const task=queue.then(async()=>{
     try {if(request.action==='components'&&request.cancelled)throw new Error('组件准备已取消');return await command(request);}
-    catch(error){emit({type:'error',action:request.action,text:error.message});throw error;}
+    catch(error){if(error.runtimeComponent&&desired.has(error.runtimeComponent)&&!closing)supervisor.exited(error.runtimeComponent,classifyRuntimeFailure(error));emit({type:'error',action:request.action,text:error.message});throw error;}
     finally{pendingComponents.delete(request);}
   });
   queue=task.catch(()=>{});return task;
 }
 function close() {
   if(closeTask)return closeTask;
-  closing=true;cancelComponents();
-  closeTask=(async()=>{await queue;try{await stop();}finally{await lease.release();}})();
+  closing=true;cancelComponents();desired.clear();supervisor.close();for(const worker of configWorkers)void processGuard.terminate(worker);
+  closeTask=(async()=>{await queue;try{await stop();}finally{await processGuard.close();await lease.release();}})();
   return closeTask;
 }
 lease.lost.then(async error=>{if(!error)return;emit({type:'error',text:error.message});try{await close();}finally{onFatal(error);}}).catch(()=>{});
+processGuard.onLost=error=>{emit({type:'error',text:error.message});void close().finally(()=>onFatal(error));};
 try{for(const text of readFileSync(logPath,'utf8').trim().split('\n').slice(-100))if(text)onEvent({type:'log',text:redact(text),historical:true});}catch{}
 state();
 return {receive,close,readConfiguration:()=>configuration.read(),updateConfiguration(data){
@@ -216,5 +252,5 @@ return {receive,close,readConfiguration:()=>configuration.read(),updateConfigura
   const task=queue.then(async()=>{if(!lease.held)throw new Error('运行管理实例锁已失效');const result=await configuration.update(data);await refreshSecrets();return result;});
   queue=task.catch(()=>{});return task;
 },get quitting(){return quitting;}};
-} catch(error){await lease.release();throw error;}
+} catch(error){await processGuard?.close();await lease.release();throw error;}
 }

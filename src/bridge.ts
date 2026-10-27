@@ -24,6 +24,7 @@ import { GroupContextStore, groupTrigger, formatGroupEntry } from './qq/group-co
 import { parseApprovalReply, permissionOutcome } from './core/permissions.js';
 import { assertToolAccess, toolAccessVisible, approvalBinding } from './security/tool-policy.js';
 import { nativeToolDenial } from './security/dsh-policy.js';
+import { classifyRuntimeFailure } from './core/runtime-failure.js';
 import { DailyUsageStore } from './core/usage.js';
 import { QqActionPolicy } from './qq/qq-actions.js';
 import { startActionServer, type ActionServer } from './services/action-server.js';
@@ -94,6 +95,8 @@ let selfId = config.bot.selfId;
 let acpCtx: acp.ClientContext | undefined;
 let actionServer: ActionServer | undefined;
 let dshChild: ReturnType<typeof spawn> | undefined;
+let fatalReported=false;
+function reportFatal(error:unknown):void {fatalReported=true;process.send?.({type:'fatal',failure:classifyRuntimeFailure(error)},()=>{});}
 let ws: OneBotWs | undefined;
 let stopSettings: (() => void) | undefined;
 let stopping = false;
@@ -714,8 +717,9 @@ function startBridge(patch?: string): void {
     status.acpConnected = false;
     status.nativeToolsRestricted = false;
     acpCtx = undefined;
-    readyReject?.(new Error(`DSH 已退出 (${code})`));
+    const failure=Object.assign(new Error(`DSH 已退出 (${code})`),{code:'MODEL_EXITED'});readyReject?.(failure);
     if (stopping) return;
+    reportFatal(failure);
     log('error', `[acp] dsh exited with ${code}`);
     void shutdown(1);
   });
@@ -750,6 +754,7 @@ function startBridge(patch?: string): void {
       status.acpConnected = false;
       status.lastError = String(error);
       log('error', `[acp] connection failed: ${String(error)}`);
+      reportFatal(error);
       readyReject?.(error instanceof Error ? error : new Error(String(error)));
       if (!stopping) void shutdown(1);
     });
@@ -934,6 +939,7 @@ if (process.send) {
 process.on('disconnect', () => { void shutdown(); });
 export type { BotSettings };
 void main().catch((error) => {
+  if(!fatalReported)reportFatal(error);
   log('error', `[startup] ${String(error)}`);
   void shutdown(1);
 });
