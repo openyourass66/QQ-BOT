@@ -25,6 +25,10 @@ MCP 工具通过内部动作接口交由桥接执行；权限、会话范围、�
 
 桌面首次配置由 `QuickSetupView.cs` 与 `onboarding.mjs` 提供，复用 `RuntimeView.cs` 的输入控件、校验和连接保存逻辑。检测仅提供路径建议；检查使用当前草稿，不调用模型。HTTP 与 WebSocket 分开探测，修改输入会使检查结果失效。`tests/onboarding.test.mjs` 覆盖初始化保留、路径检测、外部连接与鉴权边界，原生窗口测试覆盖步骤切换、失效状态、安装指引和紧凑布局。
 
+`ScopeSetupView.cs` 提供第四步主人及联系人选择，`setup-scope.mjs` 只读实际账号/好友/群列表，保存时重新核验账号、目标、屏蔽与配置基线。联系人列表使用虚拟化和筛选，选择先保留为连接草稿。连接保存与行为设置保存共用动态配置文件锁，网络检查后再读取最新设置以保留无关编辑。
+
+`createInitialSettings()` 只供缺失配置文件的新实例使用，写入 `installation: { version: 1, scopeConfigured: false }` 和显式安全默认值；保存有限范围后将完成状态置为 `true`。旧文件继续按原 schema 补齐缺省值，不因升级重置已有功能。`DEFAULT_SETTINGS` 与 `validateSettings({})` 保留兼容用途，不能用于初始化新实例。安装元数据不显示在行为设置中，保存时原样保留。`tests/setup-scope.test.mjs` 覆盖新旧配置、联系人/账号变化、屏蔽、冲突和只读网络边界。
+
 联网由当前 DSH Profile 的原生搜索与网页工具提供。项目不再维护独立 QQ 搜索服务、静态 DOM 解析器或对应缓存；QQ 工具预算不等同于 DSH 原生工具预算。
 
 ## 构建与测试

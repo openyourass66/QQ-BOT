@@ -142,6 +142,7 @@ partial class App
     static Dictionary<string, object> Collect(Dictionary<string, object> original, string prefix) {
         var result = new Dictionary<string, object>();
         foreach (var pair in original) {
+            if(prefix.Length==0&&pair.Key=="installation"){result[pair.Key]=pair.Value;continue;}
             string path = prefix + pair.Key;
             var nested = pair.Value as Dictionary<string, object>;
             if (nested != null) result[pair.Key] = Collect(nested, path + ".");
@@ -172,7 +173,7 @@ partial class App
         if(type=="component-progress"){RenderComponentProgress(message);return;}
         if(type=="error"&&message.ContainsKey("action")&&(string)message["action"]=="components")ComponentError((string)message["text"]);
         if(type=="onboarding"){RenderOnboarding(message);return;}
-        if(type=="error"&&message.ContainsKey("action")&&(string)message["action"]=="onboarding"){onboardingBusy=false;quickReady=false;Find<TextBlock>("QuickNotice").Text=(string)message["text"];UpdateConnectionEditing();}
+        if(type=="error"&&message.ContainsKey("action")&&(string)message["action"]=="onboarding"){if(scopeBusy)ScopeError((string)message["text"]);onboardingBusy=false;quickReady=false;Find<TextBlock>("QuickNotice").Text=(string)message["text"];UpdateConnectionEditing();}
         if(type=="error"&&message.ContainsKey("action")&&(string)message["action"]=="model")ChatModelError((string)message["text"]);
         if(type=="model"){RenderChatModel(message);return;}
         if(type=="qzone-check"){RenderQzoneCheck((string)message["message"],false);return;}
@@ -191,7 +192,8 @@ partial class App
                 var result = (Dictionary<string,object>)message["result"]; loading = true; Find<TextBox>("Env").Text = (string)result["env"]; RuntimeFields(result["runtimeFields"]); loading = false;
                 dirtySections.Remove("env"); dirtySections.Remove("runtime");
                 if(result.ContainsKey("settingsPath")) {if(settingsPath!=(string)result["settingsPath"]){Find<TextBlock>("SettingsQuota").Text="已切换配置，请重新启动机器人并刷新额度。";Find<System.Windows.Controls.Primitives.UniformGrid>("SettingsQuotaCards").Children.Clear();Find<Expander>("SettingsGroupQuotas").Visibility=Visibility.Collapsed;}settingsPath=(string)result["settingsPath"];}
-                if(result.ContainsKey("settings"))ApplySavedSettings((Dictionary<string,object>)result["settings"],section=="connection"?mediaKeys.Select(key=>"social."+key):new string[0]);
+                if(result.ContainsKey("settings"))ApplySavedSettings((Dictionary<string,object>)result["settings"],section=="connection"?mediaKeys.Select(key=>"social."+key).Concat(quickScope!=null?scopePaths:new string[0]):new string[0]);
+                if(section=="connection"){quickScope=null;dirtySections.Remove("scope");}
                 connectionRestartPending=message.ContainsKey("restartRequested")&&(bool)message["restartRequested"];
                 Find<TextBlock>("RuntimeHint").Text=message.ContainsKey("restartRequested")&&(bool)message["restartRequested"]?"配置已保存，正在重新启动机器人…":"配置已保存；连接参数重启后生效。";
                 if(finishedSetup)CompleteSetup();
@@ -408,7 +410,7 @@ partial class App
             if (smoke && !exiting) {
                 if (DateTime.UtcNow > smokeDeadline) { Environment.ExitCode = 1; File.WriteAllText(Path.Combine(root, "smoke-result.txt"), "FAIL: lifecycle timeout at step "+smokeStep+", socialBusy="+socialBusy+", knowledgeBusy="+knowledgeBusy+", rows="+Find<ListView>("SocialList").Items.Count+", feedback="+Find<TextBlock>("Feedback").Text); exiting = true; Send("quit"); return; }
                 if (smokeStep == 0 && settings != null) {
-                    try { VerifyActivityInteraction(); VerifySettingsInteraction(); VerifyRuntimeInteraction(); VerifyQuickSetupInteraction(); VerifyKnowledgeInteraction(); VerifyComponentInteraction(); VerifyQQLoginInteraction(); } catch(Exception error) { Environment.ExitCode=1;File.WriteAllText(Path.Combine(root,"smoke-result.txt"),"FAIL: "+error.Message);exiting=true;Send("quit");return; }
+                    try { VerifyActivityInteraction(); VerifySettingsInteraction(); VerifyRuntimeInteraction(); VerifyQuickSetupInteraction(); VerifyScopeInteraction(); VerifyKnowledgeInteraction(); VerifyComponentInteraction(); VerifyQQLoginInteraction(); } catch(Exception error) { Environment.ExitCode=1;File.WriteAllText(Path.Combine(root,"smoke-result.txt"),"FAIL: "+error.Message);exiting=true;Send("quit");return; }
                     if (fields.Count < 53 || runtimeInputs.Count < 20 || Find<TextBox>("Persona").Text != "测试小鲸人设" || !tray.Registered) { Environment.ExitCode = 1; File.WriteAllText(Path.Combine(root, "smoke-result.txt"), "FAIL: config=" + fields.Count + ", runtime=" + runtimeInputs.Count + ", tray=" + tray.Registered + ", personaLength=" + Find<TextBox>("Persona").Text.Length); exiting = true; Send("quit"); return; }
                     foreach (MainPage page in Enum.GetValues(typeof(MainPage))) Capture(Path.Combine(root,"page-" + (int)page + ".png"), page);
                     ((TextBox)fields["chat.group.prefix"]).Text="native-scope";((TextBox)fields["social.speechVoice"]).Text="native-voice";Find<Button>("SaveSettings").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));

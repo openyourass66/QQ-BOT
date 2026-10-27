@@ -284,12 +284,13 @@ partial class App
     static void SaveConnection(bool restart) {
         if(restart&&quickSetupMode&&!quickReady){Feedback("请先检查当前配置，再保存并启动。");return;}
         if(chatModelBusy)return;
+        if(quickScope!=null&&dirtySettingPaths.Any(scopePaths.Contains)){Feedback("请先保存机器人设置中的主人或联系范围草稿，再重新选择使用范围。");return;}
         if(dirtySections.Contains("env")) {RuntimePage=5;Find<Expander>("AdvancedEnv").IsExpanded=true;Feedback("请先保存高级环境文件，再保存连接与媒体表单。");return;}
         if(RuntimeValue("BOT_SETTINGS_FILE")!=savedRuntimeValues["BOT_SETTINGS_FILE"]&&dirtySettingPaths.Any(path=>!IsMediaSetting(path))) {Feedback("请先保存机器人设置中的其他修改，再切换动态配置文件；媒体模型修改会保存到目标文件。");return;}
         foreach(string key in mediaKeys) {var text=fields["social."+key] as TextBox;if(text!=null)text.Text=text.Text.Trim();}
         if(!ValidateConnectionForm())return;
         var media=new Dictionary<string,object>();foreach(string key in mediaKeys) {Control input=fields["social."+key];media[key]=input is CheckBox?(object)(((CheckBox)input).IsChecked==true):key=="videoFrames"?(object)long.Parse(((TextBox)input).Text,CultureInfo.InvariantCulture):((TextBox)input).Text;}
-        Send("connection",new {runtime=runtimeInputs.ToDictionary(pair=>pair.Key,pair=>RuntimeValue(pair.Key)),media=media,mediaPaths=dirtySettingPaths.Where(IsMediaSetting).Select(path=>path.Substring(7)).ToArray(),baseline=settings,sourceSettingsPath=settingsPath,restart=restart});
+        Send("connection",new {runtime=runtimeInputs.ToDictionary(pair=>pair.Key,pair=>RuntimeValue(pair.Key)),media=media,mediaPaths=dirtySettingPaths.Where(IsMediaSetting).Select(path=>path.Substring(7)).ToArray(),baseline=settings,sourceSettingsPath=settingsPath,restart=restart,scope=quickScope});
     }
     static void VerifyRuntimeInteraction() {
         if(runtimeInputs.ContainsKey("BOT_QZONE_ADAPTER_URL")||runtimeInputs.ContainsKey("BOT_QZONE_ADAPTER_TOKEN")||qzoneCheckButton==null)throw new Exception("空间连接仍要求外部适配配置或缺少检查入口");

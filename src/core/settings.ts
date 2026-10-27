@@ -24,6 +24,7 @@ const GroupSchema = z
 
 const SettingsSchema = z
   .object({
+    installation: z.object({ version: z.literal(1), scopeConfigured: z.boolean() }).optional(),
     learning: LearningSettingsSchema,
     context: ContextSettingsSchema,
     social: SocialSettingsSchema,
@@ -88,6 +89,18 @@ export type BotSettings = z.infer<typeof SettingsSchema>;
 
 export const DEFAULT_SETTINGS: BotSettings = SettingsSchema.parse({});
 
+/** 仅用于尚无配置文件的新实例；已有文件继续沿用原来的缺省语义。 */
+export function createInitialSettings(): BotSettings {
+  return SettingsSchema.parse({
+    installation: { version: 1, scopeConfigured: false },
+    approval: { allowExec: false },
+    social: {
+      allowAll: false, autonomy: 'sensitive', autonomousEnabled: false,
+      autoCollectStickers: false, autoQzoneEnabled: false,
+    },
+  });
+}
+
 const path = resolve(process.env.BOT_SETTINGS_FILE || 'bot.config.json');
 export const getSettingsPath = (): string => path;
 let current: BotSettings = DEFAULT_SETTINGS;
@@ -117,7 +130,7 @@ export async function loadSettings(): Promise<BotSettings> {
     current = SettingsSchema.parse(JSON.parse(raw));
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
-    current = clone(DEFAULT_SETTINGS);
+    current = createInitialSettings();
     await persist(current);
   }
   return clone(current);
@@ -125,7 +138,7 @@ export async function loadSettings(): Promise<BotSettings> {
 
 export async function readSettingsFile(file: string): Promise<BotSettings> {
   try { return validateSettings(JSON.parse(await readFile(resolve(file), 'utf8'))); }
-  catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; return clone(DEFAULT_SETTINGS); }
+  catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; return createInitialSettings(); }
 }
 
 async function persist(next: BotSettings, file = path): Promise<void> {

@@ -63,7 +63,7 @@ test('首次桌面读取自动初始化默认配置与人设，再次读取保�
     assert.match(await readFile(join(root, '.env'), 'utf8'), /BOT_ONEBOT_MODE=auto/);
     const persona = join(root, 'bot-workspace/AGENTS.md'); assert.match(await readFile(persona, 'utf8'), /默认聊天约定/);
     await writeFile(persona, 'Personal persona'); await writeFile(join(root, '.env'), 'BOT_WORKSPACE=bot-workspace\nBOT_DSH_BIN=custom.cmd\n');
-    response = await worker(); assert.equal(response.ok, true); assert.equal(response.result.needsSetup, false);
+    response = await worker(); assert.equal(response.ok, true); assert.equal(response.result.needsSetup, true);
     assert.equal(await readFile(persona, 'utf8'), 'Personal persona'); assert.match(await readFile(join(root, '.env'), 'utf8'), /BOT_DSH_BIN=custom.cmd/);
   } finally { await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }); }
 });

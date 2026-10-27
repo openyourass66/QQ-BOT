@@ -90,7 +90,7 @@ test('环境变量补齐缺失配置；文件优先；并发保存及多次原�
   try {
     const initial = await settings.loadSettings();
     assert.equal(initial.approval.adminQq, 12345);
-    assert.equal(initial.approval.allowExec, true);
+    assert.equal(initial.approval.allowExec, false);
     assert.equal(initial.chat.group.prefix, '!');
     await settings.saveSettings({ approval: { adminQq: 67890 } });
     assert.equal(settings.getSettings().approval.adminQq, 67890);

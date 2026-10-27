@@ -11,12 +11,12 @@ partial class App
     static bool quickSetupMode, quickReady, onboardingBusy, setupComplete;
     static int quickStep, quickRevision, checkedQuickRevision;
     static Dictionary<string,string> detectionBaseline = new Dictionary<string,string>();
-    static readonly string[] quickTitles = { "1 检测环境", "2 选择模型", "3 连接 QQ", "4 检查并启动" };
+    static readonly string[] quickTitles = { "1 检测环境", "2 选择模型", "3 连接 QQ", "4 选择范围并启动" };
     static readonly string[] quickDescriptions = {
         "可先准备运行组件，也可检测已安装的 DSH 和 QQ。已有 QQ 服务可跳过本机 QQ 组件。",
         "已有 DSH 模型配置可直接沿用；首次使用建议选择本项目 API Key。Profile 和账号模式需先在 DSH 完成配置或登录。",
-        "本机通常使用默认地址，只需核对 NapCat 的端口和令牌。机器人 QQ 可以自动识别，无需手填。",
-        "检查当前输入后即可保存并启动。媒体、搜索、人设和行为参数可以稍后在全部设置中调整。"
+        "可创建安全连接并扫码登录 QQ；已有服务可核对地址与令牌。机器人 QQ 自动识别。",
+        "读取已登录 QQ 的好友和群，选择主人与聊天范围，再检查并启动。新实例先使用基础聊天，后台自主活动与空间另行开启。"
     };
     static HashSet<string> QuickKeys() {
         var keys = quickStep==0 ? new[]{"BOT_ONEBOT_MODE","BOT_DSH_BIN","BOT_QQ_DIR"} : quickStep==1 ? new[]{"BOT_CHAT_MODE","BOT_CHAT_MODEL","QQ_BOT_DEEPSEEK_API_KEY","BOT_CHAT_BASE_URL"} : quickStep==2 ? new[]{"ONEBOT_HTTP_URL","ONEBOT_WS_URL","ONEBOT_TOKEN"} : new string[0];
@@ -45,12 +45,14 @@ partial class App
         Find<Button>("PrepareComponents").Click+=(s,e)=>OpenComponents();
         Find<Button>("ConnectManagedQQ").Click+=(s,e)=>OpenQQLogin();
         Find<Button>("CheckSetup").Click+=(s,e)=>RequestOnboarding("check");
+        Find<Button>("SetupScope").Click+=(s,e)=>OpenScopeSetup();
         Find<Button>("SetupGuide").Click+=(s,e)=>{
             ShowSetupGuide();
         };
     }
     static string SetupCompletionPath { get { return System.IO.Path.Combine(dataRoot,"data/desktop/setup-complete"); } }
     static void CompleteSetup() {
+        if(NeedsScope())return;
         Find<Border>("SetupPrompt").Visibility=Visibility.Collapsed;
         if(setupComplete)return;
         setupComplete=true;
@@ -58,7 +60,7 @@ partial class App
         catch { /* Keep the prompt hidden for this session if preferences cannot be saved. */ }
     }
     static void RefreshSetupPrompt(bool needsSetup) {
-        setupComplete=setupComplete||System.IO.File.Exists(SetupCompletionPath);
+        setupComplete=!NeedsScope()&&(setupComplete||System.IO.File.Exists(SetupCompletionPath));
         if(!needsSetup)CompleteSetup();
         Find<Border>("SetupPrompt").Visibility=needsSetup&&!setupComplete?Visibility.Visible:Visibility.Collapsed;
     }
@@ -100,6 +102,8 @@ partial class App
         Find<Button>("PrepareComponents").Visibility=quickStep==0?Visibility.Visible:Visibility.Collapsed;
         Find<Button>("ConnectManagedQQ").Visibility=quickStep==2&&RuntimeValue("BOT_ONEBOT_MODE")!="external"?Visibility.Visible:Visibility.Collapsed;
         Find<Button>("CheckSetup").Visibility=quickStep==3?Visibility.Visible:Visibility.Collapsed;
+        Find<Button>("SetupScope").Visibility=quickStep==3?Visibility.Visible:Visibility.Collapsed;
+        Find<Button>("SetupScope").IsEnabled=editable;
         Find<Button>("SetupGuide").Visibility=quickStep==0||quickStep==3?Visibility.Visible:Visibility.Collapsed;
         Find<StackPanel>("QuickResults").Visibility=quickStep==3?Visibility.Visible:Visibility.Collapsed;
         Find<Button>("QuickBack").Visibility=quickSetupMode&&quickStep>0?Visibility.Visible:Visibility.Collapsed;
@@ -107,7 +111,7 @@ partial class App
         Find<Button>("QuickBack").IsEnabled=Find<Button>("QuickNext").IsEnabled=!onboardingBusy&&!chatModelBusy;
         Find<Button>("SaveRuntime").Visibility=Find<Button>("SaveRuntimeRestart").Visibility=!quickSetupMode||quickStep==3?Visibility.Visible:Visibility.Collapsed;
         Find<Button>("SaveRuntime").Content=quickSetupMode?"仅保存配置":"保存连接与媒体";
-        Find<TextBlock>("RuntimeSaveScope").Text=quickSetupMode?"先完成基础连接，其余功能可以稍后设置。":"保存本页所有分类；机器人设置中的草稿另行保存。";
+        Find<TextBlock>("RuntimeSaveScope").Text=quickScope!=null?"同时保存所选主人与联系范围；其余行为草稿另行保存。":quickSetupMode?"先完成基础连接与使用范围，其余功能稍后设置。":"保存本页所有分类；机器人设置中的草稿另行保存。";
         Find<Button>("SaveRuntimeRestart").Content=quickSetupMode?"保存并启动":"保存并重新启动";
         Find<Button>("SaveRuntimeRestart").IsEnabled=editable&&(!quickSetupMode||quickReady);
         Find<Button>("SaveRuntime").IsEnabled=editable;
@@ -124,6 +128,7 @@ partial class App
     }
     static void RequestOnboarding(string operation) {
         if(onboardingBusy||chatModelBusy||dirtySections.Contains("env")){Feedback("请先完成当前操作或保存高级环境文件。");return;}
+        if(operation=="check"&&NeedsScope()&&quickScope==null){Find<TextBlock>("QuickNotice").Text="请先选择主人与联系范围。";OpenScopeSetup();return;}
         if(operation=="check"&&!ValidateConnectionForm())return;
         onboardingBusy=true;checkedQuickRevision=quickRevision;
         detectionBaseline=runtimeInputs.ToDictionary(pair=>pair.Key,pair=>RuntimeValue(pair.Key));
@@ -131,6 +136,7 @@ partial class App
         RefreshQuickSetup();Send("onboarding",new {operation=operation,runtime=detectionBaseline});
     }
     static void RenderOnboarding(Dictionary<string,object> message) {
+        if((string)message["operation"]=="contacts"){RenderScopeContacts(message);return;}
         onboardingBusy=false;
         if((string)message["operation"]=="detect") {
             int applied=0;
@@ -213,6 +219,11 @@ partial class App
         if(SelectedPage!=MainPage.Settings||Find<TextBlock>("PageTitle").Text!="机器人设置"||Find<TextBlock>("SettingsTitle").Text!="身份与审批"||!fields["approval.adminQq"].IsVisible)throw new Exception("跨页设置入口未定位到身份与审批");
         NavigateRuntime(0);Find<ListBox>("SettingsNav").SelectedIndex=0;
         var status=new Dictionary<string,object>{{"type","status"},{"qqOnline",true},{"wsConnected",true},{"acpConnected",true},{"messagesIn",0},{"messagesOut",0},{"sessions",0},{"pendingMessages",0},{"startedAt",DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()}};
+        if(NeedsScope()) {
+            Event(json.Serialize(status));
+            if(setupComplete||Find<Border>("SetupPrompt").Visibility!=Visibility.Visible)throw new Exception("未设置联系范围就隐藏了首次配置引导");
+            ((Dictionary<string,object>)settings["installation"])["scopeConfigured"]=true;
+        }
         Event(json.Serialize(status));
         setupComplete=false;RefreshSetupPrompt(true);
         if(Find<Border>("SetupPrompt").Visibility!=Visibility.Collapsed)throw new Exception("已配置状态没有在重新加载后保留");

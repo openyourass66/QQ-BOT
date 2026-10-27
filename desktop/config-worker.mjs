@@ -5,6 +5,7 @@ import { parseEnv } from 'node:util';
 import { existsSync } from 'node:fs';
 import { setup } from '../scripts/setup.mjs';
 import { detectEnvironment, checkSetup } from './onboarding.mjs';
+import { listSetupContacts, applySetupScope, scopeBaseline } from './setup-scope.mjs';
 import { runtimeFields, chatRuntimeKeys, initialDefaultKeys, mergeRuntimeEnv, validateRuntimeEnv } from './runtime-fields.mjs';
 import { readChatModelConfig, listChatModels, testChatModel } from '../dist/agent/chat-model.js';
 import { knowledge } from './knowledge.mjs';
@@ -22,6 +23,7 @@ const describeEnv = env => { const values = parseEnv(env); return runtimeFields.
 process.once('message', async ({ action, data }) => {
   let dataLease;
   let configurationLease;
+  let settingsLease;
   try {
     if(['connection','env','runtime'].includes(action))configurationLease=await acquireDataResources([{path:resolve('.env'),label:'连接配置'}]);
     let result;
@@ -30,7 +32,8 @@ process.once('message', async ({ action, data }) => {
       const persona = await read(personaPath);
       const library = await knowledge(dirname(personaPath)).catch(error => ({ workspace: dirname(personaPath), global: persona, globalRevision: null, libraryRevision: null, presets: [], files: [], error: /^管理操作失败：/.test(error.message) ? error.message : '无法读取人设与记忆，请检查文件权限后刷新。' }));
       const values = parseEnv(env);
-      result = { settings: await settings.loadSettings(), settingsPath: settings.getSettingsPath(), env, runtimeFields: describeEnv(env), persona, personaPath, knowledge: library, needsSetup: !values.BOT_DSH_BIN || values.BOT_DSH_BIN === 'dsh.cmd' };
+      const loaded = await settings.loadSettings();
+      result = { settings: loaded, settingsPath: settings.getSettingsPath(), env, runtimeFields: describeEnv(env), persona, personaPath, knowledge: library, needsSetup: !values.BOT_DSH_BIN || values.BOT_DSH_BIN === 'dsh.cmd' || loaded.installation?.scopeConfigured === false };
     }
     else if (action === 'qq-prepare') {
       if(data?.shell!==undefined&&typeof data.shell!=='string')throw new Error('QQ 组件路径无效');
@@ -38,13 +41,19 @@ process.once('message', async ({ action, data }) => {
       result=await new ManagedQQ({root:programRoot,dataRoot:process.cwd()}).prepare(data?.shell);
     }
     else if (action === 'onboarding') {
-      if (!['detect','check'].includes(data?.operation)) throw new Error('连接配置格式无效：未知快速配置操作');
+      if (!['detect','check','contacts'].includes(data?.operation)) throw new Error('连接配置格式无效：未知快速配置操作');
       const env = mergeRuntimeEnv(await read('.env'), data.runtime || {});
-      if (data.operation === 'check') validateRuntimeEnv(env);
-      result = data.operation === 'detect' ? await detectEnvironment(process.cwd(), { ...process.env, ...parseEnv(env) }) : await checkSetup(programRoot, parseEnv(env), { dataRoot: process.cwd() });
+      if (data.operation === 'contacts') {
+        const current = await settings.readSettingsFile(settingsFileFor(env));
+        result = { operation: 'contacts', requestId: data.requestId, ...await listSetupContacts(parseEnv(env)), baseline: scopeBaseline(current) };
+      } else {
+        if (data.operation === 'check') validateRuntimeEnv(env);
+        result = data.operation === 'detect' ? await detectEnvironment(process.cwd(), { ...process.env, ...parseEnv(env) }) : await checkSetup(programRoot, parseEnv(env), { dataRoot: process.cwd() });
+      }
     }
     else if (action === 'settings') {
       if (data?.settingsPath && resolve(data.settingsPath) !== settings.getSettingsPath()) throw new Error('配置格式无效：动态配置文件已切换，当前输入已保留，请重新打开工作台核对');
+      settingsLease = await acquireDataResources([{path:settings.getSettingsPath(),label:'机器人设置'}]);
       const next = data?.draft ? mergeSettingsDraft(await settings.loadSettings(), data.baseline, data.draft, data.paths) : data;
       const parsed = settings.validateSettings(next);
       for (const key of mediaKeys) if (typeof parsed.social[key] === 'string') parsed.social[key] = parsed.social[key].trim();
@@ -94,11 +103,17 @@ process.once('message', async ({ action, data }) => {
       validateRuntimeEnv(env);
       const targetPath = settingsFileFor(env);
       const switched = targetPath !== settings.getSettingsPath();
+      settingsLease = await acquireDataResources([{path:targetPath,label:'机器人设置'}]);
       const previousSettings = await settings.readSettingsFile(targetPath);
       if (data.mediaPaths && (!Array.isArray(data.mediaPaths) || data.mediaPaths.some(key => !allowed.has(key)))) throw new Error('配置格式无效：媒体修改字段无效');
       const media = Object.fromEntries(Object.entries(data.media).filter(([key]) => !data.mediaPaths || data.mediaPaths.includes(key)).map(([key, value]) => [key, typeof value === 'string' ? value.trim() : value]));
       const draftSettings = { ...previousSettings, social: { ...previousSettings.social, ...media } };
-      const nextSettings = settings.validateSettings(data.baseline && !switched ? mergeSettingsDraft(previousSettings, data.baseline, draftSettings, Object.keys(media).map(key=>'social.'+key)) : draftSettings);
+      let nextSettings = settings.validateSettings(data.baseline && !switched ? mergeSettingsDraft(previousSettings, data.baseline, draftSettings, Object.keys(media).map(key=>'social.'+key)) : draftSettings);
+      if (data.scope) nextSettings = settings.validateSettings(await applySetupScope(nextSettings, data.scope, parseEnv(env), async () => {
+        const latest = await settings.readSettingsFile(targetPath);
+        return data.baseline && !switched ? mergeSettingsDraft(latest, data.baseline, { ...latest, social: { ...latest.social, ...media } }, Object.keys(media).map(key=>'social.'+key)) : { ...latest, social: { ...latest.social, ...media } };
+      }));
+      else if (data.restart && nextSettings.installation?.scopeConfigured === false) throw new Error('配置格式无效：请先在快速配置中选择主人和联系范围，再保存并启动。');
       validateMediaService(nextSettings, env);
       await atomic(resolve('.env'), env);
       try { await settings.saveSettingsFile(targetPath, nextSettings); }
@@ -132,6 +147,7 @@ process.once('message', async ({ action, data }) => {
     process.send({ ok: false, error }, () => process.disconnect());
   } finally {
     configurationLease?.release();
+    settingsLease?.release();
     dataLease?.release();
   }
 });

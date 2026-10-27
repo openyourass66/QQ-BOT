@@ -128,7 +128,7 @@ partial class App
     }
     static Dictionary<string,object> FlattenSettings(Dictionary<string,object> data, string prefix = "") {
         var result = new Dictionary<string,object>();
-        foreach (var pair in data) { var nested=pair.Value as Dictionary<string,object>; if(nested!=null) foreach(var child in FlattenSettings(nested,prefix+pair.Key+".")) result[child.Key]=child.Value; else result[prefix+pair.Key]=pair.Value; }
+        foreach (var pair in data) { if(prefix.Length==0&&pair.Key=="installation")continue;var nested=pair.Value as Dictionary<string,object>; if(nested!=null) foreach(var child in FlattenSettings(nested,prefix+pair.Key+".")) result[child.Key]=child.Value; else result[prefix+pair.Key]=pair.Value; }
         return result;
     }
     static void BuildSettings(Dictionary<string,object> data, StackPanel panel) {
