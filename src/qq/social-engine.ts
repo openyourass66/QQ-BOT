@@ -1,22 +1,22 @@
+import {createSocialHandlers,type ToolHandler} from "./handlers/registry.js";
+import {toFile} from "./handlers/shared.js";
+export {parseShanghaiTime} from "./handlers/shared.js";
 import { z } from 'zod';
-import { randomUUID } from 'node:crypto';
-import { extname } from 'node:path';
-import type {SocialData,ScheduledTask} from './social-store.js';
+import type {ScheduledTask} from './social-store.js';
 import type {SocialRepository} from '../storage/social-repository.js';
 import { MediaService } from '../services/media.js';
 import { socialTools, SocialCallSchema, type ToolContext } from './social-tools.js';
-import { assertAccountTool, isAccountOwner } from '../core/permissions.js';
-import { assertToolAccess, assertTargetAccess, toolAccessVisible, approvalBinding, approvalDescription } from '../security/tool-policy.js';
+import {assertAccountTool} from '../core/permissions.js';
+import {assertToolAccess, assertTargetAccess, approvalBinding, approvalDescription} from '../security/tool-policy.js';
 import { allowedChat } from './social-settings.js';
 import type { BotSettings } from '../core/settings.js';
-import { OneBotHttp, parseMessageEvent, parseCqMessage, segmentsToText, type Segment } from './onebot.js';
+import {OneBotHttp, type Segment} from './onebot.js';
 import type { DailyUsageStore, Quota } from '../core/usage.js';
-import { StickerReviews, imageHash, stickerReviewPrompt, stickerSearchText, stickerInfo, type StickerAnalysis } from './sticker-review.js';
+import {StickerReviews, imageHash, stickerReviewPrompt} from './sticker-review.js';
 import { QqStickers } from './qq-stickers.js';
 import { Autonomy, quietTime } from '../agent/autonomy.js';
 import type { AutonomousTurn } from '../agent/autonomous-state.js';
-import { Cognition, forgetMemory, memoryMeta, fingerprint } from '../agent/cognition.js';
-import { MemoryMetaSchema } from '../agent/cognition-state.js';
+import {Cognition} from '../agent/cognition.js';
 import { learningModel } from '../agent/learning-model.js';
 import { turnBudget, toolAvailable, toolEnabled } from '../agent/context-policy.js';
 import { QzoneService, type SpacePost } from '../services/qzone.js';
@@ -24,6 +24,7 @@ import type {PrepareServiceRequest} from '../agent/service-request.js';
 import type {QqOperationService} from '../app/qq-operation-service.js';
 
 export class SocialEngine {
+  private readonly handlers:ReadonlyMap<string,ToolHandler>;
   private sending = new Map<string, Promise<unknown>>();
   private rates = new Map<string, number[]>();
   private contactsAt = 0;
@@ -45,6 +46,7 @@ export class SocialEngine {
       this.qqStickers=new QqStickers(store,media,api);this.autonomy=new Autonomy(store,settings,usage,undefined,media);
       const model=learningModel(process.env,requests);this.cognition=new Cognition(store,settings,usage,model.analyze,model.available,Date.now,model.prepare);
       this.qzone=qzone??new QzoneService(api,{blocked:user=>settings().social.blockedUsers.includes(String(user)),...(operations?{effect:<T>(payload:unknown,invoke:()=>Promise<T>)=>operations.effect('qzone_comment',payload,invoke)}:{})});
+      this.handlers=createSocialHandlers(this.executionPort());
     }
   guardTool(ctx:ToolContext,name:string):void {
     ctx.budget??=turnBudget();
@@ -211,298 +213,40 @@ export class SocialEngine {
     const mutates = !reads.has(call.tool) && !['qq_group_file','qq_actions'].includes(call.tool) && !(call.tool === 'qq_send_image' && args.preview) && !collectPreview && !sendPreview;
     return {call,tool,args,mutates};
   }
-  private async perform(tool: string, a: Record<string, any>, ctx: ToolContext): Promise<unknown> {
-    if(['qq_stickers','qq_sticker_note'].includes(tool)) { this.feature('stickersEnabled');await this.qqStickers.sync(ctx.signal); }
-    switch (tool) {
-      case 'qq_self_state':return this.autonomy.view(ctx);
-      case 'qq_interest':return this.autonomy.interest(ctx,a as never);
-      case 'qq_thought':return this.autonomy.thought(ctx,a as never);
-      case 'qq_capabilities': return { media: this.media.capabilities(), settings: isAccountOwner(ctx,this.settings().approval.adminQq)?this.settings().social:Object.fromEntries(Object.entries(this.settings().social).filter(([,value])=>typeof value==='boolean')), tools: socialTools.filter(t=>toolAccessVisible(ctx,this.settings(),t.name)).map(t => ({ name: t.name, description: t.description })), notes: ['消息、成员必须使用真实编号', '本地记录仅包含已收到或主动拉取的消息', '接口成功不等于接收者已阅读'] };
-      case 'qq_reply': {
-        if (!a.text) throw new Error('文字不能为空；只想潜水请调用 qq_finish');
-        return this.send(ctx, [...await this.decorators(ctx, a), { type: 'text', data: { text: a.text } }]);
-      }
-      case 'qq_recent_messages': {
-        if (a.refresh) {
-          const [kind, id] = ctx.chat.split(':');
-          const result = await this.api.call<{ messages: unknown[] }>(kind === 'group' ? 'get_group_msg_history' : 'get_friend_msg_history', { [kind === 'group' ? 'group_id' : 'user_id']: Number(id), count: a.limit, message_seq: 0 }, ctx.signal);
-          if (!Array.isArray(result.messages)) throw new Error('协议端不支持历史查询或返回格式异常');
-          for (const raw of result.messages) {
-            const entry = raw as Record<string, unknown>;
-            const ev = parseMessageEvent({ ...entry, post_type: 'message', message_type: kind, self_id: ctx.self, ...(kind === 'group' ? { group_id: Number(id) } : {}), sender: entry.sender ?? {} });
-            if (ev && !this.settings().social.blockedUsers.includes(String(ev.user_id))) {
-              await this.store.add({ chat: ctx.chat, id: ev.message_id, user: ev.user_id, name: ev.sender.card || ev.sender.nickname, at: ev.time * 1000, text: segmentsToText(ev.message), segments: ev.message, self: ev.user_id === ctx.self, recalled: false });
-            }
-          }
-        }
-        return (await this.store.messages(ctx.chat, a.limit, a.offset, a.query)).filter(m => !this.settings().social.blockedUsers.includes(String(m.user)));
-      }
-      case 'qq_message': return await this.message(ctx, a.message_id);
-      case 'qq_read_forward': {
-        const entry = await this.message(ctx, a.message_id);
-        const segment = entry.segments.find(s => s.type === 'forward');
-        if (!segment) throw new Error('该消息不是合并转发');
-        const result = await this.api.call<Record<string, unknown>>('get_forward_msg', { message_id: String(segment.data.id ?? a.message_id) }, ctx.signal);
-        const media: Segment[] = [];
-        const walk = (value: unknown, depth = 0): void => {
-          if (!value || depth > 5 || media.length > 30) return;
-          if (Array.isArray(value)) { for (const node of value.slice(0,100)) walk(node, depth+1); return; }
-          if (typeof value !== 'object') return;
-          const node = value as Record<string, unknown>;
-          if (['image','record','video','file'].includes(String(node.type)) && node.data && typeof node.data === 'object') media.push(node as unknown as Segment);
-          for (const key of ['content','message','messages','data']) if (node[key] && node[key] !== value) walk(node[key], depth+1);
-        };
-        walk(result);
-        if (media.length) await this.store.updateWithMessages(ctx.chat,[a.message_id],d => { const original = d.messages.find(m => m.chat === ctx.chat && m.id === a.message_id); if (original) original.segments = original.segments.filter(s => s.type === 'forward').concat(media); });
-        return result;
-      }
-      case 'qq_active_members': {
-        const members = new Map<number, { user_id: number; name: string; last_at: number; count: number }>();
-        for (const m of await this.store.messages(ctx.chat, 2000)) {
-          if (this.settings().social.blockedUsers.includes(String(m.user))) continue;
-          const old = members.get(m.user); members.set(m.user, { user_id: m.user, name: m.name, last_at: Math.max(old?.last_at ?? 0, m.at), count: (old?.count ?? 0) + 1 });
-        }
-        return [...members.values()].sort((x,y) => y.last_at - x.last_at).slice(0, a.limit);
-      }
-      case 'qq_chats': {
-        await this.contacts(ctx.signal, true);
-        return this.store.view('contacts').contacts.filter(c => allowedChat(this.settings().social, c.chat) && `${c.name} ${c.chat}`.includes(a.query)).sort((x,y) => y.at - x.at).slice(0, a.limit);
-      }
-      case 'qq_poke': {
-        const [kind, id] = ctx.chat.split(':'); const target = a.user_id ?? (kind === 'private' ? Number(id) : undefined);
-        if (kind === 'private' && target !== Number(id)) throw new Error('私聊戳一戳只能操作当前私聊对象');
-        if (!target || this.settings().social.blockedUsers.includes(String(target))) throw new Error('请指定当前群里未屏蔽的成员');
-        if (kind === 'group') await this.decorators(ctx, { at_user: target });
-        await this.quota(ctx, ctx.chat);
-        return this.api.call(kind === 'group' ? 'group_poke' : 'friend_poke', { ...(kind === 'group' ? { group_id: Number(id) } : {}), user_id: target }, ctx.signal);
-      }
-      case 'qq_images': {
-        this.feature('mediaEnabled'); const entry = await this.message(ctx, a.message_id);
-        const sources = entry.segments.filter(s => s.type === 'image').slice(0, 4);
-        if (!sources.length) throw new Error('该消息没有图片');
-        const images = [];
-        for (const s of sources) images.push(await this.messageImage(s, ctx));
-        return this.media.vision(images, a.question, ctx.signal);
-      }
-      case 'qq_send_image': {
-        this.feature('mediaEnabled');
-        const image = await this.media.image(a.source, ctx.signal);
-        if (a.preview) return { content: [image] };
-        const file = await this.media.save(Buffer.from(image.data, 'base64'), '.' + image.mimeType.split('/')[1]);
-        return this.send(ctx, [...await this.decorators(ctx, a), ...(a.note ? [{ type: 'text', data: { text: a.note } }] : []), { type: 'image', data: { file: toFile(file) } }]);
-      }
-      case 'qq_stickers': {
-        this.feature('stickersEnabled');
-        const used=this.autonomy.stickerRecency(ctx.chat);
-        const terms = a.query.toLocaleLowerCase().trim().split(/\s+/).filter(Boolean);
-        const score = (s: SocialData['stickers'][number]) => s.analysis ? { high:3,medium:2,low:1 }[s.analysis.confidence] : 0;
-        return this.store.view('stickers').stickers.filter(s => s.qqPresent && terms.every((term: string) => stickerSearchText(s).includes(term)))
-          .sort((x,y) => score(y) - score(x)||(used.get(x.id)??0)-(used.get(y.id)??0)||x.uses-y.uses).slice(0, a.limit)
-          .map(s=>({...stickerInfo(s),lastUsedInChat:used.get(s.id)??0}));
-      }
-      case 'qq_collect_sticker': {
-        this.feature('stickersEnabled'); const entry = await this.message(ctx, a.message_id);
-        const segment = entry.segments.find(s => s.type === 'image'); if (!segment) throw new Error('该消息没有图片');
-        if (Boolean(a.analysis_token) !== Boolean(a.analysis)) throw new Error('收藏必须先取得原图分析凭证，再提交完整 analysis，不能只提交备注');
-        if (!a.analysis_token) {
-          await this.qqStickers.sync(ctx.signal);
-          const image = await this.messageImage(segment, ctx), hash = imageHash(Buffer.from(image.data, 'base64'));
-          const existing = this.store.view('stickers').stickers.find(s => s.qqPresent && s.analysis?.imageHash === hash && s.analysis.confidence !== 'low');
-          if (existing) { ctx.pendingStickerCollections?.delete(hash);await this.autonomy.collected(ctx,a.message_id); return { ...stickerInfo(existing), collected: true, reused: true }; }
-          return this.prepareStickerReview(ctx, { messageId: a.message_id }, image, a.note, 'collect');
-        }
-        return this.serial('sticker-review:' + a.analysis_token, async () => {
-          const review = await this.checkedStickerReview(ctx, a.analysis_token, { messageId: a.message_id });
-          const analysis: StickerAnalysis = { ...a.analysis, imageHash: review.hash, at: Date.now() };
-          let writeAttempt=false;
-          const favorite=await this.qqStickers.collect(review.file,ctx.signal,async()=>{await this.quota(ctx,ctx.chat,()=>this.autonomy.collectionQuotas(ctx));writeAttempt=true;})
-            .catch(error=>{if(writeAttempt&&ctx.autonomous)ctx.autonomous.failure=String(error);throw error;});
-          const result = await this.store.update(d => {
-            const existing = d.stickers.find(s => s.id===favorite.id);
-            const note = a.note ?? analysis.meaning, tags = [...new Set<string>([...analysis.tags, ...(a.tags ?? [])])].slice(0,20);
-            if (!existing) throw new Error('QQ 收藏记录已变化，请刷新后核对');
-            existing.note = note; existing.tags = tags; existing.analysis = analysis; return existing;
-          }).catch(error=>{if(ctx.autonomous)ctx.autonomous.failure='QQ 收藏已写入，理解记录保存失败：'+String(error);throw error;});
-          this.stickerReviews.complete(a.analysis_token);
-          ctx.pendingStickerCollections?.delete(review.hash);
-          await this.autonomy.collected(ctx,a.message_id);
-          return { ...stickerInfo(result), collected: true };
-        });
-      }
-      case 'qq_sticker_note': {
-        this.feature('stickersEnabled');
-        if (Boolean(a.analysis_token) !== Boolean(a.analysis)) throw new Error('更新理解必须先调用 qq_sticker_image 看原图，再提交分析凭证与 analysis');
-        if (!a.analysis_token && a.note === undefined && a.tags === undefined) throw new Error('请填写备注、标签或完整的图片分析');
-        return this.serial('sticker-review:' + (a.analysis_token ?? a.sticker_id), async () => {
-          const review = a.analysis_token ? await this.checkedStickerReview(ctx, a.analysis_token, { stickerId: a.sticker_id }) : undefined;
-          const result = await this.store.update(d => {
-            const s = d.stickers.find(s => s.id === a.sticker_id); if (!s) throw new Error('表情不存在');
-            if (review) {
-              if (s.file !== review.file) throw new Error('表情图片已变更，请重新看图分析');
-              const analysis: StickerAnalysis = { ...a.analysis, imageHash: review.hash, at: Date.now() };
-              s.analysis = analysis;
-              s.note = a.note ?? (s.note || analysis.meaning);
-              s.tags = [...new Set<string>([...analysis.tags, ...(a.tags ?? s.tags)])].slice(0,20);
-            } else { if (a.note !== undefined) s.note = a.note; if (a.tags !== undefined) s.tags = a.tags; }
-            return s;
-          });
-          if (a.analysis_token) this.stickerReviews.complete(a.analysis_token);
-          return stickerInfo(result);
-        });
-      }
-      case 'qq_sticker_image':
-      case 'qq_send_sticker': {
-        this.feature('stickersEnabled');if(!this.store.view('stickers').stickers.some(s=>s.id===a.sticker_id))throw new Error('表情不存在');
-        const image = await this.qqStickers.image(a.sticker_id, ctx.signal),s=this.store.view('stickers').stickers.find(s=>s.id===a.sticker_id);if(!s?.qqPresent)throw new Error('表情已从 QQ 收藏移除');
-        if (tool === 'qq_sticker_image' || !s.analysis) return this.prepareStickerReview(ctx, { stickerId: s.id }, image, s.note, tool === 'qq_send_sticker' ? 'send' : 'view');
-        if (imageHash(Buffer.from(image.data, 'base64')) !== s.analysis.imageHash) throw new Error('表情图片与理解记录不一致，请先用 qq_sticker_image 重新分析');
-        if (s.analysis.confidence === 'low') throw new Error('这张表情含义尚不确定，请结合上下文重新看图分析，或选择其他已理解的表情');
-        if(ctx.autonomous&&this.autonomy.lastSticker(ctx.chat,s.id)>Date.now()-this.settings().social.stickerRepeatHours*3600000)throw new Error('这张表情最近已在当前会话使用，请换一张或保持安静');
-        // QQ uses the image subtype to distinguish custom stickers from ordinary pictures.
-        const result = await this.send(ctx, [...await this.decorators(ctx, a), { type: 'image', data: { file: toFile(s.file), sub_type: 1, summary: '[动画表情]' } }]);
-        ctx.pendingStickerSends?.delete(s.id);
-        await this.autonomy.usedSticker(ctx.chat,s.id);
-        await this.store.update(d => { const s = d.stickers.find(s => s.id === a.sticker_id); if (s) s.uses++; }); return result;
-      }
-      case 'qq_memory_append': {
-        this.feature('memoryEnabled');
-        if (this.settings().social.blockedUsers.includes(String(a.user_id))) throw new Error('目标用户已屏蔽');
-        const sourceIds:number[]=a.source_ids??[];
-        for(const id of sourceIds){const m=await this.store.message(ctx.chat,id);if(m.self||m.recalled||m.user!==a.user_id)throw new Error('记忆依据必须是当前会话中该用户的有效消息');}
-        return this.store.updateWithMessages(ctx.chat,sourceIds,d => {
-          for(const id of sourceIds){const m=d.messages.find(m=>m.chat===ctx.chat&&m.id===id);if(!m||m.self||m.recalled||m.user!==a.user_id)throw new Error('记忆来源已失效');}
-          const suppressed=d.cognition.suppressed.find(v=>v.chat===ctx.chat&&v.hash===fingerprint(a.text));
-          if(suppressed&&!sourceIds.some(id=>d.messages.some(m=>m.chat===ctx.chat&&m.id===id&&m.at>suppressed.at)))throw new Error('该记忆已删除，需要新的真实依据才能重新记录');
-          const old = d.memories.find(m => m.chat === ctx.chat && m.user === String(a.user_id) && m.text === a.text); if (old) return old;
-          if (d.memories.length >= 10000) throw new Error('长期记忆已满，请整理或删除旧记忆');
-          const m = { id: randomUUID(), chat: ctx.chat, user: String(a.user_id), name: a.name, text: a.text, at: Date.now() }; d.memories.push(m);
-          d.cognition.memories[m.id]=MemoryMetaSchema.parse({source:'tool',sources:sourceIds,locked:false,confirmedAt:m.at,confidence:sourceIds.length?'supported':'unknown',evidence:sourceIds.map(id=>{const s=d.messages.find(m=>m.chat===ctx.chat&&m.id===id)!;return {id,user:String(s.user),quote:s.text.slice(0,500),at:s.at};})});return m;
-        });
-      }
-      case 'qq_memory_query': this.feature('memoryEnabled'); return this.store.view('memories').memories.filter(m => m.chat === ctx.chat && (!a.user_id || m.user === String(a.user_id)) && `${m.name} ${m.text}`.includes(a.query) && !this.settings().social.blockedUsers.includes(m.user)).slice(-100);
-      case 'qq_memory_remove': this.feature('memoryEnabled'); return this.store.update(d => {this.check(ctx);const m=d.memories.find(m=>m.chat===ctx.chat&&m.id===a.memory_id);if(!m)return {removed:0};if(memoryMeta(d,m.id).locked&&!isAccountOwner(ctx,this.settings().approval.adminQq))throw new Error('管理员锁定的记忆需要主人真实消息或在管理端修改');forgetMemory(d,m.id);return {removed:1};});
-      case 'qq_finish': ctx.silent = true; ctx.topic = a.active_topic; ctx.endTopic = a.end_topic;if(ctx.autonomous)ctx.autonomous.reason=a.reason; this.log(`[decision] ${ctx.chat} ${a.reason}`); return { finished: true };
-      case 'qq_set_reminder': {
-        this.feature('remindersEnabled');
-        const blocked = this.reminderBlockReason(ctx, true);
-        if (blocked) throw new Error(`暂不能创建提醒：${blocked}`);
-        if ((a.delay_minutes !== undefined) === (a.at_time !== undefined)) throw new Error('delay_minutes 与 at_time 必须且只能提供一项');
-        const due = a.delay_minutes !== undefined ? Date.now() + a.delay_minutes * 60000 : parseShanghaiTime(a.at_time);
-        if (!Number.isFinite(due) || due <= Date.now()) throw new Error('提醒时间必须在未来，格式为上海时间 YYYY-MM-DD HH:mm');
-        return this.store.addTask({ chat: ctx.chat, creator: String(ctx.user), text: a.text, due, interval: a.interval_minutes * 60000 });
-      }
-      case 'qq_reminders': return this.store.view('tasks').tasks.filter(t => t.chat === ctx.chat && (t.creator===String(ctx.user)||isAccountOwner(ctx,this.settings().approval.adminQq)) && !['sent', 'cancelled'].includes(t.state));
-      case 'qq_cancel_reminder': return this.store.update(d => { this.check(ctx);const task = d.tasks.find(t => t.id === a.reminder_id && t.chat === ctx.chat); if (!task || !['pending','blocked'].includes(task.state)) throw new Error('该提醒不存在或已开始执行');if(task.creator!==String(ctx.user)&&!isAccountOwner(ctx,this.settings().approval.adminQq))throw new Error('只能取消自己在当前会话创建的提醒');task.state = 'cancelled'; return task; });
-      case 'qq_events': {
-        const ownerInbox = isAccountOwner(ctx, this.settings().approval.adminQq) && ctx.chat === `private:${ctx.user}`;
-        return this.store.view('events').events.filter(e =>
-          (e.chat === ctx.chat || ownerInbox && e.type.startsWith('request:') && allowedChat(this.settings().social, e.chat)) &&
-          (!e.type.startsWith('request:')||isAccountOwner(ctx,this.settings().approval.adminQq))&&(!a.pending_only || !e.handled)).slice(-50).map(e=>({...e,data:Object.fromEntries(Object.entries(e.data).filter(([key])=>!['flag','token','cookie'].includes(key.toLowerCase())))}));
-      }
-      case 'qq_actions': {const current=this.operations?await this.operations.actions(ctx.self,ctx.chat):[],ids=new Set(current.map(row=>row.id));return [...current,...this.store.view('actions').actions.filter(action=>action.chat===ctx.chat&&!ids.has(action.id)).slice(-30).reverse()].sort((a,b)=>b.at-a.at).slice(0,30);}
-      case 'qq_handle_request': {
-        this.feature('requestsEnabled');
-        const ownerInbox = isAccountOwner(ctx, this.settings().approval.adminQq) && ctx.chat === `private:${ctx.user}`;
-        const event = this.store.view('events').events.find(e => e.id === a.event_id && (e.chat === ctx.chat || ownerInbox) && e.type.startsWith('request:'));
-        if (!event || event.handled || typeof event.data.flag !== 'string') throw new Error('申请不存在或已经处理');
-        this.check(ctx, event.chat);
-        await this.quota(ctx, ctx.chat);
-        await this.store.update(d => { const e = d.events.find(e => e.id === event.id); if (!e || e.handled) throw new Error('申请已由其他操作处理'); e.handled = true; });
-        assertAccountTool(ctx, this.settings().approval.adminQq, tool);
-        this.check(ctx, event.chat);
-        return this.api.call(event.type === 'request:friend' ? 'set_friend_add_request' : 'set_group_add_request', { flag: event.data.flag, approve: a.approve, ...(event.type === 'request:friend' ? { remark: a.remark } : { sub_type: event.data.sub_type, reason: a.remark }) }, ctx.signal);
-      }
-      case 'qq_transcribe': this.feature('mediaEnabled'); return this.media.transcribe(await this.messageSource(ctx, a.message_id, 'record'), ctx.signal);
-      case 'qq_speak': {
-        this.feature('mediaEnabled'); const file = await this.media.speech(a.text, ctx.signal);
-        return this.send(ctx, [{ type: 'record', data: { file: toFile(file) } }]);
-      }
-      case 'qq_video': this.feature('mediaEnabled'); return this.media.video(await this.messageSource(ctx, a.message_id, 'video'), a.question, ctx.signal);
-      case 'qq_file': {
-        this.feature('filesEnabled'); const entry = await this.message(ctx, a.message_id); const segment = entry.segments.find(s => s.type === 'file'); if (!segment) throw new Error('该消息没有文件');
-        const { buffer } = await this.media.bytes(await this.source(segment, ctx), ctx.signal, 25_000_000);
-        const extension = extname(String(segment.data.name ?? '')).toLowerCase();
-        const file = await this.media.save(buffer, /^\.[a-z0-9]{1,8}$/.test(extension) ? extension : '.bin');
-        return { file, bytes: buffer.length, name: segment.data.name, text: ['.txt', '.md', '.csv', '.json', '.log', '.xml', '.html'].includes(extension) ? buffer.toString('utf8').slice(0, 30000) : undefined, note: '二进制文档尚未提取正文，可使用 DSH 已配置的文档读取能力' };
-      }
-      case 'qq_event_file': {
-        this.feature('filesEnabled');
-        const event = this.store.view('events').events.find(e => e.chat === ctx.chat && e.id === a.event_id && e.type.includes('upload'));
-        if (!event || !event.data.file || typeof event.data.file !== 'object') throw new Error('上传事件不存在或没有文件信息');
-        const fileInfo = event.data.file as Record<string, unknown>;
-        const segment: Segment = { type:'file', data:{ ...fileInfo, file_id:fileInfo.id ?? fileInfo.file_id } };
-        const { buffer } = await this.media.bytes(await this.source(segment,ctx),ctx.signal,25_000_000);
-        const ext = extname(String(fileInfo.name ?? '')).toLowerCase();
-        const file = await this.media.save(buffer,/^\.[a-z0-9]{1,8}$/.test(ext)?ext:'.bin');
-        return { file,name:fileInfo.name,bytes:buffer.length,text:['.txt','.md','.csv','.json'].includes(ext)?buffer.toString('utf8').slice(0,30000):undefined };
-      }
-      case 'qq_group_files': {
-        this.feature('filesEnabled'); if (!ctx.chat.startsWith('group:')) throw new Error('当前不是群聊');
-        const result = await this.api.call<{files?:Array<Record<string, unknown>>}>(a.folder_id?'get_group_files_by_folder':'get_group_root_files',{group_id:Number(ctx.chat.split(':')[1]),...(a.folder_id?{folder_id:a.folder_id}:{})},ctx.signal);
-        this.groupFiles.set(ctx.chat,new Map((result.files??[]).slice(0,1000).map(f=>[String(f.file_id),f])));
-        if(this.groupFiles.size>100) this.groupFiles.delete(this.groupFiles.keys().next().value!);
-        return result;
-      }
-      case 'qq_group_file': {
-        this.feature('filesEnabled'); const info=this.groupFiles.get(ctx.chat)?.get(a.file_id); if(!info) throw new Error('请先浏览当前群文件，使用返回的真实文件编号');
-        const source=await this.source({type:'file',data:info},ctx);
-        const {buffer}=await this.media.bytes(source,ctx.signal,25_000_000);
-        const extension=extname(String(info.file_name??info.name??'')).toLowerCase();
-        const file=await this.media.save(buffer,/^\.[a-z0-9]{1,8}$/.test(extension)?extension:'.bin');
-        return {file,name:info.file_name??info.name,bytes:buffer.length,text:['.txt','.md','.csv','.json'].includes(extension)?buffer.toString('utf8').slice(0,30000):undefined};
-      }
-      case 'qq_create_file': {
-        this.feature('filesEnabled'); return { file:await this.media.save(Buffer.from(a.text,'utf8'),extname(a.name).toLowerCase()),name:a.name };
-      }
-      case 'qq_send_file': {
-        this.feature('filesEnabled'); const { buffer } = await this.media.bytes(a.source, ctx.signal, 25_000_000);
-        const file = await this.media.save(buffer, extname(a.name).replace(/[^.a-zA-Z0-9]/g,'').slice(0,10) || '.bin');
-        return this.serial(ctx.chat, async () => {
-          await this.quota(ctx, ctx.chat, () => this.proactiveQuotas(ctx, ctx.chat));
-          const [kind, id] = ctx.chat.split(':');
-          let result;
-          try { result = await this.api.call(kind === 'group' ? 'upload_group_file' : 'upload_private_file', { [kind === 'group' ? 'group_id' : 'user_id']: Number(id), file, name: a.name }, ctx.signal); }
-          catch (error) { ctx.silent = true; throw error; }
-          ctx.sent++; this.onSent(ctx.chat, 0, [{ type: 'file', data: { name: a.name } }]); return result;
-        });
-      }
-      case 'qq_qzone_feed': {
-        if(!this.settings().features.qzone.browseEnabled)throw new Error('空间浏览已关闭，请在机器人设置的功能开关开启');
-        const user=a.user_id??ctx.self;this.autonomy.authorizeSpaceTarget(ctx,user);if(user!==ctx.self)await this.spaceTarget(ctx,user);
-        const result=await this.qzone.feed(ctx.chat,ctx.self,user,a.limit,a.offset,ctx.signal);this.check(ctx);
-        if(!this.settings().features.qzone.browseEnabled)throw new Error('空间浏览已关闭');
-        if(user!==ctx.self)this.check(ctx,`private:${user}`);
-        return result;
-      }
-      case 'qq_qzone_comment': {
-        let confirmed=false;
-        const validate=()=>{
-          this.check(ctx);const qzone=this.settings().features.qzone;
-          if(!qzone.browseEnabled||!qzone.commentsEnabled)throw new Error('空间浏览或评论已关闭，请在机器人设置的功能开关开启');
-          const target=this.qzone.target(ctx.chat,ctx.self,a.post_id,a.reply_id);
-          this.autonomy.authorizeSpaceTarget(ctx,target.post.user_id,a.post_id);
-          if(target.post.user_id!==ctx.self)this.check(ctx,`private:${target.post.user_id}`);
-          return {qzone,target};
-        };
-        const {qzone,target}=validate();if(target.post.user_id!==ctx.self)await this.spaceTarget(ctx,target.post.user_id);
-        let checkApproval:(()=>void)|undefined;
-        if(qzone.commentRequireConfirm||this.settings().social.autonomy!=='autonomous') {
-          const binding=approvalBinding(this.settings(),{tool,chat:ctx.chat,user:ctx.user,target:target.post.url,args:a});
-          confirmed=await this.confirm(`要${target.reply?'回复空间评论':'评论 QQ 空间说说'}：\n目标：${target.post.name||target.post.user_id}（QQ ${target.post.user_id}）\n动态：${target.post.text.slice(0,800)}\n${target.reply?'回复 '+(target.reply.name||target.reply.user_id)+'：'+target.reply.text+'\n':''}评论正文：\n${a.text}`,ctx.signal);
-          if(!confirmed)throw new Error('空间评论未获管理员确认');
-          checkApproval=()=>binding.assert(this.settings());
-        }
-        let reserved=false;
-        try {const result=await this.qzone.comment(ctx.chat,ctx.self,{post_id:a.post_id,text:a.text,reply_id:a.reply_id},ctx.signal,async()=>{
-          const check=()=>{const {qzone}=validate();if((qzone.commentRequireConfirm||this.settings().social.autonomy!=='autonomous')&&!confirmed)throw new Error('空间评论现在需要管理员确认，请重新发起');checkApproval?.();return qzone;};
-          check();await this.quota(ctx,ctx.chat,()=>[{key:'qzone-comments',amount:1,limit:check().commentDailyLimit,label:'空间评论'}]);check();
-          await this.autonomy.reserveSpaceComment(ctx,target.post.url);reserved=true;check();
-        });await this.autonomy.finishSpaceComment(ctx,target.post.url,true);return result;}
-        catch(error){if(reserved)await this.autonomy.finishSpaceComment(ctx,target.post.url,false);throw error;}
-      }
-      case 'qq_report': this.log(`[report] ${ctx.chat} ${a.text}`); return { recorded: true };
-      default: throw new Error('工具尚未实现');
-    }
+  private executionPort(){const engine=this;return {
+      send:this.send.bind(this),
+      decorators:this.decorators.bind(this),
+      get api(){return engine.api;},
+      settings:this.settings.bind(this),
+      get store(){return engine.store;},
+      message:this.message.bind(this),
+      contacts:this.contacts.bind(this),
+      quota:this.quota.bind(this),
+      feature:this.feature.bind(this),
+      messageImage:this.messageImage.bind(this),
+      get media(){return engine.media;},
+      messageSource:this.messageSource.bind(this),
+      get autonomy(){return engine.autonomy;},
+      get qqStickers(){return engine.qqStickers;},
+      prepareStickerReview:this.prepareStickerReview.bind(this),
+      serial:<T>(key:string,operation:()=>Promise<T>)=>this.serial(key,operation),
+      checkedStickerReview:this.checkedStickerReview.bind(this),
+      get stickerReviews(){return engine.stickerReviews;},
+      check:this.check.bind(this),
+      reminderBlockReason:this.reminderBlockReason.bind(this),
+      get operations(){return engine.operations;},
+      source:this.source.bind(this),
+      get groupFiles(){return engine.groupFiles;},
+      proactiveQuotas:this.proactiveQuotas.bind(this),
+      onSent:this.onSent.bind(this),
+      spaceTarget:this.spaceTarget.bind(this),
+      get qzone(){return engine.qzone;},
+      confirm:this.confirm.bind(this),
+      log:this.log.bind(this)
+    };}
+  private async perform(tool:string,a:Record<string,any>,ctx:ToolContext):Promise<unknown>{
+    if(["qq_stickers","qq_sticker_note"].includes(tool))await this.qqStickers.sync(ctx.signal);
+    const handler=this.handlers.get(tool);if(!handler)throw new Error("未知 QQ 工具");return handler(tool,a,ctx);
   }
   private async messageSource(ctx: ToolContext, id: number, type: string): Promise<string> {
     const s = (await this.message(ctx, id)).segments.find(s => s.type === type); if (!s) throw new Error('该消息没有所需媒体');
@@ -686,10 +430,5 @@ export class SocialEngine {
   }
 }
 
-export function parseShanghaiTime(text: string): number {
-  if (!/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/.test(text)) throw new Error('时间格式应为 YYYY-MM-DD HH:mm（上海时间）');
-  const value = Date.parse(text.replace(' ', 'T') + ':00+08:00');
-  if (!Number.isFinite(value) || new Date(value + 8 * 3600000).toISOString().slice(0,16).replace('T',' ') !== text) throw new Error('日期或时间无效');
-  return value;
-}
-function toFile(file: string): string { return new URL('file:///' + file.replace(/\\/g, '/').replace(/^\//, '').split('/').map((p,i) => i === 0 && p.endsWith(':') ? p : encodeURIComponent(p)).join('/')).href; }
+
+export type SocialExecutionPort=ReturnType<SocialEngine["executionPort"]>;
