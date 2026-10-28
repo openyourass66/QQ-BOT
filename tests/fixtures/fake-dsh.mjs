@@ -41,6 +41,15 @@ lines.on('line', async (line) => {
       process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id, error: { code: -32603, message: 'model not applied before prompt' } }) + '\n'); return;
     }
     let text = params.prompt.map((block) => block.text ?? '').join('');
+    if(text.includes('OPERATION_REPLAY')){
+      const server=sessionServers.get(params.sessionId).find(entry=>entry.name==='qq'),env=Object.fromEntries(server.env.map(({name,value})=>[name,value]));
+      const headers={'content-type':'application/json',authorization:`Bearer ${env.BOT_ACTION_TOKEN}`,'x-bot-conversation':env.BOT_ACTION_CONTEXT,'x-bot-operation':'a'.repeat(64)};
+      const input={action:'social',tool:'qq_reply',args:{text:'逻辑动作只发一次'}},invoke=async(body=input,operation=headers['x-bot-operation'])=>{const response=await fetch(new URL('/actions',env.BOT_ACTION_URL),{method:'POST',headers:{...headers,'x-bot-operation':operation},body:JSON.stringify(body)});return {status:response.status,body:await response.json()};};
+      const joined=await Promise.all(Array.from({length:6},()=>invoke())),changed=await invoke({...input,args:{text:'替换正文'}}),invalid=await invoke(input,'invalid'),forged=await invoke({...input,args:{...input.args,operationId:'c'.repeat(64)}},'c'.repeat(64));
+      const lost={...input,args:{text:'丢失响应'}},firstLost=await invoke(lost,'d'.repeat(64)),secondLost=await invoke(lost,'e'.repeat(64));
+      if(process.env.FAKE_OPERATION_EVENTS)appendFileSync(process.env.FAKE_OPERATION_EVENTS,JSON.stringify({joined,changed,invalid,forged,firstLost,secondLost})+'\n');
+      respond(id,{stopReason:'end_turn'});return;
+    }
     if (process.env.FAKE_GROUP_PROMPTS) {
       appendFileSync(process.env.FAKE_GROUP_PROMPTS, JSON.stringify({ sessionId: params.sessionId, text }) + '\n');
       const current = text.split('对你说：\n').at(-1).split('\n')[0];

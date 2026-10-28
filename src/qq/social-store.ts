@@ -8,6 +8,7 @@ import { StoredStickerAnalysisSchema } from './sticker-review.js';
 import { AutonomousStateSchema } from '../agent/autonomous-state.js';
 import { CognitionStateSchema, MemoryMetaSchema } from '../agent/cognition-state.js';
 import type {SocialRepository,SocialField,MessageQuery,MessageRef} from '../storage/social-repository.js';
+import {currentOperation} from '../core/operation-context.js';
 
 const segment = z.object({ type: z.string(), data: z.record(z.string(), z.unknown()) });
 const message = z.object({ chat: z.string(), id: z.number().int().safe(), user: z.number().int().safe(), name: z.string(), at: z.number(), text: z.string(), segments: z.array(segment), self: z.boolean(), recalled: z.boolean().default(false) });
@@ -103,7 +104,7 @@ export class SocialStore implements SocialRepository {
   flush(): Promise<unknown> { return this.chain; }
   async account(id: number): Promise<void> {
     if (this.data.account === id) return;
-    if (this.data.account && this.data.account !== id) throw new Error('QQ 账号与社交数据不匹配，请为新账号指定独立数据文件');
+    if (this.data.account && this.data.account !== id) throw Object.assign(new Error('QQ 账号与社交数据不匹配，请为新账号指定独立数据文件'),{code:'ACCOUNT_CHANGED'});
     await this.update(d => { d.account = id; });
   }
   async record(event: MessageEvent, days: number, perChat: number): Promise<boolean> {
@@ -142,8 +143,8 @@ export class SocialStore implements SocialRepository {
     await this.add({ chat, id, user, name, at: Date.now(), text: segmentsToText(segments), segments, self: true, recalled: false });
   }
   async beginAction(chat: string, tool: string): Promise<string> {
-    const id = randomUUID();
-    await this.update(d => { d.actions.push({ id, chat, tool, at: Date.now(), state: 'running', summary: '' }); d.actions = d.actions.slice(-2000); });
+    const id = currentOperation()?.record.id??randomUUID();
+    await this.update(d => { if(d.actions.some(action=>action.id===id))return;d.actions.push({ id, chat, tool, at: Date.now(), state: 'running', summary: '' }); d.actions = d.actions.slice(-2000); });
     return id;
   }
   async endAction(id: string, state: 'success' | 'failed' | 'unknown', summary: string): Promise<void> {

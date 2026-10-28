@@ -4,8 +4,11 @@ import { z } from 'zod';
 import { requestQqAction } from './services/action-client.js';
 import { socialTools } from './qq/social-tools.js';
 import { legacyTools } from './qq/legacy-tools.js';
+import {randomUUID} from 'node:crypto';
+import {operationDigest} from './core/operation-context.js';
 
 const server = new McpServer({ name: 'qq', version: '2.0.0' });
+const transportInstance=randomUUID();
 function result(value: unknown): { content: any[] } {
   if (value && typeof value === 'object' && Array.isArray((value as { content?: unknown }).content)) return value as { content: any[] };
   return { content: [{ type: 'text', text: typeof value === 'string' ? value : JSON.stringify(value, null, 2) }] };
@@ -15,10 +18,11 @@ if(selected!==null&&(!Array.isArray(selected)||selected.some(name=>typeof name!=
 for (const tool of [...socialTools, ...legacyTools].filter(tool=>selected===null||(selected as string[]).includes(tool.name))) {
   server.registerTool(tool.name, { title: tool.title, description: tool.description, inputSchema: tool.schema as z.ZodRawShape }, async (args, extra) => {
     try {
-      if (tool.name === 'qq_send_message') return result(await requestQqAction({ action: 'send_message', ...args } as never, extra.signal));
-      if (tool.name === 'qq_like') return result(await requestQqAction({ action: 'like', ...args } as never, extra.signal));
-      if (tool.name === 'qq_qzone_post') return result(await requestQqAction({ action: 'qzone_post', ...args } as never, extra.signal));
-      return result(await requestQqAction({ action: legacyTools.some(t => t.name === tool.name) ? 'legacy' : 'social', tool: tool.name, args }, extra.signal));
+      const operationId=operationDigest([transportInstance,String(extra.requestId)]);
+      if (tool.name === 'qq_send_message') return result(await requestQqAction({ action: 'send_message', ...args } as never, extra.signal,operationId));
+      if (tool.name === 'qq_like') return result(await requestQqAction({ action: 'like', ...args } as never, extra.signal,operationId));
+      if (tool.name === 'qq_qzone_post') return result(await requestQqAction({ action: 'qzone_post', ...args } as never, extra.signal,operationId));
+      return result(await requestQqAction({ action: legacyTools.some(t => t.name === tool.name) ? 'legacy' : 'social', tool: tool.name, args }, extra.signal,operationId));
     } catch (error) { return { isError: true, content: [{ type: 'text' as const, text: String(error) }] }; }
   });
 }

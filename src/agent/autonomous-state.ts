@@ -27,4 +27,4 @@ export const AutonomousStateSchema = z.object({
   lastScanAt:z.number().default(0),lastQzoneAttempt:z.number().default(0),
 }).prefault({});
 export type Thought = z.infer<typeof ThoughtSchema>;
-export type AutonomousTurn = {kind:Thought['kind'];thoughtId:string;effects:Set<Thought['kind']>;messages:number;reason:string;failure?:string;targetUser?:number;spacePost?:import('../services/qzone.js').SpacePost};
+export type AutonomousTurn = {kind:Thought['kind'];thoughtId:string;runId?:string;effects:Set<Thought['kind']>;messages:number;reason:string;failure?:string;targetUser?:number;spacePost?:import('../services/qzone.js').SpacePost};

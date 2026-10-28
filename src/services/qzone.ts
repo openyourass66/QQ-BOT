@@ -11,7 +11,7 @@ type Comment={id:string;user_id:number;name:string;text:string};
 export type SpacePost={id:string;user_id:number;name:string;text:string;created_at:number;url:string;images:string[];comments:Comment[]};
 type Entry={chat:string;self:number;tid:string;at:number;post:SpacePost;comments:Map<string,string>};
 type Auth={self:number;cookie:string;gtk:string};
-type Options={fetch:typeof fetch;now:()=>number;blocked:(user:number)=>boolean};
+type Options={fetch:typeof fetch;now:()=>number;blocked:(user:number)=>boolean;effect?:<T>(payload:unknown,invoke:()=>Promise<T>)=>Promise<T>};
 
 function qq(value:unknown):number {const id=Number(value);return Number.isSafeInteger(id)&&id>0?id:0;}
 function clean(value:unknown,max=4000):string {
@@ -131,7 +131,8 @@ export class QzoneService {
       const auth=await this.auth(signal,self);await beforeSend();signal.throwIfAborted();this.target(chat,self,args.post_id,args.reply_id);
       const entry=this.entries.get(args.post_id)!,body=new URLSearchParams({topicId:`${entry.post.user_id}_${entry.tid}__1`,uin:String(self),hostUin:String(entry.post.user_id),feedsType:'100',inCharset:'utf-8',outCharset:'utf-8',plat:'qzone',source:'ic',platformid:'50',format:'fs',ref:'feeds',content:text,richval:'',richtype:'',private:'0',paramstr:'1',qzreferrer:entry.post.url});
       if(args.reply_id){const target=this.target(chat,self,args.post_id,args.reply_id);body.set('commentId',entry.comments.get(args.reply_id)!);body.set('commentUin',String(target.reply!.user_id));body.set('appid','311');body.set('isSignIn','0');}
-      dispatched=true;const data=await this.request(new URL(args.reply_id?replyEndpoint:commentEndpoint),auth,signal,body);
+      const invoke=async()=>{signal.throwIfAborted();this.target(chat,self,args.post_id,args.reply_id);dispatched=true;const data=await this.request(new URL(args.reply_id?replyEndpoint:commentEndpoint),auth,signal,body);if(!nativeId(data.commentid??data.data?.commentid))throw new QzoneError('空间评论接口未返回有效编号，结果待核对');return data;};
+      const data=await (this.options.effect?this.options.effect({self,host:entry.post.user_id,tid:entry.tid,reply:args.reply_id?entry.comments.get(args.reply_id):null,text},invoke):invoke());
       this.attempts.set(digest,{at:this.options.now(),state:'sent'});
       return {commented:true,post_id:args.post_id,...(args.reply_id?{reply_id:args.reply_id}:{}),comment_id:nativeId(data.commentid??data.data?.commentid)||null,note:'QQ 空间接口已确认提交；不代表对方已阅读。'};
     }catch(error){if(dispatched){this.attempts.set(digest,{at:this.options.now(),state:'unknown'});throw new QzoneError('评论请求已提交但未能确认结果，请到 QQ 空间核对；不会自动重发。'+(error instanceof Error?error.message:''));}this.attempts.delete(digest);throw error;}

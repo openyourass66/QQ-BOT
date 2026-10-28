@@ -257,7 +257,7 @@ export class Autonomy {
         if(t.kind==='qzone-comment'){data.autonomous.lastCommentAttempt=now;data.autonomous.commentCursor++;}
         if(t.chat&&!data.autonomous.contacts.some(c=>c.chat===t.chat)){data.autonomous.contacts.push({chat:t.chat,incomingAt:referenced.find(m=>m.chat===t.chat&&m.id===t.messageId)?.at??0,proactiveAt:0,unanswered:0,attemptAt:0});data.autonomous.contacts=data.autonomous.contacts.slice(-5000);}
       });
-      const a:AutonomousTurn={kind:t.kind,thoughtId:t.id,effects:new Set(),messages:0,reason:'',...(t.targetUser?{targetUser:t.targetUser}:{})};let failure='',busy=false;
+      const a:AutonomousTurn={kind:t.kind,thoughtId:t.id,runId:randomUUID(),effects:new Set(),messages:0,reason:'',...(t.targetUser?{targetUser:t.targetUser}:{})};let failure='',busy=false;
       try {
         signal.throwIfAborted();
         if(!prepare||await prepare(t,a)) {

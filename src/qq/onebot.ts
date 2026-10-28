@@ -98,10 +98,13 @@ export interface OneBotResponse<T> {
   wording?: string;
 }
 
+export type OneBotInvocation={action:string;params:Readonly<Record<string,unknown>>;signal?:AbortSignal};
+export type OneBotInterceptor=(call:OneBotInvocation,execute:()=>Promise<unknown>)=>Promise<unknown>;
 export class OneBotHttp {
   constructor(
     private readonly baseUrl: string,
     private readonly token: string,
+    private readonly intercept?:OneBotInterceptor,
   ) {}
 
   get hasLocalMedia(): boolean {
@@ -112,13 +115,18 @@ export class OneBotHttp {
   }
 
   async call<T = unknown>(action: string, params: Record<string, unknown> = {}, signal?: AbortSignal): Promise<T> {
+    const body=JSON.stringify(params),snapshot=JSON.parse(body) as Record<string,unknown>,pending:object[]=[snapshot];
+    while(pending.length){const value=pending.pop()!;for(const child of Object.values(value))if(child&&typeof child==='object')pending.push(child);Object.freeze(value);}
+    const execute=()=>this.perform<T>(action,body,signal);return this.intercept?this.intercept({action,params:snapshot,signal},execute) as Promise<T>:execute();
+  }
+  private async perform<T>(action:string,requestBody:string,signal?:AbortSignal):Promise<T>{
     const headers: Record<string, string> = { 'content-type': 'application/json' };
     if (this.token) headers.authorization = `Bearer ${this.token}`;
 
     const response = await fetch(`${this.baseUrl}/${action}`, {
       method: 'POST',
       headers,
-      body: JSON.stringify(params),
+      body:requestBody,
       signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(15_000)]) : AbortSignal.timeout(15_000),
     });
 

@@ -46,19 +46,25 @@ export function executeOperations(request:OperationDatabaseRequest,context:Conte
       const r=request.record;if(!/^[a-zA-Z0-9:_-]{8,128}$/.test(r.id)||!r.turn||r.turn.length>256||!Number.isSafeInteger(r.account)||r.account<=0||[r.chat,r.user].some(value=>typeof value!=='string'||value.length>128)||!['message','notice','background','owner','system'].includes(r.origin)||!r.tool||r.tool.length>64||typeof r.summary!=='string'||r.summary.length>500||!request.owner||request.owner.length>128||!/^\d{4}-\d{2}-\d{2}$/.test(request.date)||!Number.isFinite(request.at)||![request.hash,request.semanticHash].every(hash=>/^[a-f0-9]{64}$/.test(hash)))throw fail('动作身份或登记参数无效。');
       const previous=db.prepare('SELECT * FROM external_operations WHERE id=?').get(r.id) as Row|undefined;
       if(previous){if(previous.hash!==request.hash)throw fail('相同动作编号不能更换身份、目标或内容。');return {claimed:false,operation:stored(previous)};}
-      if(db.prepare("SELECT 1 FROM external_operations WHERE turn=? AND semantic_hash=? AND state='unknown' LIMIT 1").get(r.turn,request.semanticHash))throw fail('本轮相同内容的动作结果待核对，不会自动再次提交。');
+      const same=db.prepare("SELECT * FROM external_operations WHERE turn=? AND semantic_hash=? AND state<>'failed' ORDER BY CASE WHEN state='completed' THEN 1 ELSE 0 END,at DESC LIMIT 1").get(r.turn,request.semanticHash) as Row|undefined;
+      if(same&&same.state!=='completed')throw fail('本轮相同内容的动作正在执行或结果待核对，不会自动再次提交。');
       prune(context,request.date);if(Number(context.meta('operations_count')??0)>=200000)throw context.error('DATABASE_STATE_LIMIT','动作数量达到支持上限，请先整理历史。');
       const metadata=json(r),bytes=Buffer.byteLength(metadata)+516;account(context,bytes);
-      db.prepare('INSERT INTO external_operations(id,owner,account,chat,turn,semantic_hash,hash,date,at,state,metadata,bytes) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)').run(r.id,request.owner,r.account,r.chat,r.turn,request.semanticHash,request.hash,request.date,request.at,'created',metadata,bytes);context.setMeta('operations_count',Number(context.meta('operations_count')??0)+1);return {claimed:true,operation:stored(requireRow(context,r.id))};
+      db.prepare('INSERT INTO external_operations(id,owner,account,chat,turn,semantic_hash,hash,date,at,state,metadata,bytes) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)').run(r.id,request.owner,r.account,r.chat,r.turn,request.semanticHash,request.hash,request.date,request.at,'created',metadata,bytes);context.setMeta('operations_count',Number(context.meta('operations_count')??0)+1);
+      if(same){patch(context,requireRow(context,r.id),'completed',same.result,'');return {claimed:false,operation:stored(requireRow(context,r.id))};}
+      return {claimed:true,operation:stored(requireRow(context,r.id))};
     }
     if(typeof request.owner!=='string'||!request.owner||request.owner.length>128)throw fail('动作执行实例无效。');const row=requireRow(context,request.id,request.owner);
     if(request.action==='usage-op-submit'){
       if(!['reserved','submitting'].includes(row.state)||!Number.isSafeInteger(request.sequence)||request.sequence<0||request.sequence>=16||!request.name||request.name.length>64||!/^[a-f0-9]{64}$/.test(request.hash)||!Number.isFinite(request.at))throw fail('动作尚未预扣、已结束或步骤超出上限，拒绝提交。');
       const prior=db.prepare('SELECT hash,state,result FROM external_steps WHERE operation_id=? AND sequence=?').get(request.id,request.sequence);if(prior){if(prior.hash!==request.hash)throw fail('动作步骤不能更换内容。');return {claimed:false,state:String(prior.state),result:JSON.parse(String(prior.result))};}
       if(Number(db.prepare('SELECT COUNT(*) AS n FROM external_steps WHERE operation_id=?').get(request.id)!.n)!==request.sequence)throw fail('动作步骤序号不连续，不能跳过尚未执行的步骤。');
-      if(db.prepare("SELECT 1 FROM external_steps s JOIN external_operations o ON o.id=s.operation_id WHERE o.turn=(SELECT turn FROM external_operations WHERE id=?) AND s.name=? AND s.hash=? AND s.state='unknown' LIMIT 1").get(request.id,request.name,request.hash))throw fail('本轮相同外部提交结果待核对，不能换工具或临时编号再次发送。');
+      const same=db.prepare("SELECT s.state,s.result FROM external_steps s JOIN external_operations o ON o.id=s.operation_id WHERE o.turn=(SELECT turn FROM external_operations WHERE id=?) AND s.name=? AND s.hash=? ORDER BY CASE WHEN s.state='completed' THEN 1 ELSE 0 END LIMIT 1").get(request.id,request.name,request.hash);
+      if(same&&same.state!=='completed')throw fail('本轮相同外部提交正在执行或结果待核对，不能换工具或临时编号再次发送。');
       if(db.prepare("SELECT 1 FROM external_steps WHERE operation_id=? AND state<>'completed' LIMIT 1").get(request.id))throw fail('前一步骤尚未确认，不能继续提交后续动作。');
-      const payload=json(request.payload),bytes=Buffer.byteLength(payload)+Buffer.byteLength(request.name)+260;account(context,bytes);db.prepare('INSERT INTO external_steps(operation_id,sequence,name,hash,at,state,payload,bytes) VALUES(?,?,?,?,?,?,?,?)').run(request.id,request.sequence,request.name,request.hash,request.at,'submitting',payload,bytes);patch(context,row,'submitting');return {claimed:true};
+      const payload=json(request.payload),result=same?String(same.result):'null',bytes=Buffer.byteLength(payload)+Buffer.byteLength(request.name)+Buffer.byteLength(result)+256;account(context,bytes);db.prepare('INSERT INTO external_steps(operation_id,sequence,name,hash,at,state,payload,result,bytes) VALUES(?,?,?,?,?,?,?,?,?)').run(request.id,request.sequence,request.name,request.hash,request.at,same?'completed':'submitting',payload,result,bytes);
+      if(same)return {claimed:false,state:'completed',result:JSON.parse(result)};
+      patch(context,row,'submitting');return {claimed:true};
     }
     if(request.action==='usage-op-step'){
       const step=db.prepare('SELECT * FROM external_steps WHERE operation_id=? AND sequence=?').get(request.id,request.sequence);if(!step)throw fail('动作步骤不存在。');

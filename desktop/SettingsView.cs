@@ -56,6 +56,7 @@ partial class App
         new FieldSpec("requests.backgroundPerDay", "额度与节奏", "服务请求额度", "每日后台服务请求量", "主动行动和后台学习共享，避免无人交互时持续请求。", "次/天", 0, 1000),
         new FieldSpec("requests.mediaPerDay", "额度与节奏", "服务请求额度", "每日独立媒体请求量", "独立看图、语音识别和语音合成共享；图片随当前对话模型发送时不重复计次。", "次/天", 0, 1000),
         new FieldSpec("requests.nativeWebPerDay", "额度与节奏", "服务请求额度", "每日原生联网调用量", "搜索与网页读取共享；同时受服务总量和每轮工具上限限制。", "次/天", 0, 1000),
+        new FieldSpec("requests.noticesPerDay", "额度与节奏", "QQ 通知额度", "每日确认与忙碌通知量", "授权请求、授权结果和忙碌提示共享；同时占用 QQ 动作总量。", "次/天", 0, 1000),
         new FieldSpec("requests.perMinute", "额度与节奏", "请求节奏与大小", "每分钟服务请求量", "按最近一分钟统计，限制突发请求。", "次", 1, 1000),
         new FieldSpec("requests.perTurn", "额度与节奏", "请求节奏与大小", "每轮服务请求量", "包含模型续答、重试及压缩；工具调用另受共享工具上限限制。", "次", 1, 100),
         new FieldSpec("requests.concurrent", "额度与节奏", "请求节奏与大小", "同时执行的服务请求量", "所有会话、后台任务和媒体服务共享。", "个", 1, 16),
@@ -337,7 +338,7 @@ partial class App
         if(!IsSqliteNotice("(node:123) ExperimentalWarning: SQLite is an experimental feature and might change at any time")||IsSqliteNotice("Error: SQLite database is corrupt"))throw new Exception("SQLite 提示与实际错误未正确区分");
         if(logs.Any(line=>line.Contains("控制进程异常")))throw new Exception("启动时控制进程报告异常");
         string before=json.Serialize(Collect(settings,""));
-        var requestPaths=new[]{"perDay","perUserPerDay","perChatPerDay","backgroundPerDay","perMinute","perTurn","concurrent","maxOutputTokens","maxRequestKiB","maxResponseChars","mediaPerDay","nativeWebPerDay"};
+        var requestPaths=new[]{"perDay","perUserPerDay","perChatPerDay","backgroundPerDay","perMinute","perTurn","concurrent","maxOutputTokens","maxRequestKiB","maxResponseChars","mediaPerDay","nativeWebPerDay","noticesPerDay"};
         foreach(var requestPath in requestPaths)if(!fieldViews.ContainsKey("requests."+requestPath)||fieldViews["requests."+requestPath].Spec.Category!="额度与节奏")throw new Exception("服务预算设置缺失或分类错误："+requestPath);
         var mode=(ComboBox)fields["social.responseMode"];object originalMode=mode.SelectedValue;
         var number=(TextBox)fields["social.responseProbability"];string originalNumber=number.Text;

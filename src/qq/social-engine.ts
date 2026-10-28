@@ -21,6 +21,7 @@ import { learningModel } from '../agent/learning-model.js';
 import { turnBudget, toolAvailable, toolEnabled } from '../agent/context-policy.js';
 import { QzoneService, type SpacePost } from '../services/qzone.js';
 import type {PrepareServiceRequest} from '../agent/service-request.js';
+import type {QqOperationService} from '../app/qq-operation-service.js';
 
 export class SocialEngine {
   private sending = new Map<string, Promise<unknown>>();
@@ -40,10 +41,10 @@ export class SocialEngine {
     private readonly usage: DailyUsageStore, private readonly settings: () => BotSettings,
     private readonly confirm: (title: string, signal: AbortSignal) => Promise<boolean>,
     private readonly onSent: (chat: string, id: number, segments: Segment[], source?: string) => void,
-    private readonly log: (text: string) => void, qzone?:QzoneService,requests?:PrepareServiceRequest) {
+    private readonly log: (text: string) => void, qzone?:QzoneService,requests?:PrepareServiceRequest,private operations?:QqOperationService) {
       this.qqStickers=new QqStickers(store,media,api);this.autonomy=new Autonomy(store,settings,usage,undefined,media);
       const model=learningModel(process.env,requests);this.cognition=new Cognition(store,settings,usage,model.analyze,model.available,Date.now,model.prepare);
-      this.qzone=qzone??new QzoneService(api,{blocked:user=>settings().social.blockedUsers.includes(String(user))});
+      this.qzone=qzone??new QzoneService(api,{blocked:user=>settings().social.blockedUsers.includes(String(user)),...(operations?{effect:<T>(payload:unknown,invoke:()=>Promise<T>)=>operations.effect('qzone_comment',payload,invoke)}:{})});
     }
   guardTool(ctx:ToolContext,name:string):void {
     ctx.budget??=turnBudget();
@@ -135,6 +136,10 @@ export class SocialEngine {
     return next;
   }
   async send(ctx: ToolContext, segments: Segment[], target = ctx.chat, proactive = false, onDispatch: () => void = () => {}): Promise<unknown> {
+    if(this.operations)return this.operations.run(ctx,ctx.reminder?'reminder':'normal_reply',{target,segments,proactive},ctx.reminder?'发送提醒':'发送会话回复',()=>{this.check(ctx,target);this.autonomy.authorize(ctx,'qq_reply');},()=>this.sendRegistered(ctx,segments,target,proactive,onDispatch));
+    return this.sendRegistered(ctx,segments,target,proactive,onDispatch);
+  }
+  private async sendRegistered(ctx:ToolContext,segments:Segment[],target:string,proactive:boolean,onDispatch:()=>void):Promise<unknown>{
     return this.serial(target, async () => {
       this.autonomy.authorize(ctx,'qq_reply');
       if (ctx.reminder) { const blocked = this.reminderBlockReason(ctx); if (blocked) throw new Error(blocked); }
@@ -179,17 +184,8 @@ export class SocialEngine {
     this.guardTool(ctx,call.tool);
     this.autonomy.authorize(ctx,call.tool);
     assertAccountTool(ctx, this.settings().approval.adminQq, call.tool);
-    const tool = socialTools.find(t => t.name === call.tool);
-    if (!tool) throw new Error('未知 QQ 工具');
-    const args = z.object(tool.schema as z.ZodRawShape).strict().parse(call.args) as Record<string, any>;
+    const {tool,args,mutates}=this.describe(input);
     assertToolAccess(ctx,this.settings(),call.tool,args);
-    const reads = new Set(['qq_capabilities', 'qq_recent_messages', 'qq_message', 'qq_read_forward', 'qq_active_members', 'qq_chats', 'qq_images', 'qq_stickers', 'qq_sticker_image', 'qq_memory_query', 'qq_reminders', 'qq_events', 'qq_transcribe', 'qq_video', 'qq_file', 'qq_event_file', 'qq_group_files', 'qq_qzone_feed', 'qq_finish', 'qq_report']);
-    reads.add('qq_self_state');
-    const collectPreview = call.tool === 'qq_collect_sticker' && !args.analysis_token;
-    const sendSticker = call.tool === 'qq_send_sticker' ? this.store.view('stickers').stickers.find(s => s.id === args.sticker_id) : undefined;
-    if (sendSticker?.analysis?.confidence === 'low') throw new Error('这张表情含义尚不确定，请结合上下文重新看图分析，或选择其他已理解的表情');
-    const sendPreview = call.tool === 'qq_send_sticker' && !sendSticker?.analysis;
-    const mutates = !reads.has(call.tool) && !['qq_group_file','qq_actions'].includes(call.tool) && !(call.tool === 'qq_send_image' && args.preview) && !collectPreview && !sendPreview;
     const actionId = mutates ? await this.store.beginAction(ctx.chat, call.tool) : undefined;
     const previousAuthorization=ctx.authorize;
     ctx.authorize=()=>{previousAuthorization?.();assertToolAccess(ctx,this.settings(),call.tool,args);if(!toolEnabled(call.tool,this.settings()))throw new Error('该工具已关闭或依赖尚未就绪');};
@@ -202,6 +198,18 @@ export class SocialEngine {
       if (actionId) await this.store.endAction(actionId, 'unknown', String(e));
       throw e;
     } finally {ctx.authorize=previousAuthorization;}
+  }
+  describe(input:unknown){
+    const call=SocialCallSchema.parse(input),tool=socialTools.find(tool=>tool.name===call.tool);if(!tool)throw new Error('未知 QQ 工具');
+    const args=z.object(tool.schema as z.ZodRawShape).strict().parse(call.args) as Record<string,any>;
+    const reads = new Set(['qq_capabilities', 'qq_recent_messages', 'qq_message', 'qq_read_forward', 'qq_active_members', 'qq_chats', 'qq_images', 'qq_stickers', 'qq_sticker_image', 'qq_memory_query', 'qq_reminders', 'qq_events', 'qq_transcribe', 'qq_video', 'qq_file', 'qq_event_file', 'qq_group_files', 'qq_qzone_feed', 'qq_finish', 'qq_report']);
+    reads.add('qq_self_state');
+    const collectPreview = call.tool === 'qq_collect_sticker' && !args.analysis_token;
+    const sendSticker = call.tool === 'qq_send_sticker' ? this.store.view('stickers').stickers.find(s => s.id === args.sticker_id) : undefined;
+    if (sendSticker?.analysis?.confidence === 'low') throw new Error('这张表情含义尚不确定，请结合上下文重新看图分析，或选择其他已理解的表情');
+    const sendPreview = call.tool === 'qq_send_sticker' && !sendSticker?.analysis;
+    const mutates = !reads.has(call.tool) && !['qq_group_file','qq_actions'].includes(call.tool) && !(call.tool === 'qq_send_image' && args.preview) && !collectPreview && !sendPreview;
+    return {call,tool,args,mutates};
   }
   private async perform(tool: string, a: Record<string, any>, ctx: ToolContext): Promise<unknown> {
     if(['qq_stickers','qq_sticker_note'].includes(tool)) { this.feature('stickersEnabled');await this.qqStickers.sync(ctx.signal); }
@@ -391,7 +399,7 @@ export class SocialEngine {
           (e.chat === ctx.chat || ownerInbox && e.type.startsWith('request:') && allowedChat(this.settings().social, e.chat)) &&
           (!e.type.startsWith('request:')||isAccountOwner(ctx,this.settings().approval.adminQq))&&(!a.pending_only || !e.handled)).slice(-50).map(e=>({...e,data:Object.fromEntries(Object.entries(e.data).filter(([key])=>!['flag','token','cookie'].includes(key.toLowerCase())))}));
       }
-      case 'qq_actions': return this.store.view('actions').actions.filter(action => action.chat === ctx.chat).slice(-30);
+      case 'qq_actions': {const current=this.operations?await this.operations.actions(ctx.self,ctx.chat):[],ids=new Set(current.map(row=>row.id));return [...current,...this.store.view('actions').actions.filter(action=>action.chat===ctx.chat&&!ids.has(action.id)).slice(-30).reverse()].sort((a,b)=>b.at-a.at).slice(0,30);}
       case 'qq_handle_request': {
         this.feature('requestsEnabled');
         const ownerInbox = isAccountOwner(ctx, this.settings().approval.adminQq) && ctx.chat === `private:${ctx.user}`;
@@ -662,6 +670,7 @@ export class SocialEngine {
       return;
     }
     const claimed=await this.store.claimTask(task.id,Date.now());if(!claimed)return;task=claimed;const claimId=task.claim!.id,now=Date.now();
+    ctx.operationKey='reminder:'+claimId;
     if(task.interval&&now-task.due>task.interval){await this.store.finishTask(task.id,claimId,{state:'pending',error:'停机或睡眠期间已错过提醒，已跳过积压时段并安排下次。',retryAt:0,due:now+task.interval});return;}
     if(!task.interval&&now-task.due>86400000){await this.store.finishTask(task.id,claimId,{state:'failed',error:'一次性提醒已迟到超过二十四小时，未补发；请核对后重新安排。',retryAt:0});return;}
     let dispatched = false;

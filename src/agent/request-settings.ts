@@ -12,4 +12,5 @@ export const RequestSettingsSchema=z.object({
   maxResponseChars:z.number().int().min(1000).max(128000).default(32000),
   mediaPerDay:z.number().int().min(0).max(1000).default(60),
   nativeWebPerDay:z.number().int().min(0).max(1000).default(100),
+  noticesPerDay:z.number().int().min(0).max(1000).default(40),
 }).prefault({});

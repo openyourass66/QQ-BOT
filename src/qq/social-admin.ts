@@ -94,6 +94,9 @@ export async function socialAdmin(input: unknown, store: SocialRepository, media
   type Row = { id: string; chat: string; name: string; summary: string; status: string; time: string; detail: string; text: string };
   const date = (at: number) => at ? new Date(at).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false }) : '';
   const rows: Row[] = [];
+  const usage = live?.usage ?? offlineUsage;
+  const operationUsage=usage as (DailyUsageStore&Partial<Pick<SqliteDailyUsageStore,'operationSummaries'>>)|undefined;
+  const operations=a.section==='actions'?await operationUsage?.operationSummaries?.(store.view('account').account,a.chat||undefined):undefined;
   const add = (id: string, chat: string, name: string, summary: string, status: string, at: number, detail = summary, text = '') => {
     if (a.op === 'list' && a.chat && chat !== a.chat) return;
     if (a.query && !`${name} ${summary} ${chat} ${['memories','stickers'].includes(a.section) ? detail : ''}`.toLowerCase().includes(a.query.toLowerCase())) return;
@@ -134,11 +137,14 @@ export async function socialAdmin(input: unknown, store: SocialRepository, media
     } break;
     case 'tasks': for (const t of [...data.tasks].reverse()) add(t.id,t.chat,t.text,t.error || t.text,{ pending:'等待执行',blocked:'等待条件恢复',running:'执行中',sent:'已发送',failed:'失败',unknown:'结果待核对',cancelled:'已取消' }[t.state],t.due,`${t.text}\n${t.error || ''}\n${t.interval ? `每 ${t.interval/60000} 分钟` : '一次性'}`); break;
     case 'events': for (const e of [...data.events].reverse()) add(e.id,e.chat,e.type,String(e.data.comment ?? e.data.sub_type ?? ''),e.handled ? '已处理' : '已记录',e.at,JSON.stringify(e.data,null,2)); break;
-    case 'actions': for (const t of [...data.actions].reverse()) {
+    case 'actions': {
+      const authoritative=operations?.rows.map(({record,state,at,error})=>({id:record.id,chat:record.chat,tool:record.tool,at,summary:error||record.summary,state:state==='completed'?'success':['created','reserved','submitting'].includes(state)?'running':state}))??[],ids=new Set(authoritative.map(row=>row.id));
+      for (const t of [...authoritative,...[...data.actions].reverse().filter(row=>!ids.has(row.id))].sort((a,b)=>b.at-a.at)) {
       const alias: Record<string,string> = { send_message:'qq_send_message', like:'qq_like', qzone_post:'qq_qzone_post' };
-      const title = [...socialTools,...legacyTools].find(tool => tool.name === (alias[t.tool] ?? t.tool))?.title ?? t.tool;
-      add(t.id,t.chat,title,t.summary,{ running:'执行中',success:'成功',failed:'失败',unknown:'结果待核对' }[t.state],t.at);
-    } break;
+      const titles:Record<string,string>={normal_reply:'会话回复',reminder:'发送提醒',system_notice:'确认与忙碌通知',owner_sticker_collect:'手动收藏表情',owner_sticker_remove:'手动移除收藏'};
+      const title = [...socialTools,...legacyTools].find(tool => tool.name === (alias[t.tool] ?? t.tool))?.title ?? titles[t.tool]??t.tool;
+      add(t.id,t.chat,title,t.summary,({ running:'执行中',success:'成功',failed:'失败',unknown:'结果待核对' } as Record<string,string>)[t.state],t.at);
+    } break;}
     case 'turns': for (const t of [...data.turns].reverse()) add(t.id,t.chat,`${Math.round(t.duration/1000)} 秒`,t.output || t.error,t.error ? '失败' : '完成',t.at,`输入：\n${t.input}\n\n输出：\n${t.output}\n\n工具：${t.tools.join('、')}\n${t.error}\n\n用量：${t.inputTokens === null ? 'DSH 未提供计费用量' : t.inputTokens + ' 输入 / ' + t.outputTokens + ' 输出'}\n上下文：${t.contextSize?`${t.contextUsed}/${t.contextSize}（DSH 上报占用，非计费累计）`:'DSH 未上报'}\n会话代数：${t.generation??1}`); break;
     case 'capabilities': {
       const names: Record<string,string> = { images:'图片理解',transcription:'语音识别',speech:'语音合成',video:'视频理解',search:'联网搜索',qzone:'空间动态' };
@@ -150,13 +156,13 @@ export async function socialAdmin(input: unknown, store: SocialRepository, media
   }
   const note=a.section==='stickers'?`${live?.stickers?'已读取 QQ 收藏':'离线缓存，启动机器人后可刷新 QQ 收藏'} · QQ 收藏 ${data.stickers.filter(t=>t.qqPresent).length} 张；本地待同步 ${data.stickers.filter(t=>!t.qq).length} 张。` : rows.length?`显示前 ${Math.min(200,rows.length)} 条；时间为上海时间。`:'暂无记录。启动机器人后接收消息，或刷新联系人。';
   if(a.section==='memories'&&a.op==='edit_memory') {const selected=rows.findIndex(row=>row.id===a.id);if(selected>0)rows.unshift(rows.splice(selected,1)[0]);}
-  const usage = live?.usage ?? offlineUsage;
   const quotas = usage?.summary([
     {key:'service-requests',label:'模型与能力请求',limit:s.requests.perDay},
     {key:'service-background',label:'后台服务请求',limit:s.requests.backgroundPerDay},
     {key:'service-media',label:'独立媒体服务',limit:s.requests.mediaPerDay},
     {key:'native-web',label:'原生联网',limit:s.requests.nativeWebPerDay},
     {key:'social-actions',label:'QQ 动作',limit:s.social.actionsPerDay},
+    {key:'system-notices',label:'确认与忙碌通知',limit:s.requests.noticesPerDay},
     {key:'proactive',label:'主动消息',limit:s.budgets.proactiveMessagesPerDay},
     {key:'reminders',label:'定时提醒',limit:s.budgets.remindersPerDay},
     {key:'likes',label:'名片点赞',limit:s.budgets.likesPerDay},

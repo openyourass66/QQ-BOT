@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 import * as acp from '@agentclientprotocol/sdk';
 import { config } from './core/config.js';
 import { recall } from './agent/cognition.js';
-import { clipBackground, readContextUsage, toolAvailable, turnBudget } from './agent/context-policy.js';
+import { clipBackground, readContextUsage, toolAvailable, toolEnabled, turnBudget } from './agent/context-policy.js';
 import { socialTools } from './qq/social-tools.js';
 import {
   OneBotHttp,
@@ -47,8 +47,9 @@ import { IngressBudget, type IngressLease } from './core/ingress.js';
 import {RequestBudget,ModelBudgetError} from './agent/request-budget.js';
 import {startModelBudgetServer} from './services/model-budget-server.js';
 import {withServiceRequestScope,serviceRequestScope,type ServiceRequest,type PreparedServiceRequest} from './agent/service-request.js';
+import {QqOperationService} from './app/qq-operation-service.js';
 
-const api = new OneBotHttp(config.onebot.httpUrl, config.onebot.token);
+const api:OneBotHttp = new OneBotHttp(config.onebot.httpUrl, config.onebot.token,(call,execute)=>operations.intercept(call,execute));
 const paths = dataPaths();
 const sessionStorePath = paths.sessions;
 const store = new SqliteSessionStore(sessionStorePath);
@@ -60,6 +61,7 @@ const socialStore:SocialRepository = new SqliteSocialStore(paths.social,{onMigra
 socialStore.onFailure=error=>{if(!stopping){reportFatal(error);void shutdown(1);}};
 const media = new MediaService(paths.media, () => getSettings().social,prepareServiceRequest);
 const shutdownSignal = new AbortController();
+const operations:QqOperationService=new QqOperationService(usage,socialStore,{settings:getSettings,account:()=>selfId,readAccount:async signal=>Number((await api.call<{user_id:number}>('get_login_info',{},signal)).user_id),stopping:()=>stopping,fatal:error=>{if(!stopping){reportFatal(error);void shutdown(1);}}});
 const activeConversations = new Map<string, ToolContext>();
 const activeTopics = new Map<string, { topic: string; until: number }>();
 type PendingBatch = { latest: number; direct: boolean; bytes: number; releases: Array<() => void>; parts: Array<{ id: number; user: number; name: string; body: string }> };
@@ -74,7 +76,7 @@ const ingress = new IngressBudget({
 const engine = new SocialEngine(socialStore, media, api, usage, getSettings, askAdmin, (chat, id, segments, source) => {
   status.messagesOut++;
   if (chat.startsWith('group:') && id) rememberBotReply(Number(chat.split(':')[1]), id, segmentsToText(segments), source === chat);
-}, text => log('info', text),undefined,prepareServiceRequest);
+}, text => log('info', text),undefined,prepareServiceRequest,operations);
 let scheduler: NodeJS.Timeout | undefined;
 
 const conversations=new ConversationService({store,settings:getSettings,context:()=>acpCtx,cwd:config.dsh.workspace,model:config.chatModel,servers:qqMcpServers,policy:toolPolicy,history:conversationHistory,isBusy:key=>activeConversations.has(key)||queue.has(key),log,fatal:error=>{if(!stopping){reportFatal(error);void shutdown(1);}},onEvict:key=>activeTopics.delete(key),onChange:size=>{status.sessions=size;}});
@@ -288,12 +290,8 @@ function askAdmin(title: string, signal?: AbortSignal): Promise<boolean> {
     const timer = setTimeout(() => finish(false), settings.approval.timeoutMs);
     signal?.addEventListener('abort', cancel, { once: true });
     pendingApprovals.set(id, finish);
-    void api
-      .sendPrivate(
-        settings.approval.adminQq,
-        `【授权请求 #${id}】\n${title}\n\n回复 y ${id} 允许 / n ${id} 拒绝`,
-      )
-      .catch(() => finish(false));
+    const text=`【授权请求 #${id}】\n${title}\n\n回复 y ${id} 允许 / n ${id} 拒绝`,noticeSignal=signal??shutdownSignal.signal;
+    void operations.notice(`private:${settings.approval.adminQq}`,text,'approval',noticeSignal,()=>api.sendPrivate(settings.approval.adminQq,text,noticeSignal)).catch(()=>finish(false));
   });
 }
 
@@ -309,13 +307,13 @@ function handleAdminReply(event: MessageEvent, text: string): boolean {
   const id = match.id ?? (pendingApprovals.size === 1 ? pendingApprovals.keys().next().value : undefined);
   const resolve = id ? pendingApprovals.get(id) : undefined;
   if (!resolve) {
-    void api.sendPrivate(event.user_id, '请带有效的授权编号回复，例如 y a1b2c3').catch(() => undefined);
+    const hint='请带有效的授权编号回复，例如 y a1b2c3';
+    void operations.notice(`private:${event.user_id}`,hint,'approval-help',shutdownSignal.signal,()=>api.sendPrivate(event.user_id,hint,shutdownSignal.signal),{account:event.self_id,user:event.user_id,time:event.time,id:event.message_id}).catch(()=>undefined);
     return true;
   }
   resolve(approved);
-  void api
-    .sendPrivate(event.user_id, approved ? `已允许 #${id}` : `已拒绝 #${id}`)
-    .catch(() => undefined);
+  const hint=approved?`已允许 #${id}`:`已拒绝 #${id}`;
+  void operations.notice(`private:${event.user_id}`,hint,'approval-help',shutdownSignal.signal,()=>api.sendPrivate(event.user_id,hint,shutdownSignal.signal),{account:event.self_id,user:event.user_id,time:event.time,id:event.message_id}).catch(()=>undefined);
   return true;
 }
 
@@ -405,12 +403,14 @@ function remember(event: MessageEvent, text: string): number {
 async function reply(event: MessageEvent, text: string): Promise<void> {
   const delay = getSettings().chat.delay;
   const chunks = splitForQq(text, delay.chunkSize);
+  let sequence=0;
   for (const [index, chunk] of chunks.entries()) {
     await sleep(index === 0 ? rand(delay.minMs, delay.maxMs) : rand(350, 900));
     const current = activeConversations.get(keyOf(event));
-    const ctx: ToolContext = { chat: keyOf(event), self: event.self_id, user: event.user_id, origin: 'message', silent: false, ...current, sent: 0, signal: shutdownSignal.signal };
+    if(current)operations.key(current);
+    const ctx: ToolContext = { chat: keyOf(event), self: event.self_id, user: event.user_id, origin: 'message', silent: false,messageId:event.message_id,sourceTime:event.time, ...current,operationSequence:Math.max(sequence,current?.operationSequence??0), sent: 0, signal: shutdownSignal.signal };
     try { await engine.normalReply(ctx, chunk); }
-    finally { if (current) { current.sent += ctx.sent; current.silent ||= ctx.silent; } }
+    finally {sequence=ctx.operationSequence??sequence;if (current) { current.operationSequence=sequence;current.sent += ctx.sent; current.silent ||= ctx.silent; } }
   }
 }
 
@@ -505,7 +505,7 @@ async function onMessage(event: MessageEvent): Promise<void> {
 
     await queue.run(key, async () => {
       if (stopping || !allowedChat(getSettings().social, key, event.user_id)) return;
-      const turn: ToolContext = { chat: key, self: event.self_id, user: event.user_id, origin: 'message', signal: shutdownSignal.signal, sent: 0, silent: false, pendingStickerCollections: new Set(), pendingStickerSends: new Set(),budget:turnBudget(),messageId:event.message_id };
+      const turn: ToolContext = { chat: key, self: event.self_id, user: event.user_id, origin: 'message', signal: shutdownSignal.signal, sent: 0, silent: false, pendingStickerCollections: new Set(), pendingStickerSends: new Set(),budget:turnBudget(),messageId:event.message_id,sourceTime:event.time };
       activeConversations.set(key, turn);
       if (event.message_type === 'group') activeGroupTurns.set(event.group_id!, { seq, userId: event.user_id });
       try {
@@ -556,8 +556,8 @@ async function reportBusy(event: MessageEvent, direct: boolean, stage: 'ingress'
   if (lastBusyNotice.size > 1000) lastBusyNotice.delete(lastBusyNotice.keys().next().value!);
   busyNotices++;
   try {
-    if (event.message_type === 'group') await api.sendGroup(event.group_id!, '消息有点多，这条还没接上，稍后再 @ 我一下。', shutdownSignal.signal);
-    else await api.sendPrivate(event.user_id, '（消息有点多，这条还没接上，稍后再发给我吧。）', shutdownSignal.signal);
+    const text=event.message_type==='group'?'消息有点多，这条还没接上，稍后再 @ 我一下。':'（消息有点多，这条还没接上，稍后再发给我吧。）';
+    await operations.notice(key,text,'busy',shutdownSignal.signal,()=>event.message_type==='group'?api.sendGroup(event.group_id!,text,shutdownSignal.signal):api.sendPrivate(event.user_id,text,shutdownSignal.signal),{account:event.self_id,user:event.user_id,time:event.time,id:event.message_id});
     status.messagesOut++;
   } catch { /* Busy notifications are best effort and never enter the model queue. */ }
   finally { busyNotices--; }
@@ -733,15 +733,28 @@ async function main(): Promise<void> {
   const policy = new QqActionPolicy(api, usage, getSettings, askAdmin, () => {
     status.messagesOut += 1;
   });
-  actionServer = await startActionServer(async (input, signal, conversation) => {
+  actionServer = await startActionServer(async (input, signal, conversation,operationId) => {
     if (stopping) return Promise.reject(new Error('桥接正在退出'));
     const turnSignal = conversation ? turnSignals.get(conversation) : undefined;
     if (!turnSignal) return Promise.reject(new Error('该会话没有正在执行的模型轮次'));
     const key = [...sessionContexts].find(([, value]) => value === conversation)?.[0];
     const active = key ? activeConversations.get(key) : undefined;
     if (!active) throw new Error('当前会话上下文不存在');
+    if(!operationId)throw new Error('动作请求缺少可信编号');
+    operations.key(active);
       const callCtx: ToolContext = { ...active, sent: 0, signal: AbortSignal.any([signal, turnSignal]),budget:active.budget??(active.budget=turnBudget()) };
     try {
+      const action=(input as {action?:string})?.action;
+      const social=action==='social'?engine.describe(input):undefined;
+      const legacy=action==='legacy'?LegacyCallSchema.parse(input):undefined;
+      const plain=!social&&!legacy?QqActionSchema.parse(input):undefined;
+      const name=social?.call.tool??legacy?.tool??({send_message:'qq_send_message',like:'qq_like',qzone_post:'qq_qzone_post'} as const)[plain!.action];
+      const legacyDefinition=legacy?legacyTools.find(t=>t.name===legacy.tool):undefined;
+      if(legacy&&!legacyDefinition)throw new Error('未知 QQ 工具');
+      const args=social?.args??(legacy?z.object(legacyDefinition!.schema as z.ZodRawShape).strict().parse(legacy.args):plain);
+      const mutates=social?.mutates??(legacy?!['qq_self_info','qq_get_friend_list','qq_get_group_list','qq_get_group_member_list','qq_get_cookies'].includes(name):true);
+      const authorize=()=>{engine.check(callCtx);assertToolAccess(callCtx,getSettings(),name,args);engine.autonomy.authorize(callCtx,plain?.action??name);if(social&&!toolEnabled(name,getSettings()))throw new Error('该工具已关闭或依赖尚未就绪');callCtx.authorize?.();};
+      const dispatch=async()=>{
       if ((input as { action?: string })?.action === 'social') return await withServiceRequestScope({sessionId:key?sessions.peek(key)?.sessionId:undefined,chat:callCtx.chat,user:String(callCtx.user),background:callCtx.origin!=='message',signal:callCtx.signal,allowed:()=>{callCtx.authorize?.();if(callCtx.autonomous){engine.autonomy.authorize(callCtx,'qq_self_state');return true;}return allowedChat(getSettings().social,callCtx.chat,callCtx.user);}},()=>engine.execute(input, callCtx));
       if ((input as { action?: string })?.action === 'legacy') {
         const call = LegacyCallSchema.parse(input);
@@ -770,6 +783,8 @@ async function main(): Promise<void> {
         await socialStore.endAction(audit, 'success', '已完成');
       } catch (e) { await socialStore.endAction(audit, 'unknown', String(e)); throw e; }
       return result;
+      };
+      return await (mutates?operations.run(callCtx,name,{action,tool:name,args},social?.tool.title??legacyDefinition?.title??name,authorize,dispatch,operationId):dispatch());
     } finally {
       active.sent += callCtx.sent;
       active.silent ||= callCtx.silent;
@@ -790,7 +805,7 @@ async function main(): Promise<void> {
     url: config.onebot.wsUrl,
     token: config.onebot.token,
     onEvent: (event) => {
-      void onMessage(event).catch((error) => {status.lastError=String(error);log('error', `[message] ${String(error)}`);});
+      void onMessage(event).catch((error) => {status.lastError=String(error);log('error', `[message] ${String(error)}`);if(error?.code==='ACCOUNT_CHANGED'&&!stopping){reportFatal(error);void shutdown(1);}});
     },
     onNotice: event => { void onNotice(event).catch(e => log('error', `[notice] ${String(e)}`)); },
     onState: (connected) => {
@@ -804,7 +819,7 @@ async function main(): Promise<void> {
           throw new Error('无效的登录信息');
         }
         selfId = info.user_id;
-        void socialStore.account(info.user_id).catch(e => { log('error', String(e)); void shutdown(1); });
+        void socialStore.account(info.user_id).catch(e => { log('error', String(e));reportFatal(e);void shutdown(1); });
         status.selfId = info.user_id;
         status.nickname = info.nickname;
         if (revision === heartbeatRevision) status.qqOnline = true;
@@ -856,7 +871,7 @@ async function shutdown(code = 0): Promise<void> {
   };
   try {
     await withTimeout((async () => {
-      await Promise.all([actionServer?.close(), budgetServer?.close(), stopChild(), queue.drain(), ingress.drain()]);
+      await Promise.all([actionServer?.close(), budgetServer?.close(), operations.close(),stopChild(), queue.drain(), ingress.drain()]);
       await engine.cognition.flush();
       await Promise.all([usage.flush(), store.flush(), groupContext.flush(), socialStore.flush(), flushSettings()]);
       await Promise.all([socialStore.close?.(),usage.close(),store.close(),groupContext.close()]);
@@ -883,7 +898,7 @@ process.on('message', (message) => {
       usage,
       review:async chat=>{if(queue.size>0)throw new Error('机器人正在聊天，请稍后再整理');await engine.cognition.review(chat,shutdownSignal.signal);},
       refresh: () => engine.contacts(shutdownSignal.signal, true),
-      stickers: {sync:()=>engine.qqStickers.sync(shutdownSignal.signal),collect:id=>engine.qqStickers.collectLegacy(id,shutdownSignal.signal),remove:id=>engine.qqStickers.remove(id,shutdownSignal.signal)},
+      stickers: {sync:()=>engine.qqStickers.sync(shutdownSignal.signal),collect:id=>operations.owner('owner_sticker_collect',{id},shutdownSignal.signal,()=>engine.qqStickers.collectLegacy(id,shutdownSignal.signal)),remove:id=>operations.owner('owner_sticker_remove',{id},shutdownSignal.signal,()=>engine.qqStickers.remove(id,shutdownSignal.signal))},
       reset: async chat => {
         if (queue.has(chat)) throw new Error('该会话正在处理消息，请稍后重置');
         await conversations.reset(chat);activeTopics.delete(chat);
