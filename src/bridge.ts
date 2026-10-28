@@ -15,12 +15,12 @@ import {
   segmentsToText,
   type MessageEvent,
 } from './qq/onebot.js';
-import { SessionStore } from './core/store.js';
+import {SqliteSessionStore,SqliteGroupContextStore} from './storage/sqlite-runtime-stores.js';
 import { getSettings, loadSettings, watchSettings, flushSettings, type BotSettings } from './core/settings.js';
 import { log, status,registerRuntimeSecret,redactRuntimeText } from './core/state.js';
 import { ConversationQueue, QueueFullError, withTimeout } from './core/runtime.js';
 import { RecentMessages, splitForQq } from './core/message-utils.js';
-import { GroupContextStore, groupTrigger, formatGroupEntry } from './qq/group-context.js';
+import { groupTrigger, formatGroupEntry } from './qq/group-context.js';
 import { parseApprovalReply, permissionOutcome } from './core/permissions.js';
 import { assertToolAccess, toolAccessVisible, approvalBinding } from './security/tool-policy.js';
 import { nativeToolDenial } from './security/dsh-policy.js';
@@ -50,9 +50,9 @@ import {withServiceRequestScope,serviceRequestScope,type ServiceRequest,type Pre
 const api = new OneBotHttp(config.onebot.httpUrl, config.onebot.token);
 const paths = dataPaths();
 const sessionStorePath = paths.sessions;
-const store = new SessionStore(sessionStorePath);
-const groupContext = new GroupContextStore(paths.groupContext, Date.now,
-  (error) => log('error', `[context] 保存失败：${String(error)}`));
+const store = new SqliteSessionStore(sessionStorePath);
+const groupContext = new SqliteGroupContextStore(paths.groupContext);
+for(const runtimeStore of [store,groupContext])runtimeStore.onFailure=error=>{if(!stopping){reportFatal(error);void shutdown(1);}};
 const usage = new SqliteDailyUsageStore(paths.usage);
 usage.onFailure=error=>{if(!stopping){reportFatal(error);void shutdown(1);}};
 const socialStore:SocialRepository = new SqliteSocialStore(paths.social,{onMigrationProgress:({stage,completed,total})=>log('info',`[storage] ${stage} ${completed}/${total}`)});
@@ -926,7 +926,7 @@ async function shutdown(code = 0): Promise<void> {
       await Promise.all([actionServer?.close(), budgetServer?.close(), stopChild(), queue.drain(), ingress.drain()]);
       await engine.cognition.flush();
       await Promise.all([usage.flush(), store.flush(), groupContext.flush(), socialStore.flush(), flushSettings()]);
-      await Promise.all([socialStore.close?.(),usage.close()]);
+      await Promise.all([socialStore.close?.(),usage.close(),store.close(),groupContext.close()]);
     })(), 5000);
   } catch (error) {
     log('error', `[shutdown] ${String(error)}`);

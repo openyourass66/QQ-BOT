@@ -5,7 +5,7 @@ import type { MessageEvent } from './onebot.js';
 import { segmentsToText, stripMention } from './onebot.js';
 import type { BotSettings } from '../core/settings.js';
 
-const EntrySchema = z.object({
+export const GroupContextEntrySchema = z.object({
   seq: z.number().int().positive().safe(),
   messageId: z.number().int().safe(),
   userId: z.number().int().nonnegative().safe(),
@@ -16,27 +16,28 @@ const EntrySchema = z.object({
   replyTo: z.number().int().positive().safe().optional(),
   targetUserId: z.number().int().positive().safe().optional(),
 });
-type Entry = z.infer<typeof EntrySchema>;
-const FileSchema = z.object({ version: z.literal(1), groups: z.record(z.string(), z.array(EntrySchema).max(80)) });
+export type GroupContextEntry = z.infer<typeof GroupContextEntrySchema>;
+type Entry=GroupContextEntry;
+export const GroupContextSchema = z.object({ version: z.literal(1), groups: z.record(z.string(), z.array(GroupContextEntrySchema).max(80)) });
 const DAY = 86_400_000;
 
 /** 按机器人账号和群隔离，保留最近一天、每群 80 条、最多 100 个群的对话。 */
 export class GroupContextStore {
-  private groups = new Map<string, Entry[]>();
-  private seq = 0;
+  protected groups = new Map<string, Entry[]>();
+  protected seq = 0;
   private timer?: NodeJS.Timeout;
   private writes: Promise<void> = Promise.resolve();
   private revision = 0;
   private persisted = 0;
-  private readonly path: string;
+  protected readonly path: string;
 
-  constructor(path: string, private readonly now: () => number = Date.now, private readonly onError: (error: unknown) => void = () => undefined) {
+  constructor(path: string, protected readonly now: () => number = Date.now, protected readonly onError: (error: unknown) => void = () => undefined) {
     this.path = resolve(path);
   }
 
   async load(): Promise<void> {
     try {
-      const file = FileSchema.parse(JSON.parse(await readFile(this.path, 'utf8')));
+      const file = GroupContextSchema.parse(JSON.parse(await readFile(this.path, 'utf8')));
       for (const [key, entries] of Object.entries(file.groups).slice(-100)) {
         if (!/^\d+:\d+$/.test(key)) throw new Error('群上下文的账号或群号无效');
         for (const entry of entries) this.seq = Math.max(this.seq, entry.seq);
@@ -55,13 +56,18 @@ export class GroupContextStore {
       if (input.targetUserId !== undefined) existing.targetUserId = input.targetUserId;
     } else entries.push(entry);
     this.groups.delete(key); this.groups.set(key, entries.slice(-80));
-    if (this.groups.size > 100) this.groups.delete(this.groups.keys().next().value!);
+    const changed=[key];
+    if (this.groups.size > 100) {const evicted=this.groups.keys().next().value!;this.groups.delete(evicted);changed.push(evicted);}
+    this.changed(changed);
+    return { ...entry };
+  }
+
+  protected changed(_keys:string[]):void {
     this.revision++;
     if (!this.timer) {
       this.timer = setTimeout(() => { this.timer = undefined; void this.flush().catch(this.onError); }, 500);
       this.timer.unref();
     }
-    return { ...entry };
   }
 
   private entries(account: number, group: number): Entry[] {
@@ -91,7 +97,7 @@ export class GroupContextStore {
   }
 
   clear(account: number, group: number): void {
-    this.groups.delete(`${account}:${group}`); this.revision++;
+    this.groups.delete(`${account}:${group}`);this.changed([`${account}:${group}`]);
   }
 
   flush(): Promise<void> {

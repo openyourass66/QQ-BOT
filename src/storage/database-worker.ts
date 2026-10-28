@@ -29,8 +29,9 @@ function changeEntity(row:EntityChange,insert=false){
   const payload=JSON.stringify(row.value),size=Number(meta('metadata_bytes')??0)+Buffer.byteLength(payload)+overhead-(previous?Number(previous.size)+overhead:0);
   if(size>DATABASE_LIMITS.responseBytes-8192)throw error('DATABASE_STATE_LIMIT','业务记录已达到容量上限，请在数据维护中整理历史；本次修改未写入。');
   const value=row.value as Record<string,unknown>;
+  const numeric=(field:string)=>typeof value?.[field]==='number'&&Number.isFinite(value[field])?value[field] as number:0;
   const sql=`INSERT INTO ${table}(key,ordinal,chat,at,state,due,retry_at,payload) VALUES(?,?,?,?,?,?,?,?)`+(insert?'':' ON CONFLICT(key) DO UPDATE SET ordinal=excluded.ordinal,chat=excluded.chat,at=excluded.at,state=excluded.state,due=excluded.due,retry_at=excluded.retry_at,payload=excluded.payload');
-  db.prepare(sql).run(row.key,row.ordinal??0,String(value?.chat??''),Number(value?.at??0),String(value?.state??''),Number(value?.due??0),Number(value?.retryAt??0),payload);setMeta('metadata_bytes',size);
+  db.prepare(sql).run(row.key,row.ordinal??0,String(value?.chat??''),numeric('at'),String(value?.state??''),numeric('due'),numeric('retryAt'),payload);setMeta('metadata_bytes',size);
 }
 function putMessage(m:StoredMessage,insertOnly=false,strict=false){
   const exists=!insertOnly&&!strict&&db.prepare('SELECT 1 FROM messages WHERE chat=? AND id=?').get(m.chat,m.id);

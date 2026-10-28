@@ -16,7 +16,9 @@ export function dataPaths(env: NodeJS.ProcessEnv = process.env, root = process.c
 export function mutableDataResources(paths: ReturnType<typeof dataPaths>) {
   return [
     { path: paths.sessions, label: '模型会话映射' },
+    { path: paths.sessions+'.sqlite', label: '会话映射数据库' },
     { path: paths.groupContext, label: '群聊上下文' },
+    { path: paths.groupContext+'.sqlite', label: '群上下文数据库' },
     { path: paths.usage, label: '每日额度' },
     { path: paths.usage+'.sqlite', label: '额度数据库' },
     { path: paths.social, label: '社交存档' },
