@@ -5,14 +5,13 @@ import { isIP } from 'node:net';
 import { realpath, open } from 'node:fs/promises';
 import { resolve, relative, isAbsolute } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createHash } from 'node:crypto';
-import { spawn } from 'node:child_process';
 import type { SocialSettings } from '../qq/social-settings.js';
 import {reportedServiceUsage,type PrepareServiceRequest,type ServiceRequest,type ServiceLimits} from '../agent/service-request.js';
 import type {ReportedUsage} from '../storage/database-types.js';
 import {readJsonLimited,readBytesLimited} from './read-json.js';
 import {MediaCache} from './media-cache.js';
 import type {MediaCacheStore} from '../storage/media-cache-types.js';
+import {extractVideoFrames} from './video-frames.js';
 
 function publicAddress(address: string): boolean {
   if (isIP(address) === 4) {
@@ -79,6 +78,7 @@ async function readMediaFile(file: string, signal: AbortSignal, max: number): Pr
 export class MediaService {
   readonly root: string;
   private cache:MediaCache;
+  private videoBusy=false;
   constructor(root: string, private readonly settings: () => SocialSettings,private readonly prepareRequest?:PrepareServiceRequest,options:{index?:MediaCacheStore;onFailure?:(error:Error)=>void}={}) { this.root = resolve(root);this.cache=new MediaCache(this.root,options.index,{onFailure:options.onFailure}); }
   private async request<T>(input:ServiceRequest,operation:(limits:ServiceLimits,report:(usage:ReportedUsage)=>void)=>Promise<T>):Promise<T>{
     if(!this.prepareRequest)return operation({maxOutputTokens:8192,maxResponseChars:32000},()=>{});
@@ -242,19 +242,15 @@ export class MediaService {
   }
   async video(source: string, question: string, signal: AbortSignal): Promise<unknown> {
     if (!process.env.BOT_FFMPEG_BIN) throw new Error('视频抽帧未配置；请设置 FFmpeg 启动文件');
+    if(this.videoBusy)throw new Error('已有视频正在处理，请稍后再试');
+    this.videoBusy=true;
+    try{
     const { buffer } = await this.bytes(source, signal, 50_000_000);
     const input = await this.save(buffer, '.video');
-    const prefix = createHash('sha256').update(buffer).digest('hex');
-    const output = resolve(this.root, `${prefix}-%02d.jpg`);
     const count = this.settings().videoFrames;
-    try{await new Promise<void>((done, reject) => {
-      const child = spawn(process.env.BOT_FFMPEG_BIN!, ['-hide_banner', '-loglevel', 'error', '-y', '-i', input, '-vf', 'fps=1/3,scale=640:-2', '-frames:v', String(count), output], { windowsHide: true, stdio: 'ignore', signal: AbortSignal.any([signal, AbortSignal.timeout(45_000)]) });
-      child.once('error', reject); child.once('exit', code => code === 0 ? done() : reject(new Error('视频解码失败')));
-    });}finally{await this.cache.reconcile();}
-    const images = [];
-    for (let i = 1; i <= count; i++) { try { images.push(await this.image(resolve(this.root, `${prefix}-${String(i).padStart(2,'0')}.jpg`), signal)); } catch (e) { if ((e as NodeJS.ErrnoException).code === 'ENOENT') break; throw e; } }
-    if (!images.length) throw new Error('未取得视频画面');
-    return this.vision(images, question, signal);
+    const frames=await extractVideoFrames(process.env.BOT_FFMPEG_BIN,input,count,signal);
+    return await this.vision(frames.map(frame=>({type:'image' as const,data:frame.toString('base64'),mimeType:'image/png'})), question, signal);
+    }finally{this.videoBusy=false;}
   }
   capabilities(): Record<string, string> {
     const s = this.settings();
