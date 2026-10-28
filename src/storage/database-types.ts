@@ -1,6 +1,7 @@
 import type {StoredMessage} from '../qq/social-store.js';
 import type {MessageQuery,MessageRef} from './social-repository.js';
 import type {Quota} from '../core/usage.js';
+import type {OperationDatabaseRequest} from './operation-types.js';
 
 export const entityTables=['contacts','memories','stickers','tasks','events','actions','turns','profiles','interests','thoughts','decisions','autonomous_contacts','sticker_uses','posts','space_comments','memory_meta','lexicon','suppressed','learning_scopes','learning_jobs','state'] as const;
 export type EntityTable=typeof entityTables[number];
@@ -8,10 +9,10 @@ export type EntityRow={table:EntityTable;key:string;ordinal:number;value:unknown
 export type EntityChange={table:EntityTable;key:string;ordinal?:number;value?:unknown};
 export type ModelRequestRecord={id:string;turn:string;kind:'conversation'|'compaction'|'vision'|'transcription'|'speech'|'learning'|'search'|'fetch';background:boolean;chat:string;user:string;provider:string;model:string;maxOutputTokens:number};
 export type ReportedUsage={inputTokens:number|null;outputTokens:number|null;cacheReadTokens?:number|null;cacheWriteTokens?:number|null;totalTokens?:number|null};
-export type UsageDatabaseRequest=
+export type UsageDatabaseRequest=OperationDatabaseRequest
   |{action:'usage-import';date:string;counters:Record<string,number>;final?:boolean}
   |{action:'usage-summary';date:string}
-  |{action:'usage-consume';date:string;quotas:Quota[];reservationId:string;at:number;request?:ModelRequestRecord}
+  |{action:'usage-consume';date:string;quotas:Quota[];reservationId:string;at:number;request?:ModelRequestRecord;operation?:{id:string;owner:string}}
   |{action:'usage-finish-model';id:string;outcome:'completed'|'failed'|'unknown';usage:ReportedUsage}
   |{action:'usage-recover-models'}
   |{action:'usage-request-stats';date:string};

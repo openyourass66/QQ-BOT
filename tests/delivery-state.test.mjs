@@ -56,7 +56,7 @@ test('入站准入提交后宿主立即退出，重启不重新触发该帧或�
 
 test('schema 3 升级保留任务和归档，既有入站身份不会因升级重新开放',()=>fixture(async({path,keep})=>{
   const store=keep(new SqliteSocialStore(path));await store.load();const frame=event(88);await store.record(frame,30,100);const task=await store.addTask({chat:'private:2',creator:'2',text:'保留任务',due:Date.now()-1,interval:0});await store.close();
-  const old=new DatabaseSync(path+'.sqlite');try{old.exec('DROP TABLE incoming_receipts;PRAGMA user_version=3;');}finally{old.close();}
+  const old=new DatabaseSync(path+'.sqlite');try{old.exec('DROP TABLE incoming_receipts;DROP TABLE external_steps;DROP TABLE external_operations;PRAGMA user_version=3;');}finally{old.close();}
   const upgraded=keep(new SqliteSocialStore(path));await upgraded.load();assert.equal(await upgraded.record(frame,30,100),false);assert.equal((await upgraded.message('private:2',88)).text,'消息88');assert.equal((await upgraded.dueTasks(Date.now()))[0].id,task.id);
 }));
 

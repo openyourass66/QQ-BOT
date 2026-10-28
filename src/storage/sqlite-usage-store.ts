@@ -5,6 +5,8 @@ import {DailyUsageStore,UsageSchema,shanghaiDate,type Quota} from '../core/usage
 import {DatabaseClient} from './database-client.js';
 import {verifyMigrationSource} from './social-migration.js';
 import type {ModelRequestRecord,ReportedUsage} from './database-types.js';
+import type {OperationRecord,StoredOperation} from './operation-types.js';
+import {operationDigest,currentOperation} from '../core/operation-context.js';
 
 export const usageDatabasePath=(path:string)=>path+'.sqlite';
 const hash=(bytes:Uint8Array|string)=>createHash('sha256').update(bytes).digest('hex');
@@ -31,6 +33,7 @@ async function ensureDatabase(path:string,date:string):Promise<string>{
 }
 
 export class SqliteDailyUsageStore extends DailyUsageStore {
+  readonly instanceId=randomUUID();
   private database?:DatabaseClient;
   private chain:Promise<unknown>=Promise.resolve();
   private queued=0;
@@ -44,21 +47,33 @@ export class SqliteDailyUsageStore extends DailyUsageStore {
     try{
       const metadata=await database.call<{initialized:boolean;usageInitialized:boolean;source:{sha256?:string;kind?:string}}>({action:'metadata'});
       if(!metadata.initialized||!metadata.usageInitialized||metadata.source?.kind!=='daily-usage')throw failure('额度数据库类型或迁移状态无效，请保留文件并核对。');
-      await verifyMigrationSource(this.path,metadata.source);await database.call({action:'usage-recover-models'});const current=await database.call<{date:string;counters:Record<string,number>}>({action:'usage-summary',date:shanghaiDate(this.now())});this.data={version:1,...current};this.loaded=true;
+      await verifyMigrationSource(this.path,metadata.source);await database.call({action:'usage-recover-models'});await database.call({action:'usage-op-recover'});const current=await database.call<{date:string;counters:Record<string,number>}>({action:'usage-summary',date:shanghaiDate(this.now())});this.data={version:1,...current};this.loaded=true;
     }catch(error){await database.close();throw error;}
   }
   override consume(getQuotas:()=>Quota[],onReserved:()=>void=()=>{}):Promise<void>{
+    const operation=currentOperation();if(operation){
+      if(operation.owner!==this.instanceId)return Promise.reject(Object.assign(new Error('动作额度不属于当前仓储实例。'),{code:'DATABASE_OPERATION_CONFLICT'}));
+      const index=operation.quotaSequence++;return this.reserveOperation(operation.record.id,index,()=>{operation.signal.throwIfAborted();operation.authorize();return getQuotas();},onReserved).then(result=>{if(result.reused)throw Object.assign(new Error('动作额度已经预扣，不会再次提交。'),{code:'DATABASE_OPERATION_CONFLICT'});});
+    }
     return this.reserve(getQuotas,onReserved,randomUUID()).then(()=>{});
   }
   reserveModel(request:ModelRequestRecord,getQuotas:()=>Quota[]):Promise<{reused:boolean}>{return this.reserve(getQuotas,()=>{},request.id,request);}
   finishModel(id:string,outcome:'completed'|'failed'|'unknown',usage:ReportedUsage):Promise<unknown>{return this.database!.call({action:'usage-finish-model',id,outcome,usage});}
   requestStatistics():Promise<unknown>{return this.database!.call({action:'usage-request-stats',date:shanghaiDate(this.now())});}
-  private reserve(getQuotas:()=>Quota[],onReserved:()=>void,reservationId:string,request?:ModelRequestRecord):Promise<{reused:boolean}>{
+  beginOperation(record:OperationRecord):Promise<{claimed:boolean;operation:StoredOperation}>{const {id:_,turn:__,summary:___,...semantic}=record;return this.database!.call({action:'usage-op-begin',record,owner:this.instanceId,date:shanghaiDate(this.now()),at:this.now().getTime(),hash:operationDigest(record),semanticHash:operationDigest(semantic)});}
+  reserveOperation(id:string,index:number,getQuotas:()=>Quota[],onReserved:()=>void=()=>{}):Promise<{reused:boolean}>{return this.reserve(getQuotas,onReserved,operationDigest([id,'quota',index]),undefined,{id,owner:this.instanceId});}
+  submitOperation(id:string,sequence:number,name:string,payload:unknown):Promise<{claimed:boolean;state?:string;result?:unknown}>{return this.database!.call({action:'usage-op-submit',id,owner:this.instanceId,sequence,name,payload,hash:operationDigest({name,payload}),at:this.now().getTime()});}
+  finishOperationStep(id:string,sequence:number,state:'completed'|'unknown',result?:unknown,error?:string):Promise<unknown>{return this.database!.call({action:'usage-op-step',id,owner:this.instanceId,sequence,state,...(result===undefined?{}:{result}),...(error===undefined?{}:{error})});}
+  completeOperation(id:string,result:unknown):Promise<unknown>{return this.database!.call({action:'usage-op-complete',id,owner:this.instanceId,result});}
+  failOperation(id:string,error:string):Promise<{state:string}>{return this.database!.call({action:'usage-op-fail',id,owner:this.instanceId,error});}
+  operation(id:string):Promise<StoredOperation|null>{return this.database!.call({action:'usage-op-read',id});}
+  operationSummaries(account:number,chat?:string,limit=100,offset=0):Promise<{rows:Array<{record:Omit<OperationRecord,'payload'>;state:string;at:number;error:string}>;total:number}>{return this.database!.call({action:'usage-op-list',account,...(chat===undefined?{}:{chat}),limit,offset});}
+  private reserve(getQuotas:()=>Quota[],onReserved:()=>void,reservationId:string,request?:ModelRequestRecord,operation?:{id:string;owner:string}):Promise<{reused:boolean}>{
     if(!this.loaded||this.closing)return Promise.reject(new Error('额度仓储未打开或已经关闭。'));
     if(this.queued>=64)return Promise.reject(Object.assign(new Error('额度操作正在处理，请稍后重试。'),{code:'DATABASE_QUEUE_FULL'}));
     this.queued++;const task=this.chain.then(async()=>{
       const now=this.now(),date=shanghaiDate(now),quotas=getQuotas();
-      try{const current=await this.database!.call<{date:string;counters:Record<string,number>;reused:boolean}>({action:'usage-consume',date,quotas,reservationId,at:now.getTime(),...(request?{request}:{})});this.data={version:1,date:current.date,counters:current.counters};if(!current.reused)onReserved();return {reused:current.reused};}
+      try{const current=await this.database!.call<{date:string;counters:Record<string,number>;reused:boolean}>({action:'usage-consume',date,quotas,reservationId,at:now.getTime(),...(request?{request}:{}),...(operation?{operation}:{})});this.data={version:1,date:current.date,counters:current.counters};if(!current.reused)onReserved();return {reused:current.reused};}
       catch(error){if((error as {code?:string}).code==='DATABASE_QUOTA_EXCEEDED'){const current=await this.database!.call<{date:string;counters:Record<string,number>}>({action:'usage-summary',date});this.data={version:1,...current};}throw error;}
     });this.chain=task.catch(()=>{});return task.finally(()=>{this.queued--;});
   }
