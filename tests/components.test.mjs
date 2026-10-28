@@ -122,6 +122,13 @@ test('组件 ACP 探测只初始化协议；提前退出明确失败，不发送
   await assert.rejects(verifyAcp({node:process.execPath,entry:fake,cwd:root,env:childEnvironment(process.execPath,root),timeoutMs:3000}));
 }));
 
+test('受管组件生命周期探针创建、确认关闭、恢复并再次关闭，始终不发送提示词',()=>fixture(async root=>{
+  const fake=join(root,'dsh.mjs');
+  await writeFile(fake,"import{createInterface}from'node:readline';import{appendFileSync}from'node:fs';createInterface({input:process.stdin}).on('line',line=>{const x=JSON.parse(line);appendFileSync('calls.jsonl',JSON.stringify(x.method)+'\\n');let result={};if(x.method==='initialize')result={protocolVersion:1,agentCapabilities:{sessionCapabilities:{close:{},resume:{}}}};else if(x.method==='session/new')result={sessionId:'fixture-session'};else if(!['session/close','session/resume'].includes(x.method))process.exit(41);console.log(JSON.stringify({jsonrpc:'2.0',id:x.id,result}));});");
+  await verifyAcp({node:process.execPath,entry:fake,cwd:root,env:childEnvironment(process.execPath,root),timeoutMs:3000,lifecycle:true});
+  assert.deepEqual((await readFile(join(root,'calls.jsonl'),'utf8')).trim().split('\n').map(JSON.parse),['initialize','session/new','session/close','session/resume','session/close']);
+}));
+
 test('桌面组件取消与退出不被安装队列阻塞，同批到达的取消也能生效',()=>fixture(async root=>{
   for(const dir of ['desktop','scripts'])await mkdir(join(root,dir));
   await copyRuntimeHost(root);

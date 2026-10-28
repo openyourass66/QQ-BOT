@@ -45,6 +45,8 @@ partial class App
         new FieldSpec("learning.lexiconChars", "对话与参与", "记忆与用语召回", "每轮用语字数", "表达参考不会改写人设。", "字", 0, 2000, 100),
         new FieldSpec("context.backgroundChars", "对话与参与", "上下文预算", "附加群聊字数上限", "仅限制附加背景，保留当前问题。", "字", 500, 12000, 500),
         new FieldSpec("context.warningPercent", "额度与节奏", "上下文管理", "上下文提醒比例", "依赖 DSH 上报；上下文占用不等于计费用量。", "%", 30, 95, 5),
+        new FieldSpec("context.activeSessions", "额度与节奏", "上下文管理", "活跃模型会话上限", "达到上限时释放较早的空闲会话；历史映射保留，下次聊天可恢复。", "个", 4, 512),
+        new FieldSpec("context.idleMinutes", "额度与节奏", "上下文管理", "空闲会话释放时间", "等待模型进程确认释放后才腾出名额；处理中的会话保持有效。", "分钟", 1, 1440),
         new FieldSpec("context.rollover", "额度与节奏", "上下文管理", "高占用时更换会话", "默认沿用 DSH 压缩；开启后在下一轮交接近期记录。"),
         new FieldSpec("context.rolloverPercent", "额度与节奏", "上下文管理", "会话更换比例", "新会话及映射保存成功后才替换旧会话。", "%", 50, 99),
         new FieldSpec("context.toolsPerTurn", "额度与节奏", "工具预算", "每轮工具调用上限", "QQ 工具与原生搜索、网页读取共享；达到上限后停止本轮工具。", "次", 1, 200),

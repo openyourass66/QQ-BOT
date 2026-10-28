@@ -11,12 +11,13 @@ const send=(id,result)=>process.stdout.write(JSON.stringify({jsonrpc:'2.0',id,re
 const update=(sessionId,value)=>process.stdout.write(JSON.stringify({jsonrpc:'2.0',method:'session/update',params:{sessionId,update:value}})+'\n');
 createInterface({input:process.stdin}).on('line',async line=>{
   const {id,method,params}=JSON.parse(line);
-  if(method==='initialize')send(id,{protocolVersion:1,agentCapabilities:{sessionCapabilities:{resume:{}}},agentInfo:{name:'fixture',version:'1'}});
+  if(method==='initialize')send(id,{protocolVersion:1,agentCapabilities:{sessionCapabilities:{resume:{},close:{}}},agentInfo:{name:'fixture',version:'1'}});
   else if(method==='session/new'){
     sessions++;record({kind:'new',number:sessions,servers:params.mcpServers});
     if(process.env.INTELLIGENCE_FAIL_SECOND==='1'&&sessions===2){process.stdout.write(JSON.stringify({jsonrpc:'2.0',id,error:{code:-32603,message:'replacement fixture failure'}})+'\n');return;}
     servers.set('intelligence-'+sessions,params.mcpServers);send(id,{sessionId:'intelligence-'+sessions});
-  }else if(method==='session/resume')send(id,{});
+  }else if(method==='session/resume'){servers.set(params.sessionId,params.mcpServers);send(id,{});}
+  else if(method==='session/close'){servers.delete(params.sessionId);record({kind:'close',sessionId:params.sessionId});send(id,{});}
   else if(method==='session/set_config_option')send(id,{configOptions:[]});
   else if(method==='session/prompt'){
     let finishBudget;try {finishBudget=await beginFixtureRequest(params.sessionId,params.prompt);

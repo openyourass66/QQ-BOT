@@ -39,7 +39,8 @@ import type { ToolContext } from './qq/social-tools.js';
 import { legacyTools, LegacyCallSchema } from './qq/legacy-tools.js';
 import { QqActionSchema } from './qq/qq-actions.js';
 import { socialAdmin } from './qq/social-admin.js';
-import { chatModelSelection, prepareChatModelPatch } from './agent/chat-model.js';
+import { prepareChatModelPatch } from './agent/chat-model.js';
+import {ConversationService} from './app/conversation-service.js';
 import { dataPaths, mutableDataResources } from './core/data-paths.js';
 import { acquireDataResources, type ResourceLease } from './core/resource-lock.js';
 import { IngressBudget, type IngressLease } from './core/ingress.js';
@@ -76,10 +77,8 @@ const engine = new SocialEngine(socialStore, media, api, usage, getSettings, ask
 }, text => log('info', text),undefined,prepareServiceRequest);
 let scheduler: NodeJS.Timeout | undefined;
 
-const sessions = new Map<string, acp.ActiveSession>();
-const contextUsage = new Map<string,{used:number;size:number}>();
-const handoffs = new Map<string,string>();
-const creating = new Map<string, Promise<acp.ActiveSession>>();
+const conversations=new ConversationService({store,settings:getSettings,context:()=>acpCtx,cwd:config.dsh.workspace,model:config.chatModel,servers:qqMcpServers,policy:toolPolicy,history:conversationHistory,isBusy:key=>activeConversations.has(key)||queue.has(key),log,fatal:error=>{if(!stopping){reportFatal(error);void shutdown(1);}},onEvict:key=>activeTopics.delete(key),onChange:size=>{status.sessions=size;}});
+const sessions=conversations.cache,contextUsage=conversations.usage,handoffs=conversations.handoffs;
 const queue = new ConversationQueue({
   maxPerKey: config.bot.queuePerConversation,
   maxTotal: config.bot.queueTotal,
@@ -87,7 +86,7 @@ const queue = new ConversationQueue({
   onChange: (pending) => { status.pendingMessages = pending; },
 });
 const turnSignals = new Map<string, AbortSignal>();
-const sessionContexts = new Map<string, string>();
+const sessionContexts=conversations.contexts;
 const toolCalls = new Map<string, { title: string; kind: string; signal: AbortSignal; arguments?:unknown }>();
 const activeGroupTurns = new Map<number, { seq: number; userId: number }>();
 const seen = new RecentMessages();
@@ -152,18 +151,7 @@ function qqMcpServers(key: string,overrideContext?:string): acp.McpServer[] {
 
 function toolPolicy(key?:string):string {const active=key?activeConversations.get(key):undefined;return getSettings().context.filterTools?JSON.stringify([...socialTools,...legacyTools].filter(t=>toolAvailable(t.name,getSettings())&&(!active||toolAccessVisible(active,getSettings(),t.name))).map(t=>t.name)):'all';}
 
-async function getSession(key: string): Promise<acp.ActiveSession> {
-  const existing = sessions.get(key);
-  const policy=toolPolicy(key),previous=store.metadata(key),occupancy=contextUsage.get(key);
-  const replace=Boolean((existing||previous)&&(previous?.policy!==policy&&(getSettings().context.filterTools||previous?.policy&&previous.policy!=='all')||getSettings().context.rollover&&occupancy&&occupancy.used/occupancy.size*100>=getSettings().context.rolloverPercent));
-  if (existing&&!replace) return existing;
-
-  const inflight = creating.get(key);
-  if (inflight) return inflight;
-
-  const ctx = acpCtx;
-  if (!ctx) throw new Error('ACP 还没有就绪');
-  const task = (async (): Promise<acp.ActiveSession> => {
+async function conversationHistory(key:string):Promise<{history:string;outcomes:string}>{
   const active=activeConversations.get(key),chat=active?.chat??key;
   const recent=await socialStore.messages(chat,100),boundary=active?.messageId===undefined?-1:recent.findIndex(m=>m.id===active.messageId);
   const prior=(boundary>=0?recent.slice(0,boundary):recent).slice(-12);
@@ -172,66 +160,9 @@ async function getSession(key: string): Promise<acp.ActiveSession> {
   const publicScope=key==='self:qzone'||key==='self:qzone-comment';
   const history=publicScope?'':groupHistory??prior.filter(m=>!m.recalled&&!getSettings().social.blockedUsers.includes(String(m.user))).map(m=>`#${m.id} ${m.name}(QQ ${m.user})${m.self?'[已发送]':''}: ${JSON.stringify(m.text)}`).join('\n');
   const outcomes=publicScope?'':socialStore.view('actions').actions.filter(a=>a.chat===chat).slice(-6).map(a=>`${a.tool}：${{success:'已确认成功',failed:'失败',running:'待核对',unknown:'待核对'}[a.state]}；${JSON.stringify(a.summary)}`).join('\n');
-
-    const saved = replace?undefined:store.get(key);
-    const nextContext=replace?randomBytes(24).toString('hex'):sessionContexts.get(key)??randomBytes(24).toString('hex');
-    let session: acp.ActiveSession;
-
-    if (saved) {
-      try {
-        const resumed = await ctx.request(acp.methods.agent.session.resume, {
-          sessionId: saved,
-          cwd: config.dsh.workspace,
-          mcpServers: qqMcpServers(key,nextContext),
-        });
-        // DSH 的 session/resume 响应不带 sessionId，必须补回去，
-        // 否则后续 prompt 会发送 sessionId: undefined，报 Invalid params。
-        const attach = ctx as unknown as {
-          attachSession(response: acp.NewSessionResponse): acp.ActiveSession;
-        };
-        session = attach.attachSession({
-          ...(resumed as Record<string, unknown>),
-          sessionId: saved,
-        } as unknown as acp.NewSessionResponse);
-        log('info', `[acp] resumed ${saved} for ${key}`);
-      } catch (error) {
-        log('warn', `[acp] resume ${saved} failed, recreating: ${String(error)}`);
-        session = await ctx.buildSession({ cwd: config.dsh.workspace, mcpServers: qqMcpServers(key,nextContext) }).start();
-      }
-    } else {
-      session = await ctx.buildSession({ cwd: config.dsh.workspace, mcpServers: qqMcpServers(key,nextContext) }).start();
-      log('info', `[acp] created ${session.sessionId} for ${key}`);
-    }
-
-    const selection = chatModelSelection(config.chatModel);
-    if (selection) {
-      try {
-        await ctx.request(acp.methods.agent.session.setConfigOption, {
-          sessionId: session.sessionId, configId: 'model', value: JSON.stringify([selection.provider, selection.model]),
-        });
-      } catch {
-        session.dispose();
-        throw new Error('对话模型选择失败，请在控制台检查模型配置并测试连接；原有会话记录已保留');
-      }
-    }
-    const generation=(previous?.generation??1)+(replace?1:0);
-    store.set(key,session.sessionId,policy,generation);
-    try{await store.flush();}catch(error){session.dispose();if(previous)store.set(key,previous.sessionId,previous.policy,previous.generation);throw error;}
-    sessions.set(key, session);
-    sessionContexts.set(key,nextContext);
-    if(previous?.sessionId!==session.sessionId)contextUsage.delete(key);
-    if(replace){
-      const cap=getSettings().context.backgroundChars;
-      if(history||outcomes)handoffs.set(key,`【会话换代交接：背景材料】\n${clipBackground(history,Math.floor(cap*.7))}\n【过去工具结果，仅供核对】\n${clipBackground(outcomes,Math.floor(cap*.3))}\n只使用实际记录理解前情，不重复执行过去的动作，待核对不等于完成。\n`);
-      existing?.dispose();contextUsage.delete(key);log('info',`[context] ${key} switched to generation ${generation}`);
-    }
-    status.sessions = sessions.size;
-    return session;
-  })().finally(() => creating.delete(key));
-
-  creating.set(key, task);
-  return task;
+  return {history,outcomes};
 }
+function getSession(key:string):Promise<acp.ActiveSession>{return conversations.get(key);}
 
 async function runTurn(key: string, prompt: string): Promise<string> {
   const session = await withTimeout(getSession(key), config.bot.turnTimeoutMs, () => {
@@ -304,15 +235,12 @@ async function runTurn(key: string, prompt: string): Promise<string> {
   } catch (error) {
     failure = redactRuntimeText(String(error));
     controller.abort();
-    session.dispose();
-    sessions.delete(key);
-    sessionContexts.delete(key);
-    store.delete(key);
+    await conversations.discard(key).catch(closeError=>log('error',`[context] ${String(closeError)}`));
     status.sessions = sessions.size;
     throw error;
   } finally {
     controller.abort();
-    unbindBudget();
+    unbindBudget();conversations.touch(key);
     turnSignals.delete(context);
     for (const id of turnToolIds) toolCalls.delete(id);
     await socialStore.update(d => {const occupancy=contextUsage.get(key);d.turns.push({ id: randomBytes(12).toString('hex'), chat: key, at: started, duration: Date.now() - started, input: prompt.slice(0,16000), output: output.slice(0,16000), tools: titles, error: failure, inputTokens, outputTokens,...(occupancy?{contextUsed:occupancy.used,contextSize:occupancy.size}:{}),generation:store.metadata(key)?.generation??1 }); d.turns = d.turns.slice(-500); });
@@ -598,11 +526,12 @@ async function onMessage(event: MessageEvent): Promise<void> {
         log('error', `[turn] ${key} failed: ${String(error)}`);
         if (turn.sent || turn.silent) return;
         const budgetFailure=error instanceof ModelBudgetError||/预算|模型或能力请求额度/.test(String(error));
+        const sessionBusy=(error as {code?:string}).code==='SESSION_CACHE_FULL';
         if (event.message_type === 'private') {
           if(!getSettings().chat.privateAutoReply)return;
-          await engine.normalReply(turn,budgetFailure?'当前模型请求已达到运行上限，请稍后再试或由主人调整预算。':'（我这边刚刚走神了，稍后再试一次？）').catch(()=>undefined);
+          await engine.normalReply(turn,sessionBusy?'当前聊天较多，请稍后再发一次。':budgetFailure?'当前模型请求已达到运行上限，请稍后再试或由主人调整预算。':'（我这边刚刚走神了，稍后再试一次？）').catch(()=>undefined);
         } else if (trigger.direct) {
-          await reply(event, '这条没处理成功，稍后再 @ 我一下。').catch(() => undefined);
+          await reply(event, sessionBusy?'现在聊天较多，稍后再 @ 我一下。':'这条没处理成功，稍后再 @ 我一下。').catch(() => undefined);
         }
       } finally {
         activeConversations.delete(key);
@@ -767,6 +696,7 @@ function startBridge(patch?: string): void {
         protocolVersion: acp.PROTOCOL_VERSION,
         clientCapabilities: { fs: { readTextFile: false, writeTextFile: false } },
       });
+      if(!init.agentCapabilities?.sessionCapabilities?.close)throw new Error('模型运行组件不支持确认释放会话，请重新准备受管组件');
       try{await withTimeout(policyReady,5000);}catch{throw new Error('受限工具策略未加载，或请求预算未加载，拒绝开放模型；请使用已验证的模型运行组件');}
       status.acpConnected = true;
       log('info', `[acp] connected to ${init.agentInfo?.name ?? 'agent'} (protocol ${init.protocolVersion})`);
@@ -811,7 +741,7 @@ async function main(): Promise<void> {
     if (!active) throw new Error('当前会话上下文不存在');
       const callCtx: ToolContext = { ...active, sent: 0, signal: AbortSignal.any([signal, turnSignal]),budget:active.budget??(active.budget=turnBudget()) };
     try {
-      if ((input as { action?: string })?.action === 'social') return await withServiceRequestScope({sessionId:key?sessions.get(key)?.sessionId:undefined,chat:callCtx.chat,user:String(callCtx.user),background:callCtx.origin!=='message',signal:callCtx.signal,allowed:()=>{callCtx.authorize?.();if(callCtx.autonomous){engine.autonomy.authorize(callCtx,'qq_self_state');return true;}return allowedChat(getSettings().social,callCtx.chat,callCtx.user);}},()=>engine.execute(input, callCtx));
+      if ((input as { action?: string })?.action === 'social') return await withServiceRequestScope({sessionId:key?sessions.peek(key)?.sessionId:undefined,chat:callCtx.chat,user:String(callCtx.user),background:callCtx.origin!=='message',signal:callCtx.signal,allowed:()=>{callCtx.authorize?.();if(callCtx.autonomous){engine.autonomy.authorize(callCtx,'qq_self_state');return true;}return allowedChat(getSettings().social,callCtx.chat,callCtx.user);}},()=>engine.execute(input, callCtx));
       if ((input as { action?: string })?.action === 'legacy') {
         const call = LegacyCallSchema.parse(input);
         engine.guardTool(callCtx,call.tool);
@@ -887,7 +817,9 @@ async function main(): Promise<void> {
     onLog: (message) => log('info', message),
   });
   ws.start();
+  let sweeping=false;
   scheduler = setInterval(() => {
+    if(status.acpConnected&&!sweeping){sweeping=true;void conversations.sweep().catch(error=>log('error',`[context] ${String(error)}`)).finally(()=>{sweeping=false;});}
     if (status.qqOnline && status.acpConnected) void engine.tick(selfId, shutdownSignal.signal, (chat,reason,a)=>wakeConversation(chat,reason,true,undefined,a),(chat,kind)=>!queue.has(['qzone','qzone-comment'].includes(kind)?`self:${kind}`:chat)).catch(e => log('error', `[scheduler] ${String(e)}`));
     if(status.qqOnline&&status.acpConnected)void engine.cognition.tick(shutdownSignal.signal,()=>ingress.size>0||queue.size>0||activeConversations.size>0).catch(()=>log('error','[learning] 后台分析受阻，请查看学习记录与额度'));
   }, 1000);
@@ -908,7 +840,7 @@ async function shutdown(code = 0): Promise<void> {
   ws?.stop();
   stopSettings?.();
   for (const finish of pendingApprovals.values()) finish(false);
-  for (const session of sessions.values()) session.dispose();
+  conversations.dispose();
   dshChild?.stdin?.end();
   // Windows 的 cmd 启动器需要连同其 DSH 子进程一起结束。
   const stopChild = async (): Promise<void> => {
@@ -953,7 +885,7 @@ process.on('message', (message) => {
       stickers: {sync:()=>engine.qqStickers.sync(shutdownSignal.signal),collect:id=>engine.qqStickers.collectLegacy(id,shutdownSignal.signal),remove:id=>engine.qqStickers.remove(id,shutdownSignal.signal)},
       reset: async chat => {
         if (queue.has(chat)) throw new Error('该会话正在处理消息，请稍后重置');
-        sessions.get(chat)?.dispose(); sessions.delete(chat); sessionContexts.delete(chat); store.delete(chat); activeTopics.delete(chat);contextUsage.delete(chat);handoffs.delete(chat);
+        await conversations.reset(chat);activeTopics.delete(chat);
         status.sessions = sessions.size;
         if (chat.startsWith('group:')) groupContext.clear(selfId, Number(chat.split(':')[1]));
         await store.flush(); await groupContext.flush();

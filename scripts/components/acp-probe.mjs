@@ -2,8 +2,8 @@ import { spawn } from 'node:child_process';
 import { Readable, Writable } from 'node:stream';
 import { randomBytes } from 'node:crypto';
 
-/** 只建立协议连接，不创建会话、不发送提示词，不读取用户登录目录。 */
-export async function verifyAcp({node,entry,cwd,env,signal,timeoutMs=30000,patch}) {
+/** 使用隔离 Home 验证协议及可选会话生命周期，不发送提示词。 */
+export async function verifyAcp({node,entry,cwd,env,signal,timeoutMs=30000,patch,lifecycle=false}) {
   const acp=await import('@agentclientprotocol/sdk');
   const nonce=randomBytes(24).toString('hex');
   const child=spawn(node,[entry,'--profile','acp',...(patch?['--patch',patch]:[])],{cwd,env:{...env,...(patch?{BOT_DSH_POLICY_NONCE:nonce}:{})},signal,windowsHide:true,stdio:['pipe','pipe','pipe']});
@@ -21,6 +21,13 @@ export async function verifyAcp({node,entry,cwd,env,signal,timeoutMs=30000,patch
     const init=await context.request(acp.methods.agent.initialize,{protocolVersion:acp.PROTOCOL_VERSION,clientCapabilities:{fs:{readTextFile:false,writeTextFile:false}}});
     if(init.protocolVersion!==acp.PROTOCOL_VERSION)throw new Error('DSH ACP 协议版本不匹配');
     if(!policyActive)throw new Error('DSH 工具策略未加载，组件不可用于机器人运行');
+    if(lifecycle){
+      if(!init.agentCapabilities?.sessionCapabilities?.close||!init.agentCapabilities?.sessionCapabilities?.resume)throw new Error('DSH 不支持必需的会话释放与恢复');
+      const created=await context.request(acp.methods.agent.session.new,{cwd,mcpServers:[]});
+      await context.request(acp.methods.agent.session.close,{sessionId:created.sessionId});
+      await context.request(acp.methods.agent.session.resume,{sessionId:created.sessionId,cwd,mcpServers:[]});
+      await context.request(acp.methods.agent.session.close,{sessionId:created.sessionId});
+    }
     if(!settled){settled=true;done();}
     await closed;
   });

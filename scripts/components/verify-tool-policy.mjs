@@ -10,7 +10,7 @@ if(!node||!directory||!root)throw new Error('需要 Node、DSH 组件和程序�
 const base=await realpath(tmpdir()),scratch=await mkdtemp(join(base,'qq-tool-policy-'));
 try {
   const patch=join(scratch,'policy.json');await writeFile(patch,JSON.stringify(restrictedToolPatches()));
-  await verifyAcp({node,entry:join(directory,'node_modules/@deepseek-ai/dsh/lib/bin.js'),cwd:scratch,env:childEnvironment(node,scratch),patch});
+  await verifyAcp({node,entry:join(directory,'node_modules/@deepseek-ai/dsh/lib/bin.js'),cwd:scratch,env:childEnvironment(node,scratch),patch,lifecycle:true});
   await runChild(node,[join(root,'scripts/components/tool-policy-probe.mjs'),directory,root],{cwd:scratch,env:childEnvironment(node,scratch),timeout:20000});
   await runChild(node,[join(root,'scripts/components/model-budget-probe.mjs'),directory,root],{cwd:scratch,env:childEnvironment(node,scratch),timeout:20000});
   console.log('受限工具策略和请求预算通过真实 DSH 加载与执行检查，未调用付费模型或 QQ。');

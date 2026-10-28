@@ -16,6 +16,8 @@ export const LearningSettingsSchema = z.object({
 }).prefault({});
 
 export const ContextSettingsSchema = z.object({
+  activeSessions:z.number().int().min(4).max(512).default(128),
+  idleMinutes:z.number().int().min(1).max(1440).default(30),
   backgroundChars: z.number().int().min(500).max(12000).default(3000),
   warningPercent: z.number().int().min(30).max(95).default(70),
   rolloverPercent: z.number().int().min(50).max(99).default(85),

@@ -10,6 +10,7 @@ let nextSession = 0;
 let nextGroupTurn = 0;
 const sessionServers = new Map();
 const sessionModels = new Map();
+const lifecycle=(kind,sessionId)=>{if(process.env.FAKE_LIFECYCLE_EVENTS)appendFileSync(process.env.FAKE_LIFECYCLE_EVENTS,JSON.stringify({kind,sessionId})+'\n');};
 if (process.env.FAKE_MODEL_EVENTS) appendFileSync(process.env.FAKE_MODEL_EVENTS, JSON.stringify({ args: process.argv.slice(2),serviceCredentialsPresent:['ONEBOT_TOKEN','BOT_MEDIA_API_KEY','BOT_LEARNING_API_KEY','BOT_ACTION_TOKEN'].some(key=>Boolean(process.env[key])) }) + '\n');
 const respond = (id, result) => process.stdout.write(`${JSON.stringify({ jsonrpc: '2.0', id, result })}\n`);
 const notify = (method, params) => process.stdout.write(`${JSON.stringify({ jsonrpc: '2.0', method, params })}\n`);
@@ -18,14 +19,18 @@ lines.on('line', async (line) => {
   const request = JSON.parse(line);
   const { id, method, params } = request;
   if (method === 'initialize') {
-    respond(id, { protocolVersion: 1, agentCapabilities: {}, agentInfo: { name: 'test-agent', version: '1' } });
+    respond(id, { protocolVersion: 1, agentCapabilities: {sessionCapabilities:{...(process.env.FAKE_OMIT_SESSION_POLICY==='1'?{}:{close:{}}),resume:{}}}, agentInfo: { name: 'test-agent', version: '1' } });
   } else if (method === 'session/new') {
     const sessionId = `test-session-${++nextSession}`;
     sessionServers.set(sessionId, params.mcpServers);
+    lifecycle('new',sessionId);
     respond(id, { sessionId });
   } else if (method === 'session/resume') {
     sessionServers.set(params.sessionId, params.mcpServers);
+    lifecycle('resume',params.sessionId);
     respond(id, {});
+  } else if(method==='session/close'){
+    sessionServers.delete(params.sessionId);sessionModels.delete(params.sessionId);lifecycle('close',params.sessionId);respond(id,{});
   } else if (method === 'session/set_config_option') {
     sessionModels.set(params.sessionId, params.value);
     if (process.env.FAKE_MODEL_EVENTS) appendFileSync(process.env.FAKE_MODEL_EVENTS, JSON.stringify(params) + '\n');
