@@ -79,13 +79,13 @@ export class MediaService {
   readonly root: string;
   private cache:MediaCache;
   private videoBusy=false;
-  constructor(root: string, private readonly settings: () => SocialSettings,private readonly prepareRequest?:PrepareServiceRequest,options:{index?:MediaCacheStore;onFailure?:(error:Error)=>void}={}) { this.root = resolve(root);this.cache=new MediaCache(this.root,options.index,{onFailure:options.onFailure}); }
+  constructor(root: string, private readonly settings: () => SocialSettings,private readonly prepareRequest?:PrepareServiceRequest,private options:{index?:MediaCacheStore;onFailure?:(error:Error)=>void;pin?:(file:string)=>Promise<void>}={}) { this.root = resolve(root);this.cache=new MediaCache(this.root,options.index,{onFailure:options.onFailure}); }
   private async request<T>(input:ServiceRequest,operation:(limits:ServiceLimits,report:(usage:ReportedUsage)=>void)=>Promise<T>):Promise<T>{
     if(!this.prepareRequest)return operation({maxOutputTokens:8192,maxResponseChars:32000},()=>{});
     const prepared=await this.prepareRequest(input);try{return await prepared.run(operation);}finally{await prepared.close();}
   }
-  save(buffer: Buffer, extension: string): Promise<string> {
-    return this.cache.save(buffer,extension);
+  async save(buffer: Buffer, extension: string): Promise<string> {
+    const file=await this.cache.save(buffer,extension);await this.options.pin?.(file);return file;
   }
   flush():Promise<void>{return this.cache.flush();}
   async bytes(source: string, signal: AbortSignal, max = 12_000_000): Promise<{ buffer: Buffer; mime: string }> {

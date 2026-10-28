@@ -2,6 +2,7 @@ import type {SocialData,StoredMessage,ScheduledTask} from '../qq/social-store.js
 import type {MessageEvent,Segment} from '../qq/onebot.js';
 import type {Thought} from '../agent/autonomous-state.js';
 import type {LearningJob,LearningClaim} from '../agent/cognition-state.js';
+import type {MediaReferenceStore} from './media-reference-types.js';
 
 export type SocialField=Exclude<keyof SocialData,'messages'>;
 export type MessageQuery={chat?:string;ids?:number[];limit?:number;offset?:number;query?:string;after?:number;ascending?:boolean;incomingOnly?:boolean;excludeUsers?:string[]};
@@ -11,6 +12,7 @@ type Awaitable<T>=T|Promise<T>;
 /** 元数据视图有界缓存；归档查询允许异步实现，不要求将历史加载到业务进程。 */
 export interface SocialRepository {
   readonly path:string;
+  readonly mediaReferenceStore?:MediaReferenceStore;
   load():Promise<void>;
   close?():Promise<void>;
   onFailure?:(error:Error)=>void;

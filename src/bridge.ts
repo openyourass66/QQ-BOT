@@ -3,6 +3,8 @@ import { Readable, Writable } from 'node:stream';
 import process from 'node:process';
 import { randomBytes } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
+import {basename} from 'node:path';
+import {MediaReferenceMaintenance} from './services/media-reference-maintenance.js';
 import * as acp from '@agentclientprotocol/sdk';
 import { config } from './core/config.js';
 import { recall } from './agent/cognition.js';
@@ -58,7 +60,8 @@ const usage = new SqliteDailyUsageStore(paths.usage);
 usage.onFailure=error=>{if(!stopping){reportFatal(error);void shutdown(1);}};
 const socialStore:SocialRepository = new SqliteSocialStore(paths.social,{onMigrationProgress:({stage,completed,total})=>log('info',`[storage] ${stage} ${completed}/${total}`)});
 socialStore.onFailure=error=>{if(!stopping){reportFatal(error);void shutdown(1);}};
-const media = new MediaService(paths.media, () => getSettings().social,prepareServiceRequest,{index:usage.mediaCacheStore,onFailure:error=>{if(!stopping){reportFatal(error);void shutdown(1);}}});
+const media = new MediaService(paths.media, () => getSettings().social,prepareServiceRequest,{index:usage.mediaCacheStore,pin:file=>usage.pinMedia(basename(file)),onFailure:error=>{if(!stopping){reportFatal(error);void shutdown(1);}}});
+const mediaReferences=new MediaReferenceMaintenance([socialStore.mediaReferenceStore!,usage.mediaReferenceStore],{busy:()=>ingress.size>0||queue.size>0||activeConversations.size>0,stopping:()=>stopping,onFailure:error=>{if(!stopping){reportFatal(error);void shutdown(1);}}});
 const shutdownSignal = new AbortController();
 const operations:QqOperationService=new QqOperationService(usage,socialStore,{settings:getSettings,account:()=>selfId,readAccount:async signal=>Number((await api.call<{user_id:number}>('get_login_info',{},signal)).user_id),stopping:()=>stopping,fatal:error=>{if(!stopping){reportFatal(error);void shutdown(1);}}});
 const activeConversations = new Map<string, ToolContext>();
@@ -785,6 +788,7 @@ async function main(): Promise<void> {
   ws.start();
   let sweeping=false;
   scheduler = setInterval(() => {
+    void mediaReferences.tick();
     if(status.acpConnected&&!sweeping){sweeping=true;void conversations.sweep().catch(error=>log('error',`[context] ${String(error)}`)).finally(()=>{sweeping=false;});}
     if (status.qqOnline && status.acpConnected) void engine.tick(selfId, shutdownSignal.signal, (chat,reason,a)=>wakeConversation(chat,reason,true,undefined,a),(chat,kind)=>!queue.has(['qzone','qzone-comment'].includes(kind)?`self:${kind}`:chat),true).catch(e => log('error', `[scheduler] ${String(e)}`));
     if(status.qqOnline&&status.acpConnected)void engine.cognition.tick(shutdownSignal.signal,()=>ingress.size>0||queue.size>0||activeConversations.size>0).catch(()=>log('error','[learning] 后台分析受阻，请查看学习记录与额度'));
@@ -823,6 +827,7 @@ async function shutdown(code = 0): Promise<void> {
     await withTimeout((async () => {
       await Promise.all([actionServer?.close(), budgetServer?.close(), operations.close(),stopChild(), queue.drain(), ingress.drain()]);
       await engine.cognition.flush();
+      await mediaReferences.flush();
       await media.flush();
       await Promise.all([usage.flush(), store.flush(), groupContext.flush(), socialStore.flush(), flushSettings()]);
       await Promise.all([socialStore.close?.(),usage.close(),store.close(),groupContext.close()]);

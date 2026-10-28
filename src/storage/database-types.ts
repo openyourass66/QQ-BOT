@@ -4,6 +4,7 @@ import type {Quota} from '../core/usage.js';
 import type {OperationDatabaseRequest} from './operation-types.js';
 import type {LearningClaim} from '../agent/cognition-state.js';
 import type {MediaCacheRequest} from './media-cache-types.js';
+import type {MediaReferenceRequest} from './media-reference-types.js';
 
 export const entityTables=['contacts','memories','stickers','tasks','events','actions','turns','profiles','interests','thoughts','decisions','autonomous_contacts','sticker_uses','posts','space_comments','memory_meta','lexicon','suppressed','learning_scopes','learning_jobs','state'] as const;
 export type EntityTable=typeof entityTables[number];
@@ -19,7 +20,7 @@ export type UsageDatabaseRequest=OperationDatabaseRequest
   |{action:'usage-finish-model';id:string;outcome:'completed'|'failed'|'unknown';usage:ReportedUsage}
   |{action:'usage-recover-models'}
   |{action:'usage-request-stats';date:string};
-export type DatabaseRequest=UsageDatabaseRequest|MediaCacheRequest
+export type DatabaseRequest=UsageDatabaseRequest|MediaCacheRequest|MediaReferenceRequest
   |{action:'metadata'}
   |{action:'import';rows:Array<EntityRow|{table:'messages';key:string;ordinal:number;value:StoredMessage}>}
   |{action:'complete-import';source:Record<string,unknown>}

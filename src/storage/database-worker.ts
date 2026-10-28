@@ -11,6 +11,8 @@ import {createRequestSchema} from './request-ledger.js';
 import {createOperationSchema} from './operation-ledger.js';
 import {createMediaCacheSchema,executeMediaCache} from './media-cache-worker.js';
 import type {MediaCacheRequest} from './media-cache-types.js';
+import {createMediaReferenceSchema,executeMediaReferences,replaceMediaReferences,entityMediaSource,messageMediaSource} from './media-references.js';
+import type {MediaReferenceRequest} from './media-reference-types.js';
 import type {MessageQuery,MessageRef} from './social-repository.js';
 import type {StoredMessage} from '../qq/social-store.js';
 
@@ -35,11 +37,12 @@ function changeEntity(row:EntityChange,insert=false){
   const numeric=(field:string)=>typeof value?.[field]==='number'&&Number.isFinite(value[field])?value[field] as number:0;
   const sql=`INSERT INTO ${table}(key,ordinal,chat,at,state,due,retry_at,payload) VALUES(?,?,?,?,?,?,?,?)`+(insert?'':' ON CONFLICT(key) DO UPDATE SET ordinal=excluded.ordinal,chat=excluded.chat,at=excluded.at,state=excluded.state,due=excluded.due,retry_at=excluded.retry_at,payload=excluded.payload');
   db.prepare(sql).run(row.key,row.ordinal??0,String(value?.chat??''),numeric('at'),String(value?.state??''),numeric('due'),numeric('retryAt'),payload);setMeta('metadata_bytes',size);
+  replaceMediaReferences(db,entityMediaSource(row.table,row.key),payload);
 }
 function putMessage(m:StoredMessage,insertOnly=false,strict=false){
   const exists=!insertOnly&&!strict&&db.prepare('SELECT 1 FROM messages WHERE chat=? AND id=?').get(m.chat,m.id);
   const result=db.prepare('INSERT INTO messages(chat,id,user,name,at,text,self,recalled,payload) VALUES(?,?,?,?,?,?,?,?,?)'+(strict?'':insertOnly?' ON CONFLICT(chat,id) DO NOTHING':' ON CONFLICT(chat,id) DO UPDATE SET user=excluded.user,name=excluded.name,at=excluded.at,text=excluded.text,self=excluded.self,recalled=excluded.recalled,payload=excluded.payload')).run(m.chat,m.id,String(m.user),m.name,m.at,m.text,m.self?1:0,m.recalled?1:0,JSON.stringify(m));
-  if(result.changes&&!exists)setMeta('messages_count',Number(meta('messages_count')??0)+1);return result;
+  if(result.changes){if(!exists)setMeta('messages_count',Number(meta('messages_count')??0)+1);replaceMediaReferences(db,messageMediaSource(m.chat,m.id),JSON.stringify(m));}return result;
 }
 function deleteMessages(sql:string,...args:SQLInputValue[]){const removed=Number(db.prepare(sql).run(...args).changes);if(removed)setMeta('messages_count',Number(meta('messages_count')??0)-removed);}
 function seedReceipts(){
@@ -68,6 +71,7 @@ function lookup(refs:MessageRef[],evidenceOnly=false){
 function execute(request:DatabaseRequest):unknown {
   if(!meta('initialized')&&!['metadata','import','complete-import','integrity','fingerprint','close'].includes(request.action))throw error('DATABASE_NOT_INITIALIZED','数据库迁移尚未完成，不能开放业务。');
   if(request.action.startsWith('media-cache-'))return executeMediaCache(request as MediaCacheRequest,{db,meta,setMeta,transaction});
+  if(request.action.startsWith('media-refs-'))return executeMediaReferences(request as MediaReferenceRequest,{db,meta,setMeta,transaction});
   if(request.action.startsWith('usage-'))return executeUsage(request as UsageDatabaseRequest,{db,meta,setMeta,transaction,error});
   switch(request.action){
     case 'metadata':{
@@ -164,7 +168,7 @@ function execute(request:DatabaseRequest):unknown {
 try{
   db=new DatabaseSync(workerData.path);db.exec('PRAGMA busy_timeout=3000; PRAGMA foreign_keys=ON; PRAGMA trusted_schema=OFF;');
   const version=Number(Object.values(db.prepare('PRAGMA user_version').get()!)[0]),app=Number(Object.values(db.prepare('PRAGMA application_id').get()!)[0]);
-  if(version>8)throw error('DATABASE_SCHEMA_NEWER','数据库版本较新，请使用兼容的程序版本。');
+  if(version>9)throw error('DATABASE_SCHEMA_NEWER','数据库版本较新，请使用兼容的程序版本。');
   if(version===0){
     if(Number(db.prepare("SELECT COUNT(*) AS n FROM sqlite_schema WHERE type='table'").get()!.n))throw error('DATABASE_INVALID','数据文件不是受支持的数据库。');
     transaction(()=>{
@@ -180,12 +184,13 @@ try{
   if(version<6)transaction(()=>db.exec('CREATE INDEX IF NOT EXISTS thoughts_due ON entity_thoughts(state,due,key);PRAGMA user_version=6;'));
   if(version<7)transaction(()=>db.exec('CREATE INDEX IF NOT EXISTS learning_chat_state ON entity_learning_jobs(chat,state);PRAGMA user_version=7;'));
   if(version<8)transaction(()=>createMediaCacheSchema(db));
+  if(version<9)transaction(()=>createMediaReferenceSchema(db));
   db.exec('PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA wal_autocheckpoint=1000;');
   port.postMessage({type:'ready'});
   port.on('message',({id,request}:{id:number;request:DatabaseRequest})=>{
     const started=performance.now();
     try{
-      const reads=['metadata','query-messages','lookup-messages','latest-incoming','integrity','fingerprint','query-plan','export-social','usage-summary','usage-request-stats','due-tasks','due-thoughts','usage-op-read','usage-op-list','media-cache-read','media-cache-statistics'];
+      const reads=['metadata','query-messages','lookup-messages','latest-incoming','integrity','fingerprint','query-plan','export-social','usage-summary','usage-request-stats','due-tasks','due-thoughts','usage-op-read','usage-op-list','media-cache-read','media-cache-statistics','media-refs-query','media-refs-status'];
       const result=reads.includes(request.action)?readSnapshot(()=>execute(request)):execute(request);if(Buffer.byteLength(JSON.stringify(result))>DATABASE_LIMITS.responseBytes)throw error('DATABASE_RESPONSE_TOO_LARGE','查询结果过大，请缩小查询范围或分页读取。');
       port.postMessage({id,ok:true,result,elapsedMs:performance.now()-started});if(request.action==='close')port.close();
     }catch(failure){const e=failure as Error&{code?:string;errcode?:number};port.postMessage({id,ok:false,error:{code:e.code?.startsWith('DATABASE_')?e.code:e.errcode===13?'ENOSPC':'DATABASE_OPERATION_FAILED',message:e.code?.startsWith('DATABASE_')?e.message:'数据库操作失败，请保留数据并查看诊断。'}});}

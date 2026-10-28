@@ -1,5 +1,6 @@
 import type {DatabaseSync} from 'node:sqlite';
 import type {OperationDatabaseRequest,StoredOperation} from './operation-types.js';
+import {replaceMediaReferences} from './media-references.js';
 
 type Context={db:DatabaseSync;meta:(key:string)=>unknown;setMeta:(key:string,value:unknown)=>void;transaction:<T>(fn:()=>T)=>T;error:(code:string,message:string)=>Error};
 type Row={id:string;owner:string;state:string;metadata:string;result:string;error:string;bytes:number;at:number;date:string;hash:string};
@@ -13,6 +14,7 @@ function stored(row:Row):StoredOperation{return {record:JSON.parse(row.metadata)
 function patch(context:Context,row:Row,state:string,result=row.result,error=row.error){
   const bytes=Buffer.byteLength(row.metadata)+Buffer.byteLength(result)+Buffer.byteLength(error)+512;account(context,bytes-row.bytes);
   context.db.prepare('UPDATE external_operations SET state=?,result=?,error=?,bytes=? WHERE id=?').run(state,result,error,bytes,row.id);
+  replaceMediaReferences(context.db,'o/'+row.id,row.metadata+'\n'+result,row.id);
 }
 function prune(context:Context,date:string){
   const cutoff=new Date(Date.parse(date+'T00:00:00Z')-31*86400000).toISOString().slice(0,10),rows=context.db.prepare("SELECT id,bytes FROM external_operations WHERE date<? AND state IN ('completed','failed') ORDER BY date,at LIMIT 256").all(cutoff);
@@ -51,6 +53,7 @@ export function executeOperations(request:OperationDatabaseRequest,context:Conte
       prune(context,request.date);if(Number(context.meta('operations_count')??0)>=200000)throw context.error('DATABASE_STATE_LIMIT','动作数量达到支持上限，请先整理历史。');
       const metadata=json(r),bytes=Buffer.byteLength(metadata)+516;account(context,bytes);
       db.prepare('INSERT INTO external_operations(id,owner,account,chat,turn,semantic_hash,hash,date,at,state,metadata,bytes) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)').run(r.id,request.owner,r.account,r.chat,r.turn,request.semanticHash,request.hash,request.date,request.at,'created',metadata,bytes);context.setMeta('operations_count',Number(context.meta('operations_count')??0)+1);
+      replaceMediaReferences(db,'o/'+r.id,metadata,r.id);
       if(same){patch(context,requireRow(context,r.id),'completed',same.result,'');return {claimed:false,operation:stored(requireRow(context,r.id))};}
       return {claimed:true,operation:stored(requireRow(context,r.id))};
     }
@@ -63,13 +66,14 @@ export function executeOperations(request:OperationDatabaseRequest,context:Conte
       if(same&&same.state!=='completed')throw fail('本轮相同外部提交正在执行或结果待核对，不能换工具或临时编号再次发送。');
       if(db.prepare("SELECT 1 FROM external_steps WHERE operation_id=? AND state<>'completed' LIMIT 1").get(request.id))throw fail('前一步骤尚未确认，不能继续提交后续动作。');
       const payload=json(request.payload),result=same?String(same.result):'null',bytes=Buffer.byteLength(payload)+Buffer.byteLength(request.name)+Buffer.byteLength(result)+256;account(context,bytes);db.prepare('INSERT INTO external_steps(operation_id,sequence,name,hash,at,state,payload,result,bytes) VALUES(?,?,?,?,?,?,?,?,?)').run(request.id,request.sequence,request.name,request.hash,request.at,same?'completed':'submitting',payload,result,bytes);
+      replaceMediaReferences(db,`s/${request.id}/${request.sequence}`,payload+'\n'+result,request.id);
       if(same)return {claimed:false,state:'completed',result:JSON.parse(result)};
       patch(context,row,'submitting');return {claimed:true};
     }
     if(request.action==='usage-op-step'){
       const step=db.prepare('SELECT * FROM external_steps WHERE operation_id=? AND sequence=?').get(request.id,request.sequence);if(!step)throw fail('动作步骤不存在。');
       const result=json(request.result,65536),error=String(request.error??'').slice(0,2000);if(step.state!=='submitting'){if(step.state!==request.state||step.result!==result||step.error!==error)throw fail('已结算动作步骤不能覆盖。');return {reused:true};}
-      if(!['completed','unknown'].includes(request.state))throw fail('动作步骤状态无效。');const bytes=Buffer.byteLength(String(step.payload))+Buffer.byteLength(String(step.name))+Buffer.byteLength(result)+Buffer.byteLength(error)+256;account(context,bytes-Number(step.bytes));db.prepare('UPDATE external_steps SET state=?,result=?,error=?,bytes=? WHERE operation_id=? AND sequence=?').run(request.state,result,error,bytes,request.id,request.sequence);if(request.state==='unknown')patch(context,row,'unknown',row.result,error);return {reused:false};
+      if(!['completed','unknown'].includes(request.state))throw fail('动作步骤状态无效。');replaceMediaReferences(db,"s/"+request.id+"/"+request.sequence,String(step.payload)+'\n'+result,request.id);const bytes=Buffer.byteLength(String(step.payload))+Buffer.byteLength(String(step.name))+Buffer.byteLength(result)+Buffer.byteLength(error)+256;account(context,bytes-Number(step.bytes));db.prepare('UPDATE external_steps SET state=?,result=?,error=?,bytes=? WHERE operation_id=? AND sequence=?').run(request.state,result,error,bytes,request.id,request.sequence);if(request.state==='unknown')patch(context,row,'unknown',row.result,error);return {reused:false};
     }
     if(request.action==='usage-op-complete'){
       const result=json(request.result,524288);if(row.state==='completed'){if(row.result!==result)throw fail('已完成动作的返回值不能覆盖。');return {reused:true};}

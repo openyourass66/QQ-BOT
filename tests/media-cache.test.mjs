@@ -100,5 +100,5 @@ test('发布成功但索引确认失败后停止保存；重启保留已发布�
 
 test('schema 7 升级媒体索引时保留旧额度，拒绝未来 schema',()=>fixture(async({path,keep})=>{
   const usage=keep(new SqliteDailyUsageStore(path));await usage.load();await usage.consume(()=>[{key:'test',amount:3,limit:10,label:'测试'}]);await usage.close();let db=new DatabaseSync(path+'.sqlite');db.exec('DROP TABLE media_cache_files;PRAGMA user_version=7;');db.close();
-  const upgraded=keep(new SqliteDailyUsageStore(path));await upgraded.load();assert.equal(upgraded.used('test'),3);assert.deepEqual(await ready(upgraded.mediaCacheStore),{files:0,bytes:0});await upgraded.close();db=new DatabaseSync(path+'.sqlite');assert.equal(db.prepare('PRAGMA user_version').get().user_version,8);db.exec('PRAGMA user_version=999;');db.close();const future=keep(new SqliteDailyUsageStore(path));await assert.rejects(future.load(),/版本|schema/i);
+  const upgraded=keep(new SqliteDailyUsageStore(path));await upgraded.load();assert.equal(upgraded.used('test'),3);assert.deepEqual(await ready(upgraded.mediaCacheStore),{files:0,bytes:0});await upgraded.close();db=new DatabaseSync(path+'.sqlite');assert.equal(db.prepare('PRAGMA user_version').get().user_version,9);db.exec('PRAGMA user_version=999;');db.close();const future=keep(new SqliteDailyUsageStore(path));await assert.rejects(future.load(),/版本|schema/i);
 }));

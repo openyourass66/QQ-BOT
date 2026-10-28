@@ -8,6 +8,7 @@ import type {ModelRequestRecord,ReportedUsage} from './database-types.js';
 import type {OperationRecord,StoredOperation} from './operation-types.js';
 import {operationDigest,currentOperation} from '../core/operation-context.js';
 import type {MediaCacheStore} from './media-cache-types.js';
+import type {MediaReferenceStore} from './media-reference-types.js';
 
 export const usageDatabasePath=(path:string)=>path+'.sqlite';
 const hash=(bytes:Uint8Array|string)=>createHash('sha256').update(bytes).digest('hex');
@@ -36,6 +37,7 @@ async function ensureDatabase(path:string,date:string):Promise<string>{
 export class SqliteDailyUsageStore extends DailyUsageStore {
   readonly instanceId=randomUUID();
   readonly mediaCacheStore:MediaCacheStore={call:request=>{if(!this.loaded||this.closing)return Promise.reject(new Error('额度仓储未打开或已经关闭'));return this.database!.call(request);}};
+  readonly mediaReferenceStore:MediaReferenceStore={call:request=>{if(!this.loaded||this.closing)return Promise.reject(new Error('额度仓储未打开或已经关闭'));return this.database!.call(request);}};
   private database?:DatabaseClient;
   private chain:Promise<unknown>=Promise.resolve();
   private queued=0;
@@ -62,6 +64,7 @@ export class SqliteDailyUsageStore extends DailyUsageStore {
   reserveModel(request:ModelRequestRecord,getQuotas:()=>Quota[]):Promise<{reused:boolean}>{return this.reserve(getQuotas,()=>{},request.id,request);}
   finishModel(id:string,outcome:'completed'|'failed'|'unknown',usage:ReportedUsage):Promise<unknown>{return this.database!.call({action:'usage-finish-model',id,outcome,usage});}
   requestStatistics():Promise<unknown>{return this.database!.call({action:'usage-request-stats',date:shanghaiDate(this.now())});}
+  async pinMedia(name:string):Promise<void>{const operation=currentOperation();if(!operation)return;if(operation.owner!==this.instanceId)throw failure('媒体动作不属于当前额度仓储');await this.mediaReferenceStore.call({action:'media-refs-pin',name,operationId:operation.record.id,owner:this.instanceId});}
   beginOperation(record:OperationRecord):Promise<{claimed:boolean;operation:StoredOperation}>{const {id:_,turn:__,summary:___,...semantic}=record;return this.database!.call({action:'usage-op-begin',record,owner:this.instanceId,date:shanghaiDate(this.now()),at:this.now().getTime(),hash:operationDigest(record),semanticHash:operationDigest(semantic)});}
   reserveOperation(id:string,index:number,getQuotas:()=>Quota[],onReserved:()=>void=()=>{}):Promise<{reused:boolean}>{return this.reserve(getQuotas,onReserved,operationDigest([id,'quota',index]),undefined,{id,owner:this.instanceId});}
   submitOperation(id:string,sequence:number,name:string,payload:unknown):Promise<{claimed:boolean;state?:string;result?:unknown}>{return this.database!.call({action:'usage-op-submit',id,owner:this.instanceId,sequence,name,payload,hash:operationDigest({name,payload}),at:this.now().getTime()});}

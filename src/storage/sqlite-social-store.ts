@@ -8,9 +8,11 @@ import type {EntityRow,EntityGuard} from './database-types.js';
 import type {SocialField,MessageQuery,MessageRef} from './social-repository.js';
 import {ThoughtSchema,type Thought} from '../agent/autonomous-state.js';
 import {LearningJobSchema,type LearningJob,type LearningClaim} from '../agent/cognition-state.js';
+import type {MediaReferenceStore} from './media-reference-types.js';
 
 /** 仅缓存有界业务状态；消息历史留在 Worker，事务只提交有变化的条目。 */
 export class SqliteSocialStore extends SocialStore {
+  readonly mediaReferenceStore:MediaReferenceStore={call:request=>{this.assertReadable();return this.database!.call(request);}};
   private database?:DatabaseClient;
   private revision=0;
   private positions=new Map<string,number>();
