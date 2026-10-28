@@ -14,6 +14,7 @@ export const ThoughtSchema = z.object({
   targetUser:z.number().int().positive().safe().optional(),
   priority:z.number().int().min(1).max(100),
   state:z.enum(['pending','running','done','dismissed','expired','unknown']),result:z.string().default(''),
+  claim:z.object({id:z.string().min(1).max(128),owner:z.string().min(1).max(128),at:z.number()}).optional(),
 });
 export const AutonomousStateSchema = z.object({
   interests:z.array(InterestSchema).max(1000).default([]),
@@ -25,6 +26,7 @@ export const AutonomousStateSchema = z.object({
   spaceComments:z.array(z.object({hash:z.string(),at:z.number(),state:z.enum(['running','success','unknown'])})).max(500).default([]),
   lastDecisionAt:z.number().default(0),lastCommentAttempt:z.number().default(0),commentCursor:z.number().int().nonnegative().default(0),
   lastScanAt:z.number().default(0),lastQzoneAttempt:z.number().default(0),
+  scheduleCursor:z.string().max(256).default(''),
 }).prefault({});
 export type Thought = z.infer<typeof ThoughtSchema>;
-export type AutonomousTurn = {kind:Thought['kind'];thoughtId:string;runId?:string;effects:Set<Thought['kind']>;messages:number;reason:string;failure?:string;targetUser?:number;spacePost?:import('../services/qzone.js').SpacePost};
+export type AutonomousTurn = {kind:Thought['kind'];thoughtId:string;runId?:string;reserveDecision?:()=>Promise<void>;effects:Set<Thought['kind']>;messages:number;reason:string;failure?:string;targetUser?:number;spacePost?:import('../services/qzone.js').SpacePost};

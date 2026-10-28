@@ -574,8 +574,10 @@ function logDrop(key: string, stage: 'ingress' | 'batch' | 'queue' | 'notice'): 
 async function wakeConversation(chat: string, reason: string, proactive = true, actor?: number,autonomous?:AutonomousTurn): Promise<void|boolean> {
   const publicTask=autonomous?.kind==='qzone'||autonomous?.kind==='qzone-comment',key=publicTask?`self:${autonomous!.kind}`:autonomous?`autonomous:${autonomous.kind}:${chat}`:chat;
   if (stopping || (proactive && queue.has(publicTask?key:chat)) || (!publicTask&&!allowedChat(getSettings().social, chat, actor))) return false;
-  await queue.run(publicTask?key:chat, async () => {
+  return queue.run(publicTask?key:chat, async () => {
+    if(autonomous&&(ingress.size>0||queue.size>1))return false;
     const ctx: ToolContext = { chat:publicTask?`private:${selfId}`:chat, self: selfId, user:publicTask?selfId:actor ?? Number(chat.split(':')[1]), origin: proactive ? 'background' : 'notice', signal: shutdownSignal.signal, sent: 0, silent: false, proactive,autonomous, pendingStickerCollections: new Set(), pendingStickerSends: new Set(),budget:turnBudget() };
+    if(autonomous){engine.autonomy.authorize(ctx,'qq_self_state');await autonomous.reserveDecision?.();}
     activeConversations.set(key, ctx);
     try {
       const history=publicTask?'':(await socialStore.messages(chat,15)).filter(m=>!getSettings().social.blockedUsers.includes(String(m.user))).map(m=>`#${m.id} ${m.name}(QQ ${m.user}): ${JSON.stringify(m.text)}`).join('\n');
@@ -587,6 +589,7 @@ async function wakeConversation(chat: string, reason: string, proactive = true, 
       if (ctx.topic) activeTopics.set(chat, { topic: ctx.topic, until: Date.now() + getSettings().social.activeMinutes * 60000 });
       if (ctx.endTopic) activeTopics.delete(chat);
     } finally { activeConversations.delete(key); }
+    return true;
   });
 }
 
@@ -836,7 +839,7 @@ async function main(): Promise<void> {
   let sweeping=false;
   scheduler = setInterval(() => {
     if(status.acpConnected&&!sweeping){sweeping=true;void conversations.sweep().catch(error=>log('error',`[context] ${String(error)}`)).finally(()=>{sweeping=false;});}
-    if (status.qqOnline && status.acpConnected) void engine.tick(selfId, shutdownSignal.signal, (chat,reason,a)=>wakeConversation(chat,reason,true,undefined,a),(chat,kind)=>!queue.has(['qzone','qzone-comment'].includes(kind)?`self:${kind}`:chat)).catch(e => log('error', `[scheduler] ${String(e)}`));
+    if (status.qqOnline && status.acpConnected) void engine.tick(selfId, shutdownSignal.signal, (chat,reason,a)=>wakeConversation(chat,reason,true,undefined,a),(chat,kind)=>!queue.has(['qzone','qzone-comment'].includes(kind)?`self:${kind}`:chat),true).catch(e => log('error', `[scheduler] ${String(e)}`));
     if(status.qqOnline&&status.acpConnected)void engine.cognition.tick(shutdownSignal.signal,()=>ingress.size>0||queue.size>0||activeConversations.size>0).catch(()=>log('error','[learning] 后台分析受阻，请查看学习记录与额度'));
   }, 1000);
   scheduler.unref();

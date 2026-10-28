@@ -6,6 +6,7 @@ import {dataFromRows,entityRows,rowChanges,stableEntityOrder,entityIdentity} fro
 import {ensureSocialDatabase,verifyMigrationSource,type MigrationProgress} from './social-migration.js';
 import type {EntityRow} from './database-types.js';
 import type {SocialField,MessageQuery,MessageRef} from './social-repository.js';
+import {ThoughtSchema,type Thought} from '../agent/autonomous-state.js';
 
 /** 仅缓存有界业务状态；消息历史留在 Worker，事务只提交有变化的条目。 */
 export class SqliteSocialStore extends SocialStore {
@@ -41,7 +42,7 @@ export class SqliteSocialStore extends SocialStore {
   override updateWithMessages<T>(chat:string,ids:number[],fn:(draft:SocialData)=>T):Promise<T>{
     return this.serial(async()=>this.mutate(fn,await this.database!.call<StoredMessage[]>({action:'lookup-messages',refs:ids.map(id=>({chat,id}))})));
   }
-  private async mutate<T>(fn:(draft:SocialData)=>T,messages?:StoredMessage[]):Promise<T>{
+  private async mutate<T>(fn:(draft:SocialData)=>T,messages?:StoredMessage[],guard?:{table:'thoughts';key:string;claimId:string}):Promise<T>{
     const copies=new Map<keyof SocialData,unknown>(),originalMessages=messages?structuredClone(messages):undefined;
     const draft=new Proxy(this.data,{
       get:(target,key)=>{
@@ -64,7 +65,7 @@ export class SqliteSocialStore extends SocialStore {
       if(parsed.length!==before.size||parsed.some(m=>!before.has(`${m.chat}/${m.id}`)))throw new Error('来源消息事务不能新增、移除或更换消息编号。');
       changedMessages=parsed.filter(m=>JSON.stringify(m)!==before.get(`${m.chat}/${m.id}`));
     }
-    if(changes.length||changedMessages.length){const saved=await this.database!.call<{revision:number}>({action:'mutate',expectedRevision:this.revision,changes,messages:changedMessages});this.revision=saved.revision;this.data=next;for(const row of changes){const key=entityIdentity(row);if('ordinal' in row&&typeof row.ordinal==='number')this.positions.set(key,row.ordinal);else this.positions.delete(key);}}
+    if(changes.length||changedMessages.length){const saved=await this.database!.call<{revision:number;changed?:boolean}>({action:'mutate',expectedRevision:this.revision,changes,messages:changedMessages,...(guard?{guard}:{})});if(saved.changed===false)return false as T;this.revision=saved.revision;this.data=next;for(const row of changes){const key=entityIdentity(row);if('ordinal' in row&&typeof row.ordinal==='number')this.positions.set(key,row.ordinal);else this.positions.delete(key);}}
     return result;
   }
   override record(event:MessageEvent,days:number,perChat:number):Promise<boolean>{
@@ -84,6 +85,12 @@ export class SqliteSocialStore extends SocialStore {
     });
   }
   override async dueTasks(now:number):Promise<ScheduledTask[]>{this.assertReadable();return (await this.database!.call<unknown[]>({action:'due-tasks',now,limit:10})).map(value=>ScheduledTaskSchema.parse(value));}
+  override async dueThoughts(now:number):Promise<Thought[]>{this.assertReadable();return (await this.database!.call<unknown[]>({action:'due-thoughts',now,limit:200})).map(value=>ThoughtSchema.parse(value));}
+  override claimThought(id:string,now:number):Promise<Thought|undefined>{return this.serial(async()=>{
+    const saved=await this.database!.call<{claimed:boolean;revision:number;thought?:unknown}>({action:'claim-thought',expectedRevision:this.revision,id,now,claimId:randomUUID(),owner:this.instanceId});
+    if(!saved.claimed)return undefined;const thought=ThoughtSchema.parse(saved.thought);this.revision=saved.revision;this.data.autonomous.thoughts=this.data.autonomous.thoughts.map(item=>item.id===id?thought:item);return thought;
+  });}
+  override updateThoughtClaim(id:string,claimId:string,fn:(draft:SocialData)=>void):Promise<boolean>{return this.serial(()=>this.mutate(d=>{const current=d.autonomous.thoughts.find(t=>t.id===id);if(!current||current.state!=='running'||current.claim?.id!==claimId)return false;fn(d);return true;},undefined,{table:'thoughts',key:id,claimId}));}
   override claimTask(id:string,now:number):Promise<ScheduledTask|undefined>{return this.serial(async()=>{
     const saved=await this.database!.call<{claimed:boolean;revision:number;task?:unknown}>({action:'claim-task',expectedRevision:this.revision,id,now,claimId:randomUUID(),owner:this.instanceId});
     if(!saved.claimed)return undefined;const task=ScheduledTaskSchema.parse(saved.task);this.revision=saved.revision;this.data.tasks=this.data.tasks.map(item=>item.id===id?task:item);return task;

@@ -629,7 +629,7 @@ export class SocialEngine {
     } catch (error) { if(id)await this.store.endAction(id, 'unknown', String(error)); throw error; }
     finally {ctx.authorize=previousAuthorization;}
   }
-  async tick(self: number, signal: AbortSignal, wake: (chat: string, reason: string,autonomous?:AutonomousTurn) => Promise<void|boolean>,canWake?:(chat:string,kind:AutonomousTurn['kind'])=>boolean): Promise<void> {
+  async tick(self: number, signal: AbortSignal, wake: (chat: string, reason: string,autonomous?:AutonomousTurn) => Promise<void|boolean>,canWake?:(chat:string,kind:AutonomousTurn['kind'])=>boolean,reserveOnWake=false): Promise<void> {
     if (this.tickRunning || !self || signal.aborted) return;
     this.tickRunning = true;
     try {
@@ -649,7 +649,7 @@ export class SocialEngine {
         const post=result.posts.find(p=>p.created_at>Date.now()-24*3600000&&!p.comments.some(comment=>comment.user_id===self)&&!this.autonomy.spaceCommentSeen(p.url));
         if(!post){a.reason='好友近期没有新的可评论动态，或动态已评论、结果待核对；本轮不唤醒模型';return false;}
         a.spacePost=post;return true;
-      });
+      },reserveOnWake);
     } finally { this.tickRunning = false; }
   }
   private reminderBlockReason(ctx: ToolContext, creating = false): string {

@@ -9,6 +9,7 @@ import { shanghaiDate } from '../core/usage.js';
 import { allowedChat } from '../qq/social-settings.js';
 import { MediaService, downloadPublic, imageMime } from '../services/media.js';
 import { pathToFileURL } from 'node:url';
+import {backgroundLane,selectBackgroundThought} from '../app/background-selection.js';
 
 const minute=60000,hour=60*minute;
 const common=['qq_self_state','qq_interest','qq_thought','qq_finish','qq_report'];
@@ -51,6 +52,7 @@ export class Autonomy {
     if(!this.enabled())throw new Error('自主任务已关闭或已进入安静时段');
     const thought=this.store.view('autonomous').autonomous.thoughts.find(t=>t.id===a.thoughtId);
     if(!thought||thought.state!=='running'||thought.expires<=this.now())throw new Error('这条自主想法已取消、过期或停止执行');
+    if(a.runId&&thought.claim&&thought.claim.id!==a.runId)throw new Error('自主执行凭证已失效，未继续提交');
     const s=this.settings();
     if(!['qzone','qzone-comment'].includes(a.kind)&&(!allowedChat(s.social,ctx.chat,ctx.user)||this.store.profile(ctx.chat)?.proactive===false))throw new Error('该会话不允许自主活动');
     if(a.kind==='collect'&&(!s.social.autoCollectStickers||!s.social.stickersEnabled))throw new Error('后台收藏已关闭');
@@ -192,7 +194,7 @@ export class Autonomy {
       return result;
     } catch(error) {ctx.autonomous.failure=String(error);await this.store.update(d=>{const p=d.autonomous.posts.find(p=>p.hash===hash);if(p)p.state='unknown';});throw error;}
   }
-  async tick(signal:AbortSignal,wake:(t:Thought,a:AutonomousTurn)=>Promise<void|boolean>,canWake:(t:Thought)=>boolean=()=>true,prepare?:(t:Thought,a:AutonomousTurn)=>Promise<boolean>):Promise<void> {
+  async tick(signal:AbortSignal,wake:(t:Thought,a:AutonomousTurn)=>Promise<void|boolean>,canWake:(t:Thought)=>boolean=()=>true,prepare?:(t:Thought,a:AutonomousTurn)=>Promise<boolean>,reserveOnWake=false):Promise<void> {
     if(this.running||signal.aborted||!this.enabled())return;
     const s=this.settings(),now=this.now(),interval=s.social.proactiveIntervalMinutes*minute,scanEvery=Math.min(interval,minute);
     const before=this.store.view('autonomous');
@@ -236,8 +238,9 @@ export class Autonomy {
       }
       if(this.usage.used('autonomous-decisions')>=s.social.autonomousDecisionsPerDay||this.usage.used('social-actions')>=s.social.actionsPerDay)return;
       const d=this.store.view('autonomous','contacts','profiles','account');
-      const referenced=await this.store.lookupMessages(d.autonomous.thoughts.filter(t=>t.messageId!==undefined).map(t=>({chat:t.chat,id:t.messageId!})));
-      const eligible=d.autonomous.thoughts.filter(t=>{
+      const candidates=await this.store.dueThoughts(now);
+      const referenced=await this.store.lookupMessages(candidates.filter(t=>t.messageId!==undefined).map(t=>({chat:t.chat,id:t.messageId!})));
+      const eligible=candidates.filter(t=>{
         if(t.state!=='pending'||t.due>now||t.expires<=now||!canWake(t))return false;
         if(t.kind==='qzone')return s.social.autoQzoneEnabled&&s.features.qzone.enabled&&now-d.autonomous.lastQzoneAttempt>=s.social.qzoneIntervalHours*hour&&this.usage.used('autonomous-qzone')<s.social.autoQzonePerDay&&this.usage.used('qzone')<s.features.qzone.dailyLimit;
         if(t.kind==='qzone-comment')return s.social.autoQzoneCommentEnabled&&s.features.qzone.browseEnabled&&s.features.qzone.commentsEnabled&&!!t.targetUser&&allowedChat(s.social,`private:${t.targetUser}`)&&(!s.social.autoQzoneCommentUsers.length||s.social.autoQzoneCommentUsers.includes(String(t.targetUser)))&&this.store.profile(`private:${t.targetUser}`)?.proactive!==false&&now-d.autonomous.lastCommentAttempt>=s.social.qzoneCommentIntervalMinutes*minute&&this.usage.used('qzone-comments')<s.features.qzone.commentDailyLimit;
@@ -249,23 +252,28 @@ export class Autonomy {
         if(this.usage.used('proactive')>=s.budgets.proactiveMessagesPerDay)return false;
         return !c?.unanswered&&now-Math.max(c?.proactiveAt??0,c?.attemptAt??0)>=s.social.autonomousChatCooldownMinutes*minute&&(!t.key.startsWith('chat:')||now-Math.max(c?.incomingAt??0,d.contacts.find(x=>x.chat===t.chat)?.at??0)>=interval);
       });
-      const lastKind=d.autonomous.decisions.at(-1)?.kind,rank=(t:Thought)=>t.priority+Math.min(40,(now-t.at)/hour*2)+(lastKind&&lastKind!==t.kind?15:0);
-      const t=eligible.sort((a,b)=>rank(b)-rank(a)||a.at-b.at)[0];if(!t)return;
-      await this.store.update(data=>{
-        const current=data.autonomous.thoughts.find(x=>x.id===t.id);if(!current||current.state!=='pending')throw new Error('想法状态已变化');current.state='running';data.autonomous.lastDecisionAt=now;
+      const t=selectBackgroundThought(eligible,d.autonomous.scheduleCursor,now);if(!t)return;
+      const claimed=await this.store.claimThought(t.id,now);if(!claimed?.claim)return;
+      const claimId=claimed.claim.id;
+      if(!await this.store.updateThoughtClaim(t.id,claimId,data=>{
+        data.autonomous.lastDecisionAt=now;
+        data.autonomous.scheduleCursor=backgroundLane(t);
         if(t.kind==='qzone')data.autonomous.lastQzoneAttempt=now;
         if(t.kind==='qzone-comment'){data.autonomous.lastCommentAttempt=now;data.autonomous.commentCursor++;}
         if(t.chat&&!data.autonomous.contacts.some(c=>c.chat===t.chat)){data.autonomous.contacts.push({chat:t.chat,incomingAt:referenced.find(m=>m.chat===t.chat&&m.id===t.messageId)?.at??0,proactiveAt:0,unanswered:0,attemptAt:0});data.autonomous.contacts=data.autonomous.contacts.slice(-5000);}
-      });
-      const a:AutonomousTurn={kind:t.kind,thoughtId:t.id,runId:randomUUID(),effects:new Set(),messages:0,reason:'',...(t.targetUser?{targetUser:t.targetUser}:{})};let failure='',busy=false;
+      }))return;
+      const a:AutonomousTurn={kind:t.kind,thoughtId:t.id,runId:claimId,effects:new Set(),messages:0,reason:'',...(t.targetUser?{targetUser:t.targetUser}:{})};let failure='',busy=false;
+      let reservation:Promise<void>|undefined;
+      const reserve=()=>reservation??=this.usage.consume(()=>{signal.throwIfAborted();const current=this.store.view('autonomous').autonomous.thoughts.find(row=>row.id===t.id);if(!this.enabled()||current?.state!=='running'||current.claim?.id!==claimId||current.expires<=this.now())throw new Error('自主任务已关闭、取消或执行凭证失效');return [{key:'autonomous-decisions',amount:1,limit:this.settings().social.autonomousDecisionsPerDay,label:'自主判断'}];});
+      if(reserveOnWake)a.reserveDecision=reserve;
       try {
         signal.throwIfAborted();
         if(!prepare||await prepare(t,a)) {
-          await this.usage.consume(()=>[{key:'autonomous-decisions',amount:1,limit:this.settings().social.autonomousDecisionsPerDay,label:'自主判断'}]);
+          if(!reserveOnWake)await reserve();
           busy=(await wake(t,a))===false;
         }
       }catch(error){failure=String(error);}
-      await this.store.update(data=>{
+      await this.store.updateThoughtClaim(t.id,claimId,data=>{
         const current=data.autonomous.thoughts.find(x=>x.id===t.id),outcome=failure||a.failure?'unknown':busy?'pending':a.effects.has(t.kind)?'done':'dismissed';
         const reason=(failure||a.failure||a.reason||(busy?'会话正忙，保留想法稍后判断':outcome==='done'?'实际工具已完成':'这次选择保持安静')).slice(0,500);
         if(current?.state==='running'){current.state=outcome;current.result=reason;if(busy)current.due=now+30000;}
