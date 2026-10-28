@@ -14,13 +14,15 @@ import {operationDigest} from '../dist/core/operation-context.js';
 import {classifyRuntimeFailure} from '../dist/core/runtime-failure.js';
 import {protocolMutation,assertProtocolOperation,registeredProtocolTools} from '../dist/security/protocol-policy.js';
 import {QzoneService} from '../dist/services/qzone.js';
+import {SocialEngine} from '../dist/qq/social-engine.js';
+import {MediaService} from '../dist/services/media.js';
 
 const signal=()=>new AbortController().signal;
 const context=(extra={})=>({self:10000,user:20001,chat:'private:20001',origin:'message',messageId:1,sourceTime:100,sent:0,silent:false,signal:signal(),...extra});
 async function fixture(run){
   const root=await mkdtemp(join(tmpdir(),'qq-effects-')),usage=new SqliteDailyUsageStore(join(root,'usage.json')),store=new SqliteSocialStore(join(root,'social.json'));
   const s=structuredClone(DEFAULT_SETTINGS),calls=[],failures=[],state={account:10000,drop:false,emptyId:false,stopping:false};let next=1,operations;
-  const http=createServer(async(req,res)=>{let raw='';for await(const part of req)raw+=part;const args=JSON.parse(raw||'{}'),name=req.url.slice(1);if(name==='get_login_info'){res.end(JSON.stringify({status:'ok',retcode:0,data:{user_id:state.account}}));return;}calls.push({name,args});if(state.drop){res.destroy();return;}res.end(JSON.stringify({status:'ok',retcode:0,data:name.startsWith('send_')?state.emptyId?{}:{message_id:next++}:{result:0}}));});
+  const http=createServer(async(req,res)=>{let raw='';for await(const part of req)raw+=part;const args=JSON.parse(raw||'{}'),name=req.url.slice(1);if(name==='get_login_info'){res.end(JSON.stringify({status:'ok',retcode:0,data:{user_id:state.account}}));return;}calls.push({name,args});if(state.drop){res.destroy();return;}res.end(JSON.stringify({status:'ok',retcode:0,data:name==='get_file'?{url:'https://media.fixture/video.mp4'}:name.startsWith('send_')?state.emptyId?{}:{message_id:next++}:{result:0}}));});
   try{
     await usage.load();await store.load();await store.account(10000);http.listen(0,'127.0.0.1');await once(http,'listening');
     const api=new OneBotHttp(`http://127.0.0.1:${http.address().port}`,'',(call,execute)=>operations.intercept(call,execute));
@@ -89,4 +91,14 @@ test('空间评论按真实动态和评论编号登记，临时阅读编号变�
   const ctx=context(),feed=()=>service.feed(ctx.chat,ctx.self,20001,5,0,signal()),first=(await feed()).posts[0];
   const run=(post)=>operations.run({...ctx},'qq_qzone_comment',{post_id:post.id,text:'回复'},'评论',()=>{},()=>service.comment(ctx.chat,ctx.self,{post_id:post.id,reply_id:post.comments[0].id,text:'回复'},signal(),reserve),operationDigest(post.id));
   await assert.rejects(run(first),/不会自动重发/);const second=(await feed()).posts[0];assert.notEqual(first.id,second.id);await assert.rejects(run(second),/确认|相同/);assert.equal(posts,1);assert.equal((await usage.operationSummaries(10000)).rows.filter(row=>row.state==='unknown').length,1);
+}));
+
+test('已记录视频的协议缓存回退可经过真实只读适配器，不被动作守卫误拒绝',()=>fixture(async({root,store,usage,s,api,operations,calls})=>{
+  const previous=process.env.BOT_FFMPEG_BIN;process.env.BOT_FFMPEG_BIN='fixture-processor';
+  try{
+    await store.add({id:7,chat:'private:20001',user:20001,name:'甲',at:Date.now(),text:'[视频]',segments:[{type:'video',data:{file:'napcat-video-id'}}],self:false,recalled:false});
+    const media=new MediaService(join(root,'media'),()=>s.social);let seen;media.video=async(source)=>{seen=source;return {video:'已读取'};};
+    const engine=new SocialEngine(store,media,api,usage,()=>s,async()=>true,()=>{},()=>{},undefined,undefined,operations);
+    assert.deepEqual(await engine.execute({action:'social',tool:'qq_video',args:{message_id:7}},context()),{video:'已读取'});assert.equal(seen,'https://media.fixture/video.mp4');assert.deepEqual(calls.filter(row=>row.name==='get_file').map(row=>row.args.file),['napcat-video-id']);assert.equal(usage.used('social-actions'),0);assert.equal((await usage.operationSummaries(10000)).total,0);
+  }finally{if(previous===undefined)delete process.env.BOT_FFMPEG_BIN;else process.env.BOT_FFMPEG_BIN=previous;}
 }));

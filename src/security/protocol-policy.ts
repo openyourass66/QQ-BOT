@@ -10,7 +10,7 @@ const tools:Readonly<Record<string,readonly string[]>>=Object.freeze({
   qq_qzone_post:['send_qzone_msg'],qq_qzone_comment:['qzone_comment'],owner_sticker_collect:['add_custom_face'],owner_sticker_remove:['delete_custom_face'],
 });
 const mutations=new Set(Object.values(tools).flat());
-const reads=new Set(['get_login_info','get_friend_list','get_group_list','get_group_member_list','get_group_member_info','get_friend_msg_history','get_group_msg_history','get_forward_msg','get_group_root_files','get_group_files_by_folder','get_group_file_url','get_private_file_url','get_image','get_record','get_video','get_cookies','fetch_custom_face_detail','download_file','mark_msg_as_read']);
+const reads=new Set(['get_login_info','get_friend_list','get_group_list','get_group_member_list','get_group_member_info','get_friend_msg_history','get_group_msg_history','get_forward_msg','get_group_root_files','get_group_files_by_folder','get_group_file_url','get_private_file_url','get_image','get_record','get_video','get_file','get_cookies','fetch_custom_face_detail','download_file','mark_msg_as_read']);
 export function protocolMutation(name:string):boolean{if(mutations.has(name))return true;if(reads.has(name))return false;throw new Error('协议动作未登记，不能直接执行：'+name);}
 export function assertProtocolOperation(record:OperationRecord,name:string):void{if(!tools[record.tool]?.includes(name))throw new Error('当前能力不能提交这个协议动作。');}
 export const registeredProtocolTools=Object.freeze(Object.keys(tools));

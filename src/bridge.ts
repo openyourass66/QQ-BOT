@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 import * as acp from '@agentclientprotocol/sdk';
 import { config } from './core/config.js';
 import { recall } from './agent/cognition.js';
-import { clipBackground, readContextUsage, toolAvailable, toolEnabled, turnBudget } from './agent/context-policy.js';
+import { clipBackground, readContextUsage, toolAvailable, turnBudget } from './agent/context-policy.js';
 import { socialTools } from './qq/social-tools.js';
 import {
   OneBotHttp,
@@ -22,13 +22,12 @@ import { ConversationQueue, QueueFullError, withTimeout } from './core/runtime.j
 import { RecentMessages, splitForQq } from './core/message-utils.js';
 import { groupTrigger, formatGroupEntry } from './qq/group-context.js';
 import { parseApprovalReply, permissionOutcome } from './core/permissions.js';
-import { assertToolAccess, toolAccessVisible, approvalBinding } from './security/tool-policy.js';
+import { toolAccessVisible, approvalBinding } from './security/tool-policy.js';
 import { nativeToolDenial } from './security/dsh-policy.js';
 import { classifyRuntimeFailure } from './core/runtime-failure.js';
 import {SqliteDailyUsageStore} from './storage/sqlite-usage-store.js';
 import { QqActionPolicy } from './qq/qq-actions.js';
 import { startActionServer, type ActionServer } from './services/action-server.js';
-import { z } from 'zod';
 import {SqliteSocialStore} from './storage/sqlite-social-store.js';
 import type {SocialRepository} from './storage/social-repository.js';
 import { SocialEngine } from './qq/social-engine.js';
@@ -36,8 +35,7 @@ import type { AutonomousTurn } from './agent/autonomous-state.js';
 import { MediaService } from './services/media.js';
 import { allowedChat } from './qq/social-settings.js';
 import type { ToolContext } from './qq/social-tools.js';
-import { legacyTools, LegacyCallSchema } from './qq/legacy-tools.js';
-import { QqActionSchema } from './qq/qq-actions.js';
+import { legacyTools } from './qq/legacy-tools.js';
 import { socialAdmin } from './qq/social-admin.js';
 import { prepareChatModelPatch } from './agent/chat-model.js';
 import {ConversationService} from './app/conversation-service.js';
@@ -46,8 +44,9 @@ import { acquireDataResources, type ResourceLease } from './core/resource-lock.j
 import { IngressBudget, type IngressLease } from './core/ingress.js';
 import {RequestBudget,ModelBudgetError} from './agent/request-budget.js';
 import {startModelBudgetServer} from './services/model-budget-server.js';
-import {withServiceRequestScope,serviceRequestScope,type ServiceRequest,type PreparedServiceRequest} from './agent/service-request.js';
+import {serviceRequestScope,type ServiceRequest,type PreparedServiceRequest} from './agent/service-request.js';
 import {QqOperationService} from './app/qq-operation-service.js';
+import {QqActionService} from './app/qq-action-service.js';
 
 const api:OneBotHttp = new OneBotHttp(config.onebot.httpUrl, config.onebot.token,(call,execute)=>operations.intercept(call,execute));
 const paths = dataPaths();
@@ -737,65 +736,12 @@ async function main(): Promise<void> {
   const policy = new QqActionPolicy(api, usage, getSettings, askAdmin, () => {
     status.messagesOut += 1;
   });
-  actionServer = await startActionServer(async (input, signal, conversation,operationId) => {
-    if (stopping) return Promise.reject(new Error('桥接正在退出'));
-    const turnSignal = conversation ? turnSignals.get(conversation) : undefined;
-    if (!turnSignal) return Promise.reject(new Error('该会话没有正在执行的模型轮次'));
-    const key = [...sessionContexts].find(([, value]) => value === conversation)?.[0];
-    const active = key ? activeConversations.get(key) : undefined;
-    if (!active) throw new Error('当前会话上下文不存在');
-    if(!operationId)throw new Error('动作请求缺少可信编号');
-    operations.key(active);
-      const callCtx: ToolContext = { ...active, sent: 0, signal: AbortSignal.any([signal, turnSignal]),budget:active.budget??(active.budget=turnBudget()) };
-    try {
-      const action=(input as {action?:string})?.action;
-      const social=action==='social'?engine.describe(input):undefined;
-      const legacy=action==='legacy'?LegacyCallSchema.parse(input):undefined;
-      const plain=!social&&!legacy?QqActionSchema.parse(input):undefined;
-      const name=social?.call.tool??legacy?.tool??({send_message:'qq_send_message',like:'qq_like',qzone_post:'qq_qzone_post'} as const)[plain!.action];
-      const legacyDefinition=legacy?legacyTools.find(t=>t.name===legacy.tool):undefined;
-      if(legacy&&!legacyDefinition)throw new Error('未知 QQ 工具');
-      const args=social?.args??(legacy?z.object(legacyDefinition!.schema as z.ZodRawShape).strict().parse(legacy.args):plain);
-      const mutates=social?.mutates??(legacy?!['qq_self_info','qq_get_friend_list','qq_get_group_list','qq_get_group_member_list','qq_get_cookies'].includes(name):true);
-      const authorize=()=>{engine.check(callCtx);assertToolAccess(callCtx,getSettings(),name,args);engine.autonomy.authorize(callCtx,plain?.action??name);if(social&&!toolEnabled(name,getSettings()))throw new Error('该工具已关闭或依赖尚未就绪');callCtx.authorize?.();};
-      const dispatch=async()=>{
-      if ((input as { action?: string })?.action === 'social') return await withServiceRequestScope({sessionId:key?sessions.peek(key)?.sessionId:undefined,chat:callCtx.chat,user:String(callCtx.user),background:callCtx.origin!=='message',signal:callCtx.signal,allowed:()=>{callCtx.authorize?.();if(callCtx.autonomous){engine.autonomy.authorize(callCtx,'qq_self_state');return true;}return allowedChat(getSettings().social,callCtx.chat,callCtx.user);}},()=>engine.execute(input, callCtx));
-      if ((input as { action?: string })?.action === 'legacy') {
-        const call = LegacyCallSchema.parse(input);
-        engine.guardTool(callCtx,call.tool);
-        const def = legacyTools.find(t => t.name === call.tool);
-        if (!def) throw new Error('未知 QQ 工具');
-        return await engine.legacy(call.tool, z.object(def.schema as z.ZodRawShape).strict().parse(call.args), callCtx);
-      }
-      const validated = QqActionSchema.parse(input);
-      const toolName=({send_message:'qq_send_message',like:'qq_like',qzone_post:'qq_qzone_post'} as const)[validated.action];
-      engine.guardTool(callCtx,toolName);
-      assertToolAccess(callCtx,getSettings(),toolName,validated);
-      callCtx.authorize=()=>assertToolAccess(callCtx,getSettings(),toolName,validated);
-      engine.autonomy.authorize(callCtx,validated.action);
-      engine.check(callCtx);
-      if (validated.action === 'like') await engine.target(callCtx, `private:${validated.user_id}`,true);
-      if (validated.action !== 'qzone_post') await engine.approve(callCtx, toolName,false,validated);
-      const audit = await socialStore.beginAction(callCtx.chat, validated.action);
-      let result: unknown;
-      try {
-        if (validated.action === 'send_message') {
-          result = await engine.send(callCtx, [{ type: 'text', data: { text: validated.text } }], `${validated.target_type}:${validated.target_id}`, true);
-        } else if(validated.action==='qzone_post') {
-          result=await engine.autonomy.publish(callCtx,validated.text,validated.images??[],(extra,images)=>policy.execute({...validated,images},callCtx.signal,()=>[...engine.actionQuotas(callCtx),...extra],()=>engine.recordAction(callCtx.chat)));
-        } else { result = await policy.execute(validated, callCtx.signal, () => engine.actionQuotas(callCtx), () => engine.recordAction(callCtx.chat)); }
-        await socialStore.endAction(audit, 'success', '已完成');
-      } catch (e) { await socialStore.endAction(audit, 'unknown', String(e)); throw e; }
-      return result;
-      };
-      return await (mutates?operations.run(callCtx,name,{action,tool:name,args},social?.tool.title??legacyDefinition?.title??name,authorize,dispatch,operationId):dispatch());
-    } finally {
-      active.sent += callCtx.sent;
-      active.silent ||= callCtx.silent;
-      if (callCtx.topic) active.topic = callCtx.topic;
-      if (callCtx.endTopic) active.endTopic = true;
-    }
-  });
+  const actionService=new QqActionService(engine,policy,operations,{settings:getSettings,stopping:()=>stopping,context:conversation=>{
+    const signal=conversation?turnSignals.get(conversation):undefined;if(!signal)return undefined;
+    const key=[...sessionContexts].find(([,value])=>value===conversation)?.[0],active=key?activeConversations.get(key):undefined;
+    if(!active)throw new Error('当前会话上下文不存在');return {active,signal,sessionId:key?sessions.peek(key)?.sessionId:undefined};
+  }});
+  actionServer = await startActionServer(actionService.execute);
   registerRuntimeSecret(actionServer.token);
 
   const modelPatch = await prepareChatModelPatch(config.chatModel, sessionStorePath,getSettings().requests.maxOutputTokens);

@@ -17,11 +17,16 @@
 | 目录 | 主要模块 | 职责 |
 | --- | --- | --- |
 | `core/` | config、settings、runtime、ingress、data-paths、resource-lock、store、usage、permissions | 配置、队列、入站容量、数据路径与互斥、会话映射、额度和审批 |
+| `app/` | conversation-service、session-cache、qq-action-service、qq-operation-service、operation-executor、background-selection | 会话生命周期、可信动作分派、事务副作用、后台轮转 |
+| `storage/` | database-worker、sqlite-social-store、sqlite-usage-store、sqlite-runtime-stores | 独立 Worker、迁移与增量事务、领取凭证、持久去重及实际用量 |
+| `security/` | tool-policy、dsh-policy、model-request-policy、protocol-policy | 角色/目标/内容授权、受管模型边界、预算钩子及逐项协议动作登记 |
 | `qq/` | onebot、group-context、qq-actions、social-engine、social-store、social-tools、social-admin | 协议、QQ 行为、存档、工具定义与管理操作 |
 | `agent/` | chat-model、cognition、learning-model、autonomy、context-policy | 模型连接、资料整理、群内用语、自主决策与上下文预算 |
 | `services/` | media、qzone、read-json、action-server、action-client | 媒体、空间、受限 JSON 响应与桥接/MCP 内部通信 |
 
 MCP 工具通过内部动作接口交由桥接执行；权限、会话范围、额度与轮次状态在执行处再次核验。桌面 Node 辅助模块使用 `dist/` 内对应目录的编译模块。改动路径时需同步测试、动态导入和桌面引用。
+
+`qq-action-service` 统一规范参数、只读/写入分派、媒体请求来源和当前轮次状态回写。桥接只提供可信的活动会话与取消信号；请求必须携带由私有 MCP 传输生成的编号。写入调用 `qq-operation-service`，再由逐项协议守卫和事务执行器约束实际副作用。不得给前端或模型开放通用 OneBot 调用入口。
 
 桌面首次配置由 `QuickSetupView.cs` 与 `onboarding.mjs` 提供，复用 `RuntimeView.cs` 的输入控件、校验和连接保存逻辑。检测仅提供路径建议；检查使用当前草稿，不调用模型。HTTP 与 WebSocket 分开探测，修改输入会使检查结果失效。`tests/onboarding.test.mjs` 覆盖初始化保留、路径检测、外部连接与鉴权边界，原生窗口测试覆盖步骤切换、失效状态、安装指引和紧凑布局。
 
