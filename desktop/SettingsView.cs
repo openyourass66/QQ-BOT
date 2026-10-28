@@ -95,7 +95,7 @@ partial class App
         new FieldSpec("social.speechModel", "媒体服务", "模型与声音", "语音合成模型", "使用本页上方的媒体服务；留空表示未配置语音合成。"),
         new FieldSpec("social.speechVoice", "媒体服务", "模型与声音", "合成声音", "填写语音合成服务支持的声音名称。"),
         new FieldSpec("social.videoFrames", "媒体服务", "模型与声音", "视频抽帧数量", "需要本页配置的 FFmpeg 和可用视觉能力。", "帧", 1, 12),
-        new FieldSpec("social.remindersEnabled", "主动与提醒", "定时提醒", "定时提醒", "允许设置、查询和取消持久化提醒。"),
+        new FieldSpec("social.remindersEnabled", "主动与提醒", "定时提醒", "定时提醒", "周期错过整段时跳过积压，一次提醒迟到超过24小时停止补发；结果未知不自动重发。"),
         new FieldSpec("social.proactiveEnabled", "主动与提醒", "后台活动", "后台自主活动", "后台聊天、挑选表情和空间创作的总开关；定时提醒独立控制。"),
         new FieldSpec("social.proactiveIntervalMinutes", "主动与提醒", "后台活动", "聊天静置时间", "会话安静多久后开始考虑主动联系；收藏、到期想法和空间任务独立调度，不受此等待时间拖延。", "分钟", 5, 1440, 5),
         new FieldSpec("social.autonomousEnabled", "主动与提醒", "兴趣与想法", "持续兴趣与想法", "结合实际互动积累兴趣和未完话题；关闭后暂停自主判断。"),

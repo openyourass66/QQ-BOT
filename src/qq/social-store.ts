@@ -15,7 +15,8 @@ const contact = z.object({ chat: z.string(), name: z.string(), at: z.number() })
 const memory = z.object({ id: z.string(), chat: z.string(), user: z.string(), name: z.string(), text: z.string(), at: z.number() });
 const qqSticker = z.object({ resId: z.string().min(1), emojiId: z.string(), md5: z.string().regex(/^[a-f0-9]{32}$/), url: z.string(), cachePath: z.string(), description: z.string() });
 const sticker = z.object({ id: z.string(), file: z.string(), note: z.string(), tags: z.array(z.string()), uses: z.number(), at: z.number(), analysis: StoredStickerAnalysisSchema.optional(), md5: z.string().regex(/^[a-f0-9]{32}$/).optional(), qq: qqSticker.optional(), qqPresent: z.boolean().default(false) });
-const task = z.object({ id: z.string(), chat: z.string(), creator: z.string(), text: z.string(), due: z.number(), interval: z.number().default(0), state: z.enum(['pending', 'blocked', 'running', 'sent', 'failed', 'unknown', 'cancelled']), error: z.string().default(''), retryAt: z.number().default(0) });
+export const ScheduledTaskSchema = z.object({ id: z.string(), chat: z.string(), creator: z.string(), text: z.string(), due: z.number(), interval: z.number().default(0), state: z.enum(['pending', 'blocked', 'running', 'sent', 'failed', 'unknown', 'cancelled']), error: z.string().default(''), retryAt: z.number().default(0),claim:z.object({id:z.string().min(1).max(128),owner:z.string().min(1).max(128),at:z.number().finite()}).optional() });
+const task=ScheduledTaskSchema;
 const event = z.object({ id: z.string(), chat: z.string(), type: z.string(), at: z.number(), data: z.record(z.string(), z.unknown()), handled: z.boolean().default(false) });
 const action = z.object({ id: z.string(), chat: z.string(), tool: z.string(), at: z.number(), state: z.enum(['running', 'success', 'failed', 'unknown']), summary: z.string() });
 const turn = z.object({ id: z.string(), chat: z.string(), at: z.number(), duration: z.number(), input: z.string(), output: z.string(), tools: z.array(z.string()), error: z.string(), inputTokens: z.number().nullable(), outputTokens: z.number().nullable(), contextUsed:z.number().nonnegative().optional(),contextSize:z.number().positive().optional(),generation:z.number().optional() });
@@ -26,6 +27,8 @@ export type StoredMessage = z.infer<typeof message>;
 export type ScheduledTask = z.infer<typeof task>;
 
 export class SocialStore implements SocialRepository {
+  protected readonly instanceId=randomUUID();
+  private received=new Set<string>();
   protected data: SocialData = schema.parse({ version: 2, messages: [], contacts: [], memories: [], stickers: [], tasks: [], events: [], actions: [], turns: [] });
   protected chain: Promise<unknown> = Promise.resolve();
   constructor(readonly path: string) {}
@@ -44,6 +47,7 @@ export class SocialStore implements SocialRepository {
     catch (e) { if (found || (e as NodeJS.ErrnoException).code !== 'ENOENT') throw e; }
     // A process crash during a send has an unknown outcome; never repeat it automatically.
     await this.update(d => recoverInterrupted(d));
+    this.received=new Set(this.data.messages.filter(message=>!message.self).map(message=>message.chat+'/'+message.id));
   }
   snapshot(): SocialData { return structuredClone(this.data); }
   view(...fields:SocialField[]):SocialData {
@@ -72,7 +76,9 @@ export class SocialStore implements SocialRepository {
   profile(chat: string): SocialData['profiles'][number] | undefined { return structuredClone(this.data.profiles.find(p => p.chat === chat)); }
   memories(chat: string): SocialData['memories'] { return structuredClone(this.data.memories.filter(m => m.chat === chat)); }
   contacts(): SocialData['contacts'] { return structuredClone(this.data.contacts); }
-  dueTasks(now: number): ScheduledTask[] { return structuredClone(this.data.tasks.filter(t => ['pending','blocked'].includes(t.state) && t.due <= now && t.retryAt <= now).slice(0,10)); }
+  dueTasks(now: number): ScheduledTask[]|Promise<ScheduledTask[]> { return structuredClone(this.data.tasks.filter(t => ['pending','blocked'].includes(t.state) && t.due <= now && t.retryAt <= now).sort((a,b)=>Math.max(a.due,a.retryAt)-Math.max(b.due,b.retryAt)||a.due-b.due).slice(0,10)); }
+  claimTask(id:string,now:number):Promise<ScheduledTask|undefined>{return this.update(d=>{const current=d.tasks.find(t=>t.id===id);if(!current||!['pending','blocked'].includes(current.state)||current.due>now||current.retryAt>now)return undefined;current.state='running';current.error='';current.claim={id:randomUUID(),owner:this.instanceId,at:now};return current;});}
+  finishTask(id:string,claimId:string,result:{state:'pending'|'blocked'|'sent'|'failed'|'unknown';error:string;retryAt:number;due?:number}):Promise<boolean>{return this.update(d=>{const current=d.tasks.find(t=>t.id===id);if(!current||current.state!=='running'||current.claim?.id!==claimId)return false;Object.assign(current,result);return true;});}
   update<T>(fn: (draft: SocialData) => T): Promise<T> {
     const job = this.chain.then(async () => {
       const next = structuredClone(this.data);
@@ -100,13 +106,14 @@ export class SocialStore implements SocialRepository {
     if (this.data.account && this.data.account !== id) throw new Error('QQ 账号与社交数据不匹配，请为新账号指定独立数据文件');
     await this.update(d => { d.account = id; });
   }
-  async record(event: MessageEvent, days: number, perChat: number): Promise<void> {
+  async record(event: MessageEvent, days: number, perChat: number): Promise<boolean> {
     const chat = event.message_type === 'group' ? `group:${event.group_id}` : `private:${event.user_id === event.self_id ? (event as unknown as { target_id?: number }).target_id ?? event.user_id : event.user_id}`;
-    await this.add({ chat, id: event.message_id, user: event.user_id, name: event.sender.card || event.sender.nickname, at: event.time * 1000, text: segmentsToText(event.message), segments: event.message, self: event.user_id === event.self_id, recalled: false }, days, perChat);
+    const receipt=chat+'/'+event.message_id;if(this.received.has(receipt))return false;if(this.received.size>=200000)throw new Error('兼容存储入站记录达到容量上限，请先整理。');this.received.add(receipt);
+    try{await this.add({ chat, id: event.message_id, user: event.user_id, name: event.sender.card || event.sender.nickname, at: event.time * 1000, text: segmentsToText(event.message), segments: event.message, self: event.user_id === event.self_id, recalled: false }, days, perChat);return true;}catch(error){this.received.delete(receipt);throw error;}
   }
-  async add(entry: StoredMessage, days = 30, perChat = 2000): Promise<void> {
-    await this.update(d => {
-      if (d.messages.some(m => m.chat === entry.chat && m.id === entry.id)) return;
+  async add(entry: StoredMessage, days = 30, perChat = 2000): Promise<boolean> {
+    return this.update(d => {
+      if (d.messages.some(m => m.chat === entry.chat && m.id === entry.id)) return false;
       d.messages.push(entry);
       d.messages.sort((a,b) => a.at - b.at);
       const counts = new Map<string, number>();
@@ -118,6 +125,7 @@ export class SocialStore implements SocialRepository {
       if (c) c.at = Math.max(c.at, entry.at);
       else d.contacts.push({ chat: entry.chat, name: entry.chat.startsWith('private:') ? entry.name : entry.chat, at: entry.at });
       d.contacts = d.contacts.slice(-5000);
+      return true;
     });
   }
   messages(chat: string, limit = 30, offset = 0, query = ''): StoredMessage[]|Promise<StoredMessage[]> {

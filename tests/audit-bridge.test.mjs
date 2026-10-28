@@ -39,7 +39,7 @@ test('聚合保留全部消息、会话继承全局概率、屏蔽引用过滤�
   };
   const stop=async()=>{if(!child||child.exitCode!==null)return;const ended=once(child,'exit');child.send('shutdown');const [code]=await withTimeout(ended,7000);assert.equal(code,0,output);};
   const send=(text,user=20001,group,quote,mention=true)=>{
-    const id=next++;socket.send(JSON.stringify({post_type:'message',message_type:group?'group':'private',self_id:10000,user_id:user,message_id:id,time:1,
+    const id=next++;socket.send(JSON.stringify({post_type:'message',message_type:group?'group':'private',self_id:10000,user_id:user,message_id:id,time:Math.floor(Date.now()/1000),
       ...(group?{group_id:group}:{}),message:group?[...(mention?[{type:'at',data:{qq:'10000'}}]:[]),...(quote?[{type:'reply',data:{id:String(quote)}}]:[]),{type:'text',data:{text}}]:text,sender:{nickname:'甲'+user}}));return id;
   };
   try {

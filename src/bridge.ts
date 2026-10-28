@@ -458,8 +458,9 @@ async function onMessage(event: MessageEvent): Promise<void> {
   try {
     await socialStore.account(event.self_id);
     if (stopping) return;
-    await socialStore.record(event, getSettings().social.retentionDays, getSettings().social.messagesPerChat);
+    if(!await socialStore.record(event, getSettings().social.retentionDays, getSettings().social.messagesPerChat))return;
     if (stopping) return;
+    if(event.time>0&&Date.now()-event.time*1000>31*86400000){status.messagesDropped++;log('warn',`[ingress] ${key} 历史消息已超过自动处理保留期，不唤醒模型`);return;}
     await engine.autonomy.observe(keyOf(event),event.message_id);
     if (stopping) return;
 
@@ -789,7 +790,7 @@ async function main(): Promise<void> {
     url: config.onebot.wsUrl,
     token: config.onebot.token,
     onEvent: (event) => {
-      void onMessage(event).catch((error) => log('error', `[message] ${String(error)}`));
+      void onMessage(event).catch((error) => {status.lastError=String(error);log('error', `[message] ${String(error)}`);});
     },
     onNotice: event => { void onNotice(event).catch(e => log('error', `[notice] ${String(e)}`)); },
     onState: (connected) => {

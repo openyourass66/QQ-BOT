@@ -31,7 +31,7 @@ export const socialTools = [
   { name: 'qq_memory_query', title: '查询群友记忆', description: '检索当前会话的群友记忆。', schema: { user_id: user.optional(), query: z.string().max(128).default('') } },
   { name: 'qq_memory_remove', title: '删除过时记忆', description: '删除当前会话的一条记忆，ID 从查询工具取得。', schema: { memory_id: z.string() } },
   { name: 'qq_finish', title: '结束或保持话题', description: '决定潜水或结束本轮；reason 只记到管理端，不发到 QQ。active_topic 可维持短时话题参与；end_topic 可退出。', schema: { reason: short, active_topic: z.string().max(100).optional(), end_topic: z.boolean().default(false) } },
-  { name: 'qq_set_reminder', title: '安排提醒', description: '在当前会话安排提醒，使用上海时间 YYYY-MM-DD HH:mm 或 delay_minutes；可设周期分钟数。到点实际发送，支持重启恢复。', schema: { text: short, delay_minutes: z.number().min(0.01).max(525600).optional(), at_time: z.string().max(32).optional(), interval_minutes: z.union([z.literal(0), z.number().int().min(5).max(525600)]).default(0) } },
+  { name: 'qq_set_reminder', title: '安排提醒', description: '在当前会话安排提醒，使用上海时间 YYYY-MM-DD HH:mm 或 delay_minutes；可设周期分钟数。支持重启恢复；周期错过整段时跳过积压，一次提醒迟到超过24小时停止补发。结果未知不自动重发。', schema: { text: short, delay_minutes: z.number().min(0.01).max(525600).optional(), at_time: z.string().max(32).optional(), interval_minutes: z.union([z.literal(0), z.number().int().min(5).max(525600)]).default(0) } },
   { name: 'qq_reminders', title: '查看提醒', description: '查看当前会话待执行和失败的提醒。', schema: empty },
   { name: 'qq_cancel_reminder', title: '取消提醒', description: '取消当前会话尚未执行的提醒。', schema: { reminder_id: z.string() } },
   { name: 'qq_events', title: '查看 QQ 事件', description: '查看当前会话的戳一戳、入退群、撤回以及待处理申请；处理申请使用返回的事件 ID。', schema: { pending_only: z.boolean().default(false) } },

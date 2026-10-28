@@ -39,6 +39,10 @@ function putMessage(m:StoredMessage,insertOnly=false,strict=false){
   if(result.changes&&!exists)setMeta('messages_count',Number(meta('messages_count')??0)+1);return result;
 }
 function deleteMessages(sql:string,...args:SQLInputValue[]){const removed=Number(db.prepare(sql).run(...args).changes);if(removed)setMeta('messages_count',Number(meta('messages_count')??0)-removed);}
+function seedReceipts(){
+  const incoming=Number(db.prepare('SELECT COUNT(*) AS n FROM messages WHERE self=0').get()!.n);if(incoming>200000)throw error('DATABASE_STATE_LIMIT','旧消息数量超过去重迁移容量，请保留原数据并先整理。');
+  db.prepare('INSERT OR IGNORE INTO incoming_receipts(chat,id,received_at) SELECT chat,id,? FROM messages WHERE self=0').run(Date.now());setMeta('receipts_count',Number(db.prepare('SELECT COUNT(*) AS n FROM incoming_receipts').get()!.n));
+}
 function decodedRows(rows:Iterable<Record<string,unknown>>):any[]{const result:unknown[]=[];let bytes=0;for(const row of rows){const payload=String(row.payload);bytes+=Buffer.byteLength(payload);if(bytes>DATABASE_LIMITS.responseBytes-1024)throw error('DATABASE_RESPONSE_TOO_LARGE','查询结果过大，请缩小查询范围或分页读取。');result.push(JSON.parse(payload));}return result;}
 function messageQuery(q:MessageQuery){
   const clauses:string[]=[],args:SQLInputValue[]=[];
@@ -70,10 +74,18 @@ function execute(request:DatabaseRequest):unknown {
     case 'import':
       if(meta('initialized'))throw error('DATABASE_REQUEST_INVALID','已使用的数据库不能重复导入。');
       return transaction(()=>{for(const row of request.rows){if(row.table==='messages')putMessage(row.value,true,true);else changeEntity(row,true);}return {imported:request.rows.length};});
-    case 'complete-import':if(meta('initialized'))throw error('DATABASE_REQUEST_INVALID','数据库已经完成导入。');return transaction(()=>{setMeta('source',request.source);setMeta('initialized',true);return {revision:revision()};});
+    case 'complete-import':if(meta('initialized'))throw error('DATABASE_REQUEST_INVALID','数据库已经完成导入。');return transaction(()=>{setMeta('source',request.source);if(request.source.kind==='social')seedReceipts();setMeta('initialized',true);return {revision:revision()};});
     case 'mutate':return transaction(()=>{checkRevision(request.expectedRevision);for(const row of request.changes)changeEntity(row);for(const m of request.messages??[])putMessage(m);const next=revision()+1;setMeta('revision',next);return {revision:next};});
     case 'add-message':return transaction(()=>{
-      checkRevision(request.expectedRevision);const m=request.entry;if(!putMessage(m,true).changes)return {revision:revision(),inserted:false,contacts:[],removedContacts:[]};
+      checkRevision(request.expectedRevision);const m=request.entry,empty=(accepted=false)=>({revision:revision(),inserted:false,accepted,contacts:[],removedContacts:[]});
+      if(request.receiptAt!==undefined){
+        if(!Number.isFinite(request.receiptAt))throw error('DATABASE_REQUEST_INVALID','入站记录时间无效。');
+        if(db.prepare('SELECT 1 FROM incoming_receipts WHERE chat=? AND id=?').get(m.chat,m.id))return empty();
+        const last=Number(meta('receipts_pruned_at')??0);if(request.receiptAt-last>=3600000){const removed=Number(db.prepare('DELETE FROM incoming_receipts WHERE received_at<?').run(request.receiptAt-31*86400000).changes);setMeta('receipts_count',Number(meta('receipts_count')??0)-removed);setMeta('receipts_pruned_at',request.receiptAt);}
+        if(Number(meta('receipts_count')??0)>=200000)throw error('DATABASE_STATE_LIMIT','入站去重记录已达到容量上限，请先整理历史；本条未开放业务。');
+        db.prepare('INSERT INTO incoming_receipts(chat,id,received_at) VALUES(?,?,?)').run(m.chat,m.id,request.receiptAt);setMeta('receipts_count',Number(meta('receipts_count')??0)+1);
+      }
+      if(!putMessage(m,true).changes){if(request.receiptAt!==undefined)setMeta('revision',revision()+1);return empty(request.receiptAt!==undefined);}
       deleteMessages('DELETE FROM messages WHERE at<?',request.cutoff);
       deleteMessages('DELETE FROM messages WHERE chat=? AND id IN (SELECT id FROM messages WHERE chat=? ORDER BY at DESC,id DESC LIMIT -1 OFFSET ?)',m.chat,m.chat,request.perChat);
       const excess=Number(meta('messages_count')??0)-50000;
@@ -82,7 +94,21 @@ function execute(request:DatabaseRequest):unknown {
       const ordinal=row?Number(row.ordinal):Number(db.prepare('SELECT COALESCE(MAX(ordinal),-1)+1 AS next FROM entity_contacts').get()!.next);
       const changed:EntityRow={table:'contacts',key:m.chat,ordinal,value:contact};changeEntity(changed);
       const removed=db.prepare('SELECT key FROM entity_contacts ORDER BY ordinal DESC LIMIT -1 OFFSET 5000').all().map(row=>String(row.key));for(const key of removed)changeEntity({table:'contacts',key});
-      const next=revision()+1;setMeta('revision',next);return {revision:next,inserted:true,contacts:[changed],removedContacts:removed};
+      const next=revision()+1;setMeta('revision',next);return {revision:next,inserted:true,accepted:request.receiptAt!==undefined,contacts:[changed],removedContacts:removed};
+    });
+    case 'due-tasks':return decodedRows(db.prepare("SELECT payload FROM entity_tasks WHERE state IN ('pending','blocked') AND due<=? AND retry_at<=? ORDER BY MAX(due,retry_at),due,key LIMIT ?").iterate(request.now,request.now,Math.min(10,Math.max(1,request.limit))));
+    case 'claim-task':return transaction(()=>{
+      const row=db.prepare('SELECT ordinal,payload,state,due,retry_at FROM entity_tasks WHERE key=?').get(request.id);
+      if(!row||!['pending','blocked'].includes(String(row.state))||Number(row.due)>request.now||Number(row.retry_at)>request.now)return {claimed:false,revision:revision()};
+      checkRevision(request.expectedRevision);if(!Number.isFinite(request.now)||!request.claimId||request.claimId.length>128||!request.owner||request.owner.length>128)throw error('DATABASE_REQUEST_INVALID','提醒领取参数无效。');
+      const task={...JSON.parse(String(row.payload)),state:'running',error:'',claim:{id:request.claimId,owner:request.owner,at:request.now}};
+      changeEntity({table:'tasks',key:request.id,ordinal:Number(row.ordinal),value:task});const next=revision()+1;setMeta('revision',next);return {claimed:true,task,revision:next};
+    });
+    case 'finish-task':return transaction(()=>{
+      const row=db.prepare('SELECT ordinal,payload,state FROM entity_tasks WHERE key=?').get(request.id),task=row?JSON.parse(String(row.payload)):undefined;
+      if(!task||row!.state!=='running'||task.claim?.id!==request.claimId)return {changed:false,revision:revision()};checkRevision(request.expectedRevision);
+      if(!['pending','blocked','sent','failed','unknown'].includes(request.state)||typeof request.error!=='string'||request.error.length>1000||!Number.isFinite(request.retryAt)||request.due!==undefined&&!Number.isFinite(request.due))throw error('DATABASE_REQUEST_INVALID','提醒完成参数无效。');
+      Object.assign(task,{state:request.state,error:request.error,retryAt:request.retryAt,...(request.due===undefined?{}:{due:request.due})});changeEntity({table:'tasks',key:request.id,ordinal:Number(row!.ordinal),value:task});const next=revision()+1;setMeta('revision',next);return {changed:true,task,revision:next};
     });
     case 'query-messages':return messageQuery(request.query);
     case 'lookup-messages':return lookup(request.refs,request.evidenceOnly);
@@ -116,7 +142,7 @@ function execute(request:DatabaseRequest):unknown {
 try{
   db=new DatabaseSync(workerData.path);db.exec('PRAGMA busy_timeout=3000; PRAGMA foreign_keys=ON; PRAGMA trusted_schema=OFF;');
   const version=Number(Object.values(db.prepare('PRAGMA user_version').get()!)[0]),app=Number(Object.values(db.prepare('PRAGMA application_id').get()!)[0]);
-  if(version>3)throw error('DATABASE_SCHEMA_NEWER','数据库版本较新，请使用兼容的程序版本。');
+  if(version>4)throw error('DATABASE_SCHEMA_NEWER','数据库版本较新，请使用兼容的程序版本。');
   if(version===0){
     if(Number(db.prepare("SELECT COUNT(*) AS n FROM sqlite_schema WHERE type='table'").get()!.n))throw error('DATABASE_INVALID','数据文件不是受支持的数据库。');
     transaction(()=>{
@@ -127,12 +153,13 @@ try{
   }else if(app!==1464357708)throw error('DATABASE_INVALID','数据文件标识不匹配。');
   if(version<2)transaction(()=>createUsageSchema(db));
   if(version<3)transaction(()=>createRequestSchema(db));
+  if(version<4)transaction(()=>{db.exec('CREATE TABLE incoming_receipts(chat TEXT NOT NULL,id INTEGER NOT NULL,received_at REAL NOT NULL,PRIMARY KEY(chat,id)) WITHOUT ROWID;CREATE INDEX incoming_receipts_at ON incoming_receipts(received_at);PRAGMA user_version=4;');setMeta('receipts_count',0);setMeta('receipts_pruned_at',0);seedReceipts();});
   db.exec('PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA wal_autocheckpoint=1000;');
   port.postMessage({type:'ready'});
   port.on('message',({id,request}:{id:number;request:DatabaseRequest})=>{
     const started=performance.now();
     try{
-      const reads=['metadata','query-messages','lookup-messages','latest-incoming','integrity','fingerprint','query-plan','export-social','usage-summary','usage-request-stats'];
+      const reads=['metadata','query-messages','lookup-messages','latest-incoming','integrity','fingerprint','query-plan','export-social','usage-summary','usage-request-stats','due-tasks'];
       const result=reads.includes(request.action)?readSnapshot(()=>execute(request)):execute(request);if(Buffer.byteLength(JSON.stringify(result))>DATABASE_LIMITS.responseBytes)throw error('DATABASE_RESPONSE_TOO_LARGE','查询结果过大，请缩小查询范围或分页读取。');
       port.postMessage({id,ok:true,result,elapsedMs:performance.now()-started});if(request.action==='close')port.close();
     }catch(failure){const e=failure as Error&{code?:string;errcode?:number};port.postMessage({id,ok:false,error:{code:e.code?.startsWith('DATABASE_')?e.code:e.errcode===13?'ENOSPC':'DATABASE_OPERATION_FAILED',message:e.code?.startsWith('DATABASE_')?e.message:'数据库操作失败，请保留数据并查看诊断。'}});}

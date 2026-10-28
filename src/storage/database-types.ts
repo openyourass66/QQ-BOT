@@ -20,7 +20,10 @@ export type DatabaseRequest=UsageDatabaseRequest
   |{action:'import';rows:Array<EntityRow|{table:'messages';key:string;ordinal:number;value:StoredMessage}>}
   |{action:'complete-import';source:Record<string,unknown>}
   |{action:'mutate';expectedRevision:number;changes:EntityChange[];messages?:StoredMessage[]}
-  |{action:'add-message';expectedRevision:number;entry:StoredMessage;cutoff:number;perChat:number}
+  |{action:'add-message';expectedRevision:number;entry:StoredMessage;cutoff:number;perChat:number;receiptAt?:number}
+  |{action:'due-tasks';now:number;limit:number}
+  |{action:'claim-task';expectedRevision:number;id:string;claimId:string;owner:string;now:number}
+  |{action:'finish-task';expectedRevision:number;id:string;claimId:string;state:'pending'|'blocked'|'sent'|'failed'|'unknown';error:string;retryAt:number;due?:number}
   |{action:'query-messages';query:MessageQuery}
   |{action:'lookup-messages';refs:MessageRef[];evidenceOnly?:boolean}
   |{action:'latest-incoming';excludeUsers:string[]}

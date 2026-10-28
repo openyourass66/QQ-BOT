@@ -1,4 +1,6 @@
-import {SocialStore,SocialDataSchema,recoverInterrupted,type SocialData,type StoredMessage} from '../qq/social-store.js';
+import {SocialStore,SocialDataSchema,ScheduledTaskSchema,recoverInterrupted,type SocialData,type StoredMessage,type ScheduledTask} from '../qq/social-store.js';
+import {randomUUID} from 'node:crypto';
+import {segmentsToText,type MessageEvent} from '../qq/onebot.js';
 import {DatabaseClient} from './database-client.js';
 import {dataFromRows,entityRows,rowChanges,stableEntityOrder,entityIdentity} from './social-entities.js';
 import {ensureSocialDatabase,verifyMigrationSource,type MigrationProgress} from './social-migration.js';
@@ -65,16 +67,31 @@ export class SqliteSocialStore extends SocialStore {
     if(changes.length||changedMessages.length){const saved=await this.database!.call<{revision:number}>({action:'mutate',expectedRevision:this.revision,changes,messages:changedMessages});this.revision=saved.revision;this.data=next;for(const row of changes){const key=entityIdentity(row);if('ordinal' in row&&typeof row.ordinal==='number')this.positions.set(key,row.ordinal);else this.positions.delete(key);}}
     return result;
   }
-  override async add(entry:StoredMessage,days=30,perChat=2000):Promise<void>{
+  override record(event:MessageEvent,days:number,perChat:number):Promise<boolean>{
+    const chat=event.message_type==='group'?`group:${event.group_id}`:`private:${event.user_id===event.self_id?(event as unknown as {target_id?:number}).target_id??event.user_id:event.user_id}`;
+    return this.addEntry({chat,id:event.message_id,user:event.user_id,name:event.sender.card||event.sender.nickname,at:event.time*1000,text:segmentsToText(event.message),segments:event.message,self:event.user_id===event.self_id,recalled:false},days,perChat,Date.now());
+  }
+  override add(entry:StoredMessage,days=30,perChat=2000):Promise<boolean>{return this.addEntry(entry,days,perChat);}
+  private async addEntry(entry:StoredMessage,days:number,perChat:number,receiptAt?:number):Promise<boolean>{
     const parsed=SocialDataSchema.shape.messages.element.parse(entry);
     if(!Number.isFinite(days)||days<=0||!Number.isSafeInteger(perChat)||perChat<1)throw new Error('消息保留参数无效。');
-    await this.serial(async()=>{
-      const saved=await this.database!.call<{revision:number;contacts:EntityRow[];removedContacts:string[]}>({action:'add-message',expectedRevision:this.revision,entry:parsed,cutoff:Date.now()-days*86400000,perChat});
+    return this.serial(async()=>{
+      const saved=await this.database!.call<{revision:number;inserted:boolean;accepted:boolean;contacts:EntityRow[];removedContacts:string[]}>({action:'add-message',expectedRevision:this.revision,entry:parsed,cutoff:Date.now()-days*86400000,perChat,...(receiptAt===undefined?{}:{receiptAt})});
       this.revision=saved.revision;
       for(const row of saved.contacts){this.positions.set(entityIdentity(row),row.ordinal);const item=row.value as SocialData['contacts'][number],index=this.data.contacts.findIndex(c=>c.chat===item.chat);if(index<0)this.data.contacts.push(item);else this.data.contacts[index]=item;}
       if(saved.removedContacts.length){this.data.contacts=this.data.contacts.filter(c=>!saved.removedContacts.includes(c.chat));for(const key of saved.removedContacts)this.positions.delete(entityIdentity({table:'contacts',key}));}
+      return receiptAt===undefined?saved.inserted:saved.accepted;
     });
   }
+  override async dueTasks(now:number):Promise<ScheduledTask[]>{this.assertReadable();return (await this.database!.call<unknown[]>({action:'due-tasks',now,limit:10})).map(value=>ScheduledTaskSchema.parse(value));}
+  override claimTask(id:string,now:number):Promise<ScheduledTask|undefined>{return this.serial(async()=>{
+    const saved=await this.database!.call<{claimed:boolean;revision:number;task?:unknown}>({action:'claim-task',expectedRevision:this.revision,id,now,claimId:randomUUID(),owner:this.instanceId});
+    if(!saved.claimed)return undefined;const task=ScheduledTaskSchema.parse(saved.task);this.revision=saved.revision;this.data.tasks=this.data.tasks.map(item=>item.id===id?task:item);return task;
+  });}
+  override finishTask(id:string,claimId:string,result:{state:'pending'|'blocked'|'sent'|'failed'|'unknown';error:string;retryAt:number;due?:number}):Promise<boolean>{return this.serial(async()=>{
+    const saved=await this.database!.call<{changed:boolean;revision:number;task?:unknown}>({action:'finish-task',expectedRevision:this.revision,id,claimId,...result});
+    if(!saved.changed)return false;const task=ScheduledTaskSchema.parse(saved.task);this.revision=saved.revision;this.data.tasks=this.data.tasks.map(item=>item.id===id?task:item);return true;
+  });}
   override async queryMessages(query:MessageQuery):Promise<{rows:StoredMessage[];total:number}>{this.assertReadable();return this.database!.call({action:'query-messages',query});}
   override async lookupMessages(refs:MessageRef[]):Promise<StoredMessage[]>{this.assertReadable();return this.database!.call({action:'lookup-messages',refs});}
   override async latestIncoming(excludeUsers:string[]=[]):Promise<StoredMessage[]>{this.assertReadable();return this.database!.call({action:'latest-incoming',excludeUsers});}

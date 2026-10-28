@@ -627,7 +627,7 @@ export class SocialEngine {
     try {
       const settings = this.settings();
       if (settings.social.remindersEnabled) {
-        for (const task of this.store.dueTasks(Date.now())) {
+        for (const task of await this.store.dueTasks(Date.now())) {
           await this.fire(task, self, signal);
         }
       }
@@ -661,14 +661,17 @@ export class SocialEngine {
       await this.store.update(d => { const t = d.tasks.find(t => t.id === task.id); if (t && ['pending','blocked'].includes(t.state)) { t.state = 'blocked'; t.error = `尚未发送：${blocked}；条件恢复后自动重试，也可取消`; t.retryAt = Date.now() + 60000; } });
       return;
     }
-    await this.store.update(d => { const t = d.tasks.find(t => t.id === task.id); if (!t || !['pending','blocked'].includes(t.state)) throw new Error('提醒状态已变化'); t.state = 'running'; t.error = ''; });
+    const claimed=await this.store.claimTask(task.id,Date.now());if(!claimed)return;task=claimed;const claimId=task.claim!.id,now=Date.now();
+    if(task.interval&&now-task.due>task.interval){await this.store.finishTask(task.id,claimId,{state:'pending',error:'停机或睡眠期间已错过提醒，已跳过积压时段并安排下次。',retryAt:0,due:now+task.interval});return;}
+    if(!task.interval&&now-task.due>86400000){await this.store.finishTask(task.id,claimId,{state:'failed',error:'一次性提醒已迟到超过二十四小时，未补发；请核对后重新安排。',retryAt:0});return;}
     let dispatched = false;
     try {
       await this.approve(ctx, '定时提醒');
       await this.send(ctx, [{ type: 'text', data: { text: `提醒：${task.text}` } }], task.chat, true, () => { dispatched = true; });
-      await this.store.update(d => { const t = d.tasks.find(t => t.id === task.id)!; t.state = task.interval ? 'pending' : 'sent'; t.error = ''; t.retryAt = 0; if (task.interval) t.due = Date.now() + task.interval; });
+      await this.store.finishTask(task.id,claimId,{state:task.interval?'pending':'sent',error:'',retryAt:0,...(task.interval?{due:Date.now()+task.interval}:{})});
     } catch (e) {
-      await this.store.update(d => { const t = d.tasks.find(t => t.id === task.id)!; t.state = dispatched ? 'unknown' : String(e).includes('未获确认') ? 'failed' : 'blocked'; t.error = `${dispatched ? '已提交发送，结果待核对，不自动重发' : t.state === 'failed' ? '未获管理员确认，提醒已停止' : '尚未发送，稍后自动重试'}：${String(e)}`.slice(0,1000); t.retryAt = Date.now() + 60000; });
+      const state=dispatched?'unknown':String(e).includes('未获确认')?'failed':'blocked';
+      await this.store.finishTask(task.id,claimId,{state,error:`${dispatched?'已提交发送，结果待核对，不自动重发':state==='failed'?'未获管理员确认，提醒已停止':'尚未发送，稍后自动重试'}：${String(e)}`.slice(0,1000),retryAt:Date.now()+60000});
       this.log(`[reminder] ${task.id}: ${String(e)}`);
     }
   }
