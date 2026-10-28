@@ -10,6 +10,7 @@ import { SocialStore } from '../dist/qq/social-store.js';
 import { SocialEngine } from '../dist/qq/social-engine.js';
 import { MediaService } from '../dist/services/media.js';
 import { QzoneService } from '../dist/services/qzone.js';
+import {IntervalClock} from '../dist/core/interval-clock.js';
 
 const minute=60000,hour=60*minute;
 async function fixture(run) {
@@ -21,7 +22,7 @@ async function fixture(run) {
   let posts=true,postRequests=0;
   const qzone=new QzoneService(api,{fetch:async(url,options)=>{if(options.method==='POST'){postRequests++;return new Response('{"code":0,"commentid":"fixture-comment"}');}return new Response(JSON.stringify({code:0,total:posts?1:0,msglist:posts?[{tid:'real-post',uin:Number(url.searchParams.get('uin')),content:'公开的新动态',created_time:Math.floor(Date.now()/1000)}]:[]}));}});
   const media=new MediaService(join(root,'media'),()=>settings.social),engine=new SocialEngine(store,media,api,usage,()=>settings,async()=>true,()=>{},()=>{},qzone);
-  const autonomy=new Autonomy(store,()=>settings,usage,()=>clock.now,media);engine.autonomy=autonomy;
+  const autonomy=new Autonomy(store,()=>settings,usage,()=>clock.now,media,new IntervalClock(()=>clock.now,()=>clock.now));engine.autonomy=autonomy;
   const ctx=a=>({chat:'private:20001',self:10000,user:20001,sent:0,silent:false,signal:new AbortController().signal,proactive:true,...(a?{autonomous:a}:{})});
   const add=async()=>{await store.add({chat:'private:20001',id:1,user:20001,name:'朋友',at:clock.now-3*hour,text:'之前聊过猫猫',segments:[],self:false,recalled:false});};
   try{await run({root,clock,settings,store,usage,api,engine,autonomy,media,calls,ctx,add,setPosts:value=>{posts=value;},postCount:()=>postRequests});}finally{await rm(root,{recursive:true,force:true,maxRetries:10,retryDelay:100});}

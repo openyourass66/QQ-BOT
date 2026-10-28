@@ -15,6 +15,7 @@ import {DEFAULT_SETTINGS} from '../dist/core/settings.js';
 import {Autonomy} from '../dist/agent/autonomy.js';
 import {selectBackgroundThought,backgroundLane} from '../dist/app/background-selection.js';
 import {DatabaseSync} from 'node:sqlite';
+import {IntervalClock} from '../dist/core/interval-clock.js';
 
 const thought=(id,now,extra={})=>({id,key:id,chat:'private:20001',kind:'chat',summary:'具体想法',reason:'实际依据',at:now-1000,due:now-100,expires:now+3600000,priority:50,state:'pending',result:'',...extra});
 async function fixture(run){const root=await mkdtemp(join(tmpdir(),'qq-background-claims-')),resources=[],keep=item=>{resources.push(item);return item;};try{await run({root,path:join(root,'social.json'),keep});}finally{await Promise.allSettled(resources.map(item=>item.close?.()));await rm(root,{recursive:true,force:true,maxRetries:8,retryDelay:50});}}
@@ -70,7 +71,7 @@ test('schema 5 原子增加到期索引，保留想法、游标和领取记录�
 
 test('模型队列接纳后才预扣自主判断，忙碌退回不消耗；重复预扣回调只计一次',()=>fixture(async({root,path,keep})=>{
   let now=Date.now();const s=structuredClone(DEFAULT_SETTINGS);Object.assign(s.social,{proactiveEnabled:true,quietStartHour:0,quietEndHour:0});const store=keep(new SqliteSocialStore(path));await store.load();await store.update(d=>{d.autonomous.lastScanAt=now;d.autonomous.thoughts=[thought('wait',now)];});
-  const usage=new DailyUsageStore(join(root,'usage.json')),signal=new AbortController().signal;await usage.load();const autonomy=new Autonomy(store,()=>s,usage,()=>now);
+  const usage=new DailyUsageStore(join(root,'usage.json')),signal=new AbortController().signal;await usage.load();const autonomy=new Autonomy(store,()=>s,usage,()=>now,undefined,new IntervalClock(()=>now,()=>now));
   await autonomy.tick(signal,async()=>false,()=>true,undefined,true);assert.equal(usage.used('autonomous-decisions'),0);assert.equal(store.view('autonomous').autonomous.thoughts[0].state,'pending');
   now+=31000;await autonomy.tick(signal,async(_,turn)=>{await Promise.all([turn.reserveDecision(),turn.reserveDecision()]);turn.effects.add('chat');},()=>true,undefined,true);assert.equal(usage.used('autonomous-decisions'),1);assert.equal(store.view('autonomous').autonomous.thoughts[0].state,'done');
 }));

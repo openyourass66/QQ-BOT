@@ -574,6 +574,7 @@ function logDrop(key: string, stage: 'ingress' | 'batch' | 'queue' | 'notice'): 
 async function wakeConversation(chat: string, reason: string, proactive = true, actor?: number,autonomous?:AutonomousTurn): Promise<void|boolean> {
   const publicTask=autonomous?.kind==='qzone'||autonomous?.kind==='qzone-comment',key=publicTask?`self:${autonomous!.kind}`:autonomous?`autonomous:${autonomous.kind}:${chat}`:chat;
   if (stopping || (proactive && queue.has(publicTask?key:chat)) || (!publicTask&&!allowedChat(getSettings().social, chat, actor))) return false;
+  if(autonomous&&(ingress.size>0||queue.size>0))return false;
   return queue.run(publicTask?key:chat, async () => {
     if(autonomous&&(ingress.size>0||queue.size>1))return false;
     const ctx: ToolContext = { chat:publicTask?`private:${selfId}`:chat, self: selfId, user:publicTask?selfId:actor ?? Number(chat.split(':')[1]), origin: proactive ? 'background' : 'notice', signal: shutdownSignal.signal, sent: 0, silent: false, proactive,autonomous, pendingStickerCollections: new Set(), pendingStickerSends: new Set(),budget:turnBudget() };

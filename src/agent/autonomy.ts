@@ -10,6 +10,7 @@ import { allowedChat } from '../qq/social-settings.js';
 import { MediaService, downloadPublic, imageMime } from '../services/media.js';
 import { pathToFileURL } from 'node:url';
 import {backgroundLane,selectBackgroundThought} from '../app/background-selection.js';
+import {IntervalClock} from '../core/interval-clock.js';
 
 const minute=60000,hour=60*minute;
 const common=['qq_self_state','qq_interest','qq_thought','qq_finish','qq_report'];
@@ -30,9 +31,7 @@ function prune(d:SocialData,now:number):void {
 /** Candidate selection is local; the existing conversation model decides whether to act. */
 export class Autonomy {
   private running=false;
-  private nextScanAt=0;
-  private scanInterval=0;
-  constructor(private store:SocialRepository,private settings:()=>BotSettings,private usage:DailyUsageStore,private now=()=>Date.now(),private media?:MediaService){}
+  constructor(private store:SocialRepository,private settings:()=>BotSettings,private usage:DailyUsageStore,private now=()=>Date.now(),private media?:MediaService,private cadence=new IntervalClock(now)){}
   private enabled():boolean {const s=this.settings();return s.social.autonomousEnabled&&s.social.proactiveEnabled&&!quietTime(s,this.now());}
   view(ctx:ToolContext):unknown {
     const d=this.store.view('autonomous').autonomous,scope=['qzone','qzone-comment'].includes(ctx.autonomous?.kind??'')?'':ctx.chat;
@@ -198,12 +197,10 @@ export class Autonomy {
     if(this.running||signal.aborted||!this.enabled())return;
     const s=this.settings(),now=this.now(),interval=s.social.proactiveIntervalMinutes*minute,scanEvery=Math.min(interval,minute);
     const before=this.store.view('autonomous');
-    if(now-before.autonomous.lastDecisionAt<30000)return;
-    if(this.scanInterval!==interval){this.scanInterval=interval;this.nextScanAt=0;}
+    if(!this.cadence.due('decision',before.autonomous.lastDecisionAt,30000))return;
     this.running=true;
     try {
-      if(now>=this.nextScanAt&&now-before.autonomous.lastScanAt>=scanEvery) {
-        this.nextScanAt=now+scanEvery;
+      if(this.cadence.due('scan',before.autonomous.lastScanAt,scanEvery)) {
         const incoming=await this.store.latestIncoming(s.social.blockedUsers);
         await this.store.update(d=>{
           d.autonomous.lastScanAt=now;prune(d,now);
@@ -235,6 +232,7 @@ export class Autonomy {
           }
           prune(d,now);
         });
+        this.cadence.mark('scan',now);
       }
       if(this.usage.used('autonomous-decisions')>=s.social.autonomousDecisionsPerDay||this.usage.used('social-actions')>=s.social.actionsPerDay)return;
       const d=this.store.view('autonomous','contacts','profiles','account');
@@ -262,6 +260,7 @@ export class Autonomy {
         if(t.kind==='qzone-comment'){data.autonomous.lastCommentAttempt=now;data.autonomous.commentCursor++;}
         if(t.chat&&!data.autonomous.contacts.some(c=>c.chat===t.chat)){data.autonomous.contacts.push({chat:t.chat,incomingAt:referenced.find(m=>m.chat===t.chat&&m.id===t.messageId)?.at??0,proactiveAt:0,unanswered:0,attemptAt:0});data.autonomous.contacts=data.autonomous.contacts.slice(-5000);}
       }))return;
+      this.cadence.mark('decision',now);
       const a:AutonomousTurn={kind:t.kind,thoughtId:t.id,runId:claimId,effects:new Set(),messages:0,reason:'',...(t.targetUser?{targetUser:t.targetUser}:{})};let failure='',busy=false;
       let reservation:Promise<void>|undefined;
       const reserve=()=>reservation??=this.usage.consume(()=>{signal.throwIfAborted();const current=this.store.view('autonomous').autonomous.thoughts.find(row=>row.id===t.id);if(!this.enabled()||current?.state!=='running'||current.claim?.id!==claimId||current.expires<=this.now())throw new Error('自主任务已关闭、取消或执行凭证失效');return [{key:'autonomous-decisions',amount:1,limit:this.settings().social.autonomousDecisionsPerDay,label:'自主判断'}];});
