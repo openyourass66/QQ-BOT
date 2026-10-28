@@ -127,7 +127,7 @@ export async function socialAdmin(input: unknown, store: SocialRepository, media
     } break;
     case 'lexicon':for(const l of [...data.cognition.lexicon].reverse())add(l.id,l.chat,l.term,l.meaning,{candidate:'待确认',active:'有效',disabled:'已停用'}[l.status],l.at,
       `类型：${l.kind==='term'?'群内用语':'表达参考'}\n${l.meaning}\n\n依据消息：${l.sources.join('、')}\n修订：${l.revision} · ${l.locked?'管理员锁定':'自动候选'}\n历史版本：\n${l.history.map(h=>`${date(h.at)} ${h.reason}\n${h.text}`).join('\n')||'无'}`,l.meaning);break;
-    case 'learning':for(const j of [...data.cognition.jobs].reverse())add(j.id,j.chat,'聊天资料整理',j.summary,{running:'分析中',completed:'完成',failed:'失败',unknown:'结果待核对',discarded:'未应用'}[j.state],j.at,`${j.summary}\n依据消息：${j.sources.join('、')}\n服务返回用量：${j.inputTokens===undefined?'未知':`${j.inputTokens} 输入 / ${j.outputTokens} 输出`}\n此记录统计一次无工具分析，不推算费用。`);break;
+    case 'learning':for(const j of [...data.cognition.jobs].reverse())add(j.id,j.chat,'聊天资料整理',j.summary,{preparing:'准备分析',running:'分析中',completed:'完成',failed:'失败',unknown:'结果待核对',discarded:'未应用'}[j.state],j.at,`${j.summary}\n依据消息：${j.sources.join('、')}\n服务返回用量：${j.inputTokens===undefined?'未知':`${j.inputTokens} 输入 / ${j.outputTokens} 输出`}\n此记录统计一次无工具分析，不推算费用。`);break;
     case 'stickers': for (const t of data.stickers) {
       if(t.qq&&!t.qqPresent)continue;
       if (a.query && !(stickerSearchText(t) + ' ' + (t.analysis?.avoid.join(' ') ?? '').toLocaleLowerCase()).includes(a.query.toLocaleLowerCase())) continue;

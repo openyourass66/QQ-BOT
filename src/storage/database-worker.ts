@@ -77,7 +77,7 @@ function execute(request:DatabaseRequest):unknown {
       return transaction(()=>{for(const row of request.rows){if(row.table==='messages')putMessage(row.value,true,true);else changeEntity(row,true);}return {imported:request.rows.length};});
     case 'complete-import':if(meta('initialized'))throw error('DATABASE_REQUEST_INVALID','数据库已经完成导入。');return transaction(()=>{setMeta('source',request.source);if(request.source.kind==='social')seedReceipts();setMeta('initialized',true);return {revision:revision()};});
     case 'mutate':return transaction(()=>{
-      if(request.guard){if(request.guard.table!=='thoughts'||typeof request.guard.claimId!=='string'||!request.guard.claimId||request.guard.claimId.length>128)throw error('DATABASE_REQUEST_INVALID','自主任务凭证无效。');const row=db.prepare('SELECT state,payload FROM entity_thoughts WHERE key=?').get(request.guard.key);if(!row||row.state!=='running'||JSON.parse(String(row.payload)).claim?.id!==request.guard.claimId)return {changed:false,revision:revision()};}
+      if(request.guard){const state=request.guard.state??'running';if(!['thoughts','learning_jobs'].includes(request.guard.table)||!['preparing','running'].includes(state)||request.guard.table==='thoughts'&&state!=='running'||typeof request.guard.claimId!=='string'||!request.guard.claimId||request.guard.claimId.length>128)throw error('DATABASE_REQUEST_INVALID','后台任务凭证无效。');const row=db.prepare(`SELECT state,payload FROM ${tableName(request.guard.table)} WHERE key=?`).get(request.guard.key);if(!row||row.state!==state||JSON.parse(String(row.payload)).claim?.id!==request.guard.claimId)return {changed:false,revision:revision()};}
       checkRevision(request.expectedRevision);for(const row of request.changes)changeEntity(row);for(const m of request.messages??[])putMessage(m);const next=revision()+1;setMeta('revision',next);return {changed:true,revision:next};
     });
     case 'add-message':return transaction(()=>{
@@ -107,6 +107,14 @@ function execute(request:DatabaseRequest):unknown {
       if(!thought||row!.state!=='pending'||Number(row!.due)>request.now||thought.expires<=request.now)return {claimed:false,revision:revision()};
       checkRevision(request.expectedRevision);if(!Number.isFinite(request.now)||!request.claimId||request.claimId.length>128||!request.owner||request.owner.length>128)throw error('DATABASE_REQUEST_INVALID','自主任务领取参数无效。');
       thought.state='running';thought.claim={id:request.claimId,owner:request.owner,at:request.now};changeEntity({table:'thoughts',key:request.id,ordinal:Number(row!.ordinal),value:thought});const next=revision()+1;setMeta('revision',next);return {claimed:true,thought,revision:next};
+    });
+    case 'claim-learning':return transaction(()=>{
+      const i=request.input;if(typeof i.id!=='string'||!i.id||i.id.length>128||typeof i.chat!=='string'||!/^(group|private):\d+$/.test(i.chat)||!Number.isFinite(i.at)||!/^[a-f0-9]{64}$/.test(i.batch)||!Array.isArray(i.sources)||i.sources.length>20000||!i.sources.every(Number.isSafeInteger)||typeof request.owner!=='string'||!request.owner||request.owner.length>128)throw error('DATABASE_REQUEST_INVALID','资料整理领取参数无效。');
+      if(db.prepare("SELECT 1 FROM entity_learning_jobs WHERE key=? OR chat=? AND state IN ('preparing','running') LIMIT 1").get(i.id,i.chat)||!i.manual&&db.prepare("SELECT 1 FROM entity_learning_jobs WHERE chat=? AND state='unknown' AND json_extract(payload,'$.batch')=? LIMIT 1").get(i.chat,i.batch))return {claimed:false,revision:revision()};
+      checkRevision(request.expectedRevision);const removed:string[]=[];
+      if(Number(db.prepare('SELECT COUNT(*) AS n FROM entity_learning_jobs').get()!.n)>=200){const oldest=db.prepare("SELECT key FROM entity_learning_jobs WHERE state NOT IN ('preparing','running') ORDER BY ordinal,key LIMIT 1").get();if(!oldest)throw error('DATABASE_STATE_LIMIT','资料整理任务达到容量上限');removed.push(String(oldest.key));changeEntity({table:'learning_jobs',key:String(oldest.key)});}
+      const ordinal=Number(db.prepare('SELECT COALESCE(MAX(ordinal),-1024)+1024 AS n FROM entity_learning_jobs').get()!.n),job={id:i.id,chat:i.chat,at:i.at,batch:i.batch,sources:i.sources,state:'preparing',summary:'准备分析',claim:{id:i.id,owner:request.owner,at:i.at}};
+      changeEntity({table:'learning_jobs',key:i.id,ordinal,value:job});const next=revision()+1;setMeta('revision',next);return {claimed:true,job,revision:next,ordinal,removed};
     });
     case 'claim-task':return transaction(()=>{
       const row=db.prepare('SELECT ordinal,payload,state,due,retry_at FROM entity_tasks WHERE key=?').get(request.id);
@@ -153,7 +161,7 @@ function execute(request:DatabaseRequest):unknown {
 try{
   db=new DatabaseSync(workerData.path);db.exec('PRAGMA busy_timeout=3000; PRAGMA foreign_keys=ON; PRAGMA trusted_schema=OFF;');
   const version=Number(Object.values(db.prepare('PRAGMA user_version').get()!)[0]),app=Number(Object.values(db.prepare('PRAGMA application_id').get()!)[0]);
-  if(version>6)throw error('DATABASE_SCHEMA_NEWER','数据库版本较新，请使用兼容的程序版本。');
+  if(version>7)throw error('DATABASE_SCHEMA_NEWER','数据库版本较新，请使用兼容的程序版本。');
   if(version===0){
     if(Number(db.prepare("SELECT COUNT(*) AS n FROM sqlite_schema WHERE type='table'").get()!.n))throw error('DATABASE_INVALID','数据文件不是受支持的数据库。');
     transaction(()=>{
@@ -167,6 +175,7 @@ try{
   if(version<4)transaction(()=>{db.exec('CREATE TABLE incoming_receipts(chat TEXT NOT NULL,id INTEGER NOT NULL,received_at REAL NOT NULL,PRIMARY KEY(chat,id)) WITHOUT ROWID;CREATE INDEX incoming_receipts_at ON incoming_receipts(received_at);PRAGMA user_version=4;');setMeta('receipts_count',0);setMeta('receipts_pruned_at',0);seedReceipts();});
   if(version<5)transaction(()=>{createOperationSchema(db);setMeta('operations_count',0);setMeta('operations_bytes',0);});
   if(version<6)transaction(()=>db.exec('CREATE INDEX IF NOT EXISTS thoughts_due ON entity_thoughts(state,due,key);PRAGMA user_version=6;'));
+  if(version<7)transaction(()=>db.exec('CREATE INDEX IF NOT EXISTS learning_chat_state ON entity_learning_jobs(chat,state);PRAGMA user_version=7;'));
   db.exec('PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA wal_autocheckpoint=1000;');
   port.postMessage({type:'ready'});
   port.on('message',({id,request}:{id:number;request:DatabaseRequest})=>{

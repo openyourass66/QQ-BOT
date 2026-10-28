@@ -4,9 +4,10 @@ import {segmentsToText,type MessageEvent} from '../qq/onebot.js';
 import {DatabaseClient} from './database-client.js';
 import {dataFromRows,entityRows,rowChanges,stableEntityOrder,entityIdentity} from './social-entities.js';
 import {ensureSocialDatabase,verifyMigrationSource,type MigrationProgress} from './social-migration.js';
-import type {EntityRow} from './database-types.js';
+import type {EntityRow,EntityGuard} from './database-types.js';
 import type {SocialField,MessageQuery,MessageRef} from './social-repository.js';
 import {ThoughtSchema,type Thought} from '../agent/autonomous-state.js';
+import {LearningJobSchema,type LearningJob,type LearningClaim} from '../agent/cognition-state.js';
 
 /** 仅缓存有界业务状态；消息历史留在 Worker，事务只提交有变化的条目。 */
 export class SqliteSocialStore extends SocialStore {
@@ -42,7 +43,7 @@ export class SqliteSocialStore extends SocialStore {
   override updateWithMessages<T>(chat:string,ids:number[],fn:(draft:SocialData)=>T):Promise<T>{
     return this.serial(async()=>this.mutate(fn,await this.database!.call<StoredMessage[]>({action:'lookup-messages',refs:ids.map(id=>({chat,id}))})));
   }
-  private async mutate<T>(fn:(draft:SocialData)=>T,messages?:StoredMessage[],guard?:{table:'thoughts';key:string;claimId:string}):Promise<T>{
+  private async mutate<T>(fn:(draft:SocialData)=>T,messages?:StoredMessage[],guard?:EntityGuard):Promise<T>{
     const copies=new Map<keyof SocialData,unknown>(),originalMessages=messages?structuredClone(messages):undefined;
     const draft=new Proxy(this.data,{
       get:(target,key)=>{
@@ -91,6 +92,11 @@ export class SqliteSocialStore extends SocialStore {
     if(!saved.claimed)return undefined;const thought=ThoughtSchema.parse(saved.thought);this.revision=saved.revision;this.data.autonomous.thoughts=this.data.autonomous.thoughts.map(item=>item.id===id?thought:item);return thought;
   });}
   override updateThoughtClaim(id:string,claimId:string,fn:(draft:SocialData)=>void):Promise<boolean>{return this.serial(()=>this.mutate(d=>{const current=d.autonomous.thoughts.find(t=>t.id===id);if(!current||current.state!=='running'||current.claim?.id!==claimId)return false;fn(d);return true;},undefined,{table:'thoughts',key:id,claimId}));}
+  override claimLearning(input:LearningClaim):Promise<LearningJob|undefined>{return this.serial(async()=>{
+    const saved=await this.database!.call<{claimed:boolean;revision:number;job?:unknown;ordinal:number;removed:string[]}>({action:'claim-learning',expectedRevision:this.revision,input,owner:this.instanceId});
+    if(!saved.claimed)return undefined;const job=LearningJobSchema.parse(saved.job);this.revision=saved.revision;this.data.cognition.jobs=this.data.cognition.jobs.filter(row=>!saved.removed.includes(row.id));this.data.cognition.jobs.push(job);this.positions.set(entityIdentity({table:'learning_jobs',key:job.id}),saved.ordinal);for(const key of saved.removed)this.positions.delete(entityIdentity({table:'learning_jobs',key}));return job;
+  });}
+  override updateLearningClaim(id:string,claimId:string,state:'preparing'|'running',fn:(draft:SocialData)=>void,refs?:MessageRef[]):Promise<boolean>{return this.serial(async()=>this.mutate(d=>{const current=d.cognition.jobs.find(job=>job.id===id);if(!current||current.state!==state||current.claim?.id!==claimId)return false;fn(d);return true;},refs?await this.database!.call<StoredMessage[]>({action:'lookup-messages',refs}):undefined,{table:'learning_jobs',key:id,claimId,state}));}
   override claimTask(id:string,now:number):Promise<ScheduledTask|undefined>{return this.serial(async()=>{
     const saved=await this.database!.call<{claimed:boolean;revision:number;task?:unknown}>({action:'claim-task',expectedRevision:this.revision,id,now,claimId:randomUUID(),owner:this.instanceId});
     if(!saved.claimed)return undefined;const task=ScheduledTaskSchema.parse(saved.task);this.revision=saved.revision;this.data.tasks=this.data.tasks.map(item=>item.id===id?task:item);return task;

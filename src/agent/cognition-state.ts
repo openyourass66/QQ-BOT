@@ -19,11 +19,14 @@ export const LexiconSchema = z.object({
   locked:z.boolean().default(false),revision:z.number().int().positive().default(1),at:z.number(),
   history:z.array(z.object({text:z.string(),at:z.number(),reason:z.string()})).max(10).default([]),
 });
+export const LearningJobSchema=z.object({id:z.string(),chat:z.string(),at:z.number(),state:z.enum(['preparing','running','completed','failed','unknown','discarded']),summary:z.string(),sources:z.array(z.number().int().safe()),inputTokens:z.number().int().nonnegative().optional(),outputTokens:z.number().int().nonnegative().optional(),batch:z.string().regex(/^[a-f0-9]{64}$/).optional(),claim:z.object({id:z.string().min(1).max(128),owner:z.string().min(1).max(128),at:z.number()}).optional()});
+export type LearningJob=z.infer<typeof LearningJobSchema>;
+export type LearningClaim={id:string;chat:string;at:number;batch:string;sources:number[];manual?:boolean};
 export const CognitionStateSchema = z.object({
   memories:z.record(z.string(), MemoryMetaSchema).prefault({}),
   lexicon:z.array(LexiconSchema).max(3000).default([]),
   suppressed:z.array(z.object({chat:z.string(),hash:z.string(),at:z.number()})).max(10000).default([]),
   scopes:z.record(z.string(), z.object({cursor:z.number().default(0),cursorIds:z.array(z.number().int().safe()).max(20000).default([]),lastAttempt:z.number().default(0)})).prefault({}),
-  jobs:z.array(z.object({id:z.string(),chat:z.string(),at:z.number(),state:z.enum(['running','completed','failed','unknown','discarded']),summary:z.string(),sources:z.array(z.number().int().safe()),inputTokens:z.number().int().nonnegative().optional(),outputTokens:z.number().int().nonnegative().optional()})).max(200).default([]),
+  jobs:z.array(LearningJobSchema).max(200).default([]),
 }).prefault({});
 export type MemoryMeta = z.infer<typeof MemoryMetaSchema>;

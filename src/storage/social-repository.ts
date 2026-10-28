@@ -1,6 +1,7 @@
 import type {SocialData,StoredMessage,ScheduledTask} from '../qq/social-store.js';
 import type {MessageEvent,Segment} from '../qq/onebot.js';
 import type {Thought} from '../agent/autonomous-state.js';
+import type {LearningJob,LearningClaim} from '../agent/cognition-state.js';
 
 export type SocialField=Exclude<keyof SocialData,'messages'>;
 export type MessageQuery={chat?:string;ids?:number[];limit?:number;offset?:number;query?:string;after?:number;ascending?:boolean;incomingOnly?:boolean;excludeUsers?:string[]};
@@ -27,6 +28,8 @@ export interface SocialRepository {
   dueThoughts(now:number):Awaitable<Thought[]>;
   claimThought(id:string,now:number):Promise<Thought|undefined>;
   updateThoughtClaim(id:string,claimId:string,fn:(draft:SocialData)=>void):Promise<boolean>;
+  claimLearning(input:LearningClaim):Promise<LearningJob|undefined>;
+  updateLearningClaim(id:string,claimId:string,state:'preparing'|'running',fn:(draft:SocialData)=>void,refs?:MessageRef[]):Promise<boolean>;
   messages(chat:string,limit?:number,offset?:number,query?:string):Awaitable<StoredMessage[]>;
   message(chat:string,id:number):Awaitable<StoredMessage>;
   update<T>(fn:(draft:SocialData)=>T):Promise<T>;

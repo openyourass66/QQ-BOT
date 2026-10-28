@@ -6,7 +6,7 @@ import type { MessageEvent, Segment } from './onebot.js';
 import { segmentsToText } from './onebot.js';
 import { StoredStickerAnalysisSchema } from './sticker-review.js';
 import { AutonomousStateSchema } from '../agent/autonomous-state.js';
-import { CognitionStateSchema, MemoryMetaSchema } from '../agent/cognition-state.js';
+import { CognitionStateSchema, MemoryMetaSchema, type LearningClaim, type LearningJob } from '../agent/cognition-state.js';
 import type {SocialRepository,SocialField,MessageQuery,MessageRef} from '../storage/social-repository.js';
 import {currentOperation} from '../core/operation-context.js';
 
@@ -82,6 +82,12 @@ export class SocialStore implements SocialRepository {
   dueThoughts(now:number):SocialData['autonomous']['thoughts']|Promise<SocialData['autonomous']['thoughts']>{return structuredClone(this.data.autonomous.thoughts.filter(t=>t.state==='pending'&&t.due<=now&&t.expires>now).sort((a,b)=>a.due-b.due||a.id.localeCompare(b.id)).slice(0,200));}
   claimThought(id:string,now:number):Promise<SocialData['autonomous']['thoughts'][number]|undefined>{return this.update(d=>{const current=d.autonomous.thoughts.find(t=>t.id===id);if(!current||current.state!=='pending'||current.due>now||current.expires<=now)return undefined;current.state='running';current.claim={id:randomUUID(),owner:this.instanceId,at:now};return current;});}
   updateThoughtClaim(id:string,claimId:string,fn:(draft:SocialData)=>void):Promise<boolean>{return this.update(d=>{const current=d.autonomous.thoughts.find(t=>t.id===id);if(!current||current.state!=='running'||current.claim?.id!==claimId)return false;fn(d);return true;});}
+  claimLearning(input:LearningClaim):Promise<LearningJob|undefined>{return this.update(d=>{
+    if(d.cognition.jobs.some(job=>job.id===input.id||job.chat===input.chat&&(['preparing','running'].includes(job.state)||!input.manual&&job.state==='unknown'&&job.batch===input.batch)))return undefined;
+    if(d.cognition.jobs.length>=200){const index=d.cognition.jobs.findIndex(job=>!['preparing','running'].includes(job.state));if(index<0)throw new Error('资料整理任务已达到容量上限');d.cognition.jobs.splice(index,1);}
+    const job:LearningJob={id:input.id,chat:input.chat,at:input.at,batch:input.batch,sources:input.sources,state:'preparing',summary:'准备分析',claim:{id:input.id,owner:this.instanceId,at:input.at}};d.cognition.jobs.push(job);return job;
+  });}
+  updateLearningClaim(id:string,claimId:string,state:'preparing'|'running',fn:(draft:SocialData)=>void,_refs?:MessageRef[]):Promise<boolean>{return this.update(d=>{const current=d.cognition.jobs.find(job=>job.id===id);if(!current||current.state!==state||current.claim?.id!==claimId)return false;fn(d);return true;});}
   finishTask(id:string,claimId:string,result:{state:'pending'|'blocked'|'sent'|'failed'|'unknown';error:string;retryAt:number;due?:number}):Promise<boolean>{return this.update(d=>{const current=d.tasks.find(t=>t.id===id);if(!current||current.state!=='running'||current.claim?.id!==claimId)return false;Object.assign(current,result);return true;});}
   update<T>(fn: (draft: SocialData) => T): Promise<T> {
     const job = this.chain.then(async () => {
@@ -173,6 +179,7 @@ export class SocialStore implements SocialRepository {
 export {schema as SocialDataSchema};
 
 export function recoverInterrupted(d:SocialData,now=Date.now()):void {
+      for(const job of d.cognition.jobs)if(job.state==='preparing'){job.state='failed';job.summary='上次准备分析中断，尚未提交分析，处理游标保留';}
       for(const job of d.cognition.jobs) if(job.state==='running'){job.state='unknown';job.summary='上次分析中断，已保留处理游标，不自动重复提交';}
       for (const item of d.actions) if (item.state === 'running') item.state = 'unknown';
       for (const item of d.tasks) if (item.state === 'running') { item.state = 'unknown'; item.error = '上次执行中断，请核对聊天记录后再安排'; }
