@@ -17,6 +17,8 @@ export const LearningProposalSchema = z.object({
 export type LearningProposal = z.infer<typeof LearningProposalSchema>;
 export type LearningBatch = {chat:string;messages:StoredMessage[];memories:SocialData['memories'];revision:string};
 export type Analyze = (batch:LearningBatch,signal:AbortSignal)=>Promise<LearningProposal|{proposal:LearningProposal;usage?:{inputTokens:number;outputTokens:number}} >;
+export type PreparedAnalysis={run:()=>ReturnType<Analyze>;close:()=>Promise<void>};
+export type PrepareAnalysis=(batch:LearningBatch,signal:AbortSignal)=>Promise<PreparedAnalysis>;
 export const normalize = (value:string):string => value.normalize('NFKC').toLocaleLowerCase().replace(/[\s\p{P}\p{S}]/gu,'');
 export const fingerprint = (value:string):string => createHash('sha256').update(normalize(value)).digest('hex');
 const unsafe = (text:string):boolean => /(?:api[_ -]?key|access[_ -]?token|authorization|password|密码|密钥|口令|cookie)\s*[:=：]|(?:sk-|Bearer\s+)[a-z0-9_-]{10,}|-----BEGIN .*PRIVATE KEY/i.test(text);
@@ -71,7 +73,7 @@ export function forgetMemory(data:SocialData,id:string,now=Date.now()):void {
 export class Cognition {
   private running?:Promise<void>;
   constructor(readonly store:SocialRepository,private settings:()=>BotSettings,private usage:DailyUsageStore,private analyze:Analyze,
-    private available:()=>string=()=>'',private now:()=>number=Date.now) {}
+    private available:()=>string=()=>'',private now:()=>number=Date.now,private prepare?:PrepareAnalysis) {}
   availability():string {return this.available();}
   async review(chat:string,signal:AbortSignal):Promise<void> {
     if(this.running)throw new Error('已有资料整理正在执行，请稍后再试');
@@ -109,7 +111,9 @@ export class Cognition {
     if(!current.learning.memory&&!current.learning.lexicon)throw new Error('后台学习已关闭');
     if(this.available())throw new Error(this.available());
     signal.throwIfAborted();
-    await this.usage.consume(()=>[{key:'learning',amount:1,limit:this.settings().learning.dailyCalls,label:'后台学习'}]);
+    const prepared=await this.prepare?.(batch,signal);
+    try{
+    if(!prepared)await this.usage.consume(()=>[{key:'learning',amount:1,limit:this.settings().learning.dailyCalls,label:'后台学习'}]);
     const id=randomUUID(),at=this.now();
     await this.store.update(d=>{
       const scope=d.cognition.scopes[batch.chat]??{cursor:0,cursorIds:[],lastAttempt:0};
@@ -119,7 +123,7 @@ export class Cognition {
       d.cognition.jobs.push({id,chat:batch.chat,at,state:'running',summary:'分析中',sources:batch.messages.map(m=>m.id)});d.cognition.jobs=d.cognition.jobs.slice(-200);
     });
     try {
-      const analyzed=await this.analyze(batch,signal),proposal=LearningProposalSchema.parse('proposal' in analyzed?analyzed.proposal:analyzed);signal.throwIfAborted();
+      const analyzed=await(prepared?prepared.run():this.analyze(batch,signal)),proposal=LearningProposalSchema.parse('proposal' in analyzed?analyzed.proposal:analyzed);signal.throwIfAborted();
       await this.store.updateWithMessages(batch.chat,batch.messages.map(m=>m.id),d=>{
         const job=d.cognition.jobs.find(j=>j.id===id)!;
         if('proposal' in analyzed&&analyzed.usage){job.inputTokens=analyzed.usage.inputTokens;job.outputTokens=analyzed.usage.outputTokens;}
@@ -173,5 +177,6 @@ export class Cognition {
       await this.store.update(d=>{const j=d.cognition.jobs.find(j=>j.id===id);if(j){j.state=signal.aborted?'unknown':'failed';j.summary=signal.aborted?'分析已中止，未写入提案':'分析失败或返回格式无效，未写入提案';}});
       if(signal.aborted)throw error;
     }
+    }finally{await prepared?.close();}
   }
 }

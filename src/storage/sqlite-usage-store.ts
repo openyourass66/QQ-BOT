@@ -4,6 +4,7 @@ import {createHash,randomUUID} from 'node:crypto';
 import {DailyUsageStore,UsageSchema,shanghaiDate,type Quota} from '../core/usage.js';
 import {DatabaseClient} from './database-client.js';
 import {verifyMigrationSource} from './social-migration.js';
+import type {ModelRequestRecord,ReportedUsage} from './database-types.js';
 
 export const usageDatabasePath=(path:string)=>path+'.sqlite';
 const hash=(bytes:Uint8Array|string)=>createHash('sha256').update(bytes).digest('hex');
@@ -43,15 +44,21 @@ export class SqliteDailyUsageStore extends DailyUsageStore {
     try{
       const metadata=await database.call<{initialized:boolean;usageInitialized:boolean;source:{sha256?:string;kind?:string}}>({action:'metadata'});
       if(!metadata.initialized||!metadata.usageInitialized||metadata.source?.kind!=='daily-usage')throw failure('额度数据库类型或迁移状态无效，请保留文件并核对。');
-      await verifyMigrationSource(this.path,metadata.source);const current=await database.call<{date:string;counters:Record<string,number>}>({action:'usage-summary',date:shanghaiDate(this.now())});this.data={version:1,...current};this.loaded=true;
+      await verifyMigrationSource(this.path,metadata.source);await database.call({action:'usage-recover-models'});const current=await database.call<{date:string;counters:Record<string,number>}>({action:'usage-summary',date:shanghaiDate(this.now())});this.data={version:1,...current};this.loaded=true;
     }catch(error){await database.close();throw error;}
   }
   override consume(getQuotas:()=>Quota[],onReserved:()=>void=()=>{}):Promise<void>{
+    return this.reserve(getQuotas,onReserved,randomUUID()).then(()=>{});
+  }
+  reserveModel(request:ModelRequestRecord,getQuotas:()=>Quota[]):Promise<{reused:boolean}>{return this.reserve(getQuotas,()=>{},request.id,request);}
+  finishModel(id:string,outcome:'completed'|'failed'|'unknown',usage:ReportedUsage):Promise<unknown>{return this.database!.call({action:'usage-finish-model',id,outcome,usage});}
+  requestStatistics():Promise<unknown>{return this.database!.call({action:'usage-request-stats',date:shanghaiDate(this.now())});}
+  private reserve(getQuotas:()=>Quota[],onReserved:()=>void,reservationId:string,request?:ModelRequestRecord):Promise<{reused:boolean}>{
     if(!this.loaded||this.closing)return Promise.reject(new Error('额度仓储未打开或已经关闭。'));
     if(this.queued>=64)return Promise.reject(Object.assign(new Error('额度操作正在处理，请稍后重试。'),{code:'DATABASE_QUEUE_FULL'}));
     this.queued++;const task=this.chain.then(async()=>{
       const now=this.now(),date=shanghaiDate(now),quotas=getQuotas();
-      try{const current=await this.database!.call<{date:string;counters:Record<string,number>}>({action:'usage-consume',date,quotas,reservationId:randomUUID(),at:now.getTime()});this.data={version:1,date:current.date,counters:current.counters};onReserved();}
+      try{const current=await this.database!.call<{date:string;counters:Record<string,number>;reused:boolean}>({action:'usage-consume',date,quotas,reservationId,at:now.getTime(),...(request?{request}:{})});this.data={version:1,date:current.date,counters:current.counters};if(!current.reused)onReserved();return {reused:current.reused};}
       catch(error){if((error as {code?:string}).code==='DATABASE_QUOTA_EXCEEDED'){const current=await this.database!.call<{date:string;counters:Record<string,number>}>({action:'usage-summary',date});this.data={version:1,...current};}throw error;}
     });this.chain=task.catch(()=>{});return task.finally(()=>{this.queued--;});
   }

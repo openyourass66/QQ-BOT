@@ -2,7 +2,7 @@ import { mkdir, rename, writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 
 export function restrictedToolPatches(): object[] {
-  const disabled=['tool-bash','tool-pwsh','tool-jobs','tool-fs','tool-fs-search','tool-working-directory','tool-skill','tool-subagent-control','tool-subagent-list-agents','tool-subagent','tool-subagent-fork','tool-workflow','tool-todo','tool-goal','tool-plugin-manager'];
+  const disabled=['tool-bash','tool-pwsh','tool-jobs','tool-fs','tool-fs-search','tool-working-directory','tool-skill','tool-subagent-control','tool-subagent-list-agents','tool-subagent','tool-subagent-fork','tool-workflow','tool-todo','tool-goal','tool-plugin-manager','session-title-llm'];
   return [...disabled.map(id=>({id,disabled:true})),{id:'tools',config:{mode:'native'}},{insert:[{id:'whale-tool-policy',name:new URL('../security/dsh-policy.js',import.meta.url).href}]}];
 }
 
@@ -72,8 +72,8 @@ export function chatModelPatches(config: ChatModelConfig): object[] {
   return patches;
 }
 
-export async function prepareChatModelPatch(config: ChatModelConfig, sessionStore: string): Promise<string | undefined> {
-  const patches = [...chatModelPatches(config),...restrictedToolPatches()];
+export async function prepareChatModelPatch(config: ChatModelConfig, sessionStore: string,maxOutputTokens=8192): Promise<string | undefined> {
+  const patches = [...chatModelPatches(config),...restrictedToolPatches(),{id:'compaction-basic',config:{maxTokens:maxOutputTokens}}];
   const path = resolve(dirname(sessionStore), 'dsh', 'chat-model.patch.json');
   await mkdir(dirname(path), { recursive: true });
   const temporary = path + `.${process.pid}.tmp`;

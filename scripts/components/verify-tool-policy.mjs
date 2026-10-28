@@ -12,7 +12,8 @@ try {
   const patch=join(scratch,'policy.json');await writeFile(patch,JSON.stringify(restrictedToolPatches()));
   await verifyAcp({node,entry:join(directory,'node_modules/@deepseek-ai/dsh/lib/bin.js'),cwd:scratch,env:childEnvironment(node,scratch),patch});
   await runChild(node,[join(root,'scripts/components/tool-policy-probe.mjs'),directory,root],{cwd:scratch,env:childEnvironment(node,scratch),timeout:20000});
-  console.log('受限工具策略通过真实 DSH ACP 加载与执行检查，未调用模型或 QQ。');
+  await runChild(node,[join(root,'scripts/components/model-budget-probe.mjs'),directory,root],{cwd:scratch,env:childEnvironment(node,scratch),timeout:20000});
+  console.log('受限工具策略和请求预算通过真实 DSH 加载与执行检查，未调用付费模型或 QQ。');
 }finally {
   const target=await realpath(scratch),rel=relative(base,target);
   if(!rel||rel.startsWith('..')||isAbsolute(rel))throw new Error('验证临时目录位置异常，已保留');

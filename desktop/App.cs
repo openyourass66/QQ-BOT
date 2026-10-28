@@ -29,6 +29,7 @@ partial class App
     }
     static Window window;
     static Process host;
+    static bool IsSqliteNotice(string text) {return System.Text.RegularExpressions.Regex.IsMatch(text,@"^\(node:\d+\) ExperimentalWarning: SQLite is an experimental feature and might change at any time$");}
     static StreamWriter hostInput;
     static string root;
     static string dataRoot;
@@ -386,7 +387,10 @@ partial class App
         info.EnvironmentVariables["QQBOT_LOW_INTEGRITY"] = NativeTray.IsLowIntegrity() ? "1" : "0";
         host = new Process { StartInfo = info, EnableRaisingEvents = true };
         host.OutputDataReceived += (s, e) => { if (e.Data != null) events.Enqueue(e.Data); };
-        host.ErrorDataReceived += (s, e) => { if (e.Data != null) events.Enqueue("{\"type\":\"error\",\"text\":\"控制进程异常，请检查配置与 Node 版本。\"}"); };
+        host.ErrorDataReceived += (s, e) => { if (e.Data != null) {
+            if(IsSqliteNotice(e.Data))events.Enqueue("{\"type\":\"log\",\"text\":\"[runtime] 当前 Node 版本将 SQLite 标记为实验功能；此提示不影响数据库运行。\"}");
+            else if(!e.Data.StartsWith("(Use `node --trace-warnings"))events.Enqueue("{\"type\":\"error\",\"text\":\"控制进程异常，请检查配置与 Node 版本。\"}");
+        } };
         host.Start(); hostInput = new StreamWriter(host.StandardInput.BaseStream, new UTF8Encoding(false)); host.BeginOutputReadLine(); host.BeginErrorReadLine();
         tray = new NativeTray(window, trayImage.Handle, args.Contains("--tray-check") ? "Whale UI tray check " + Path.GetFileName(root.TrimEnd(Path.DirectorySeparatorChar,Path.AltDirectorySeparatorChar)) : "小鲸工作台 · 点击打开");
         var menu = new ContextMenu();

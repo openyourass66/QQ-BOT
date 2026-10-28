@@ -3,8 +3,8 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { appendFileSync } from 'node:fs';
 import { mockStickerAnalysis } from '../helpers/sticker-review.mjs';
-import { apply as applyNativePolicy } from '../../dist/security/dsh-policy.js';
-if(process.env.FAKE_OMIT_NATIVE_POLICY!=='1')applyNativePolicy({tools:{guard(){}}});
+import {installFixturePolicy,beginFixtureRequest} from './model-budget.mjs';
+if(process.env.FAKE_OMIT_NATIVE_POLICY!=='1')installFixturePolicy();
 
 let nextSession = 0;
 let nextGroupTurn = 0;
@@ -31,6 +31,7 @@ lines.on('line', async (line) => {
     if (process.env.FAKE_MODEL_EVENTS) appendFileSync(process.env.FAKE_MODEL_EVENTS, JSON.stringify(params) + '\n');
     respond(id, { configOptions: [] });
   } else if (method === 'session/prompt') {
+    let finishBudget;try {finishBudget=await beginFixtureRequest(params.sessionId,params.prompt);
     if (process.env.FAKE_MODEL_EVENTS && sessionModels.get(params.sessionId) !== JSON.stringify(['deepseek-official', 'test-project-model'])) {
       process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id, error: { code: -32603, message: 'model not applied before prompt' } }) + '\n'); return;
     }
@@ -144,6 +145,7 @@ lines.on('line', async (line) => {
       update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text } },
     });
     respond(id, { stopReason: 'end_turn' });
+    }catch(error){process.stdout.write(JSON.stringify({jsonrpc:'2.0',id,error:{code:-32000,message:error.message}})+'\n');}finally{await finishBudget?.().catch(()=>{});}
   }
 });
 lines.on('close', () => process.exit(0));

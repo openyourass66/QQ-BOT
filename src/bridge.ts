@@ -17,7 +17,7 @@ import {
 } from './qq/onebot.js';
 import { SessionStore } from './core/store.js';
 import { getSettings, loadSettings, watchSettings, flushSettings, type BotSettings } from './core/settings.js';
-import { log, status } from './core/state.js';
+import { log, status,registerRuntimeSecret,redactRuntimeText } from './core/state.js';
 import { ConversationQueue, QueueFullError, withTimeout } from './core/runtime.js';
 import { RecentMessages, splitForQq } from './core/message-utils.js';
 import { GroupContextStore, groupTrigger, formatGroupEntry } from './qq/group-context.js';
@@ -43,6 +43,9 @@ import { chatModelSelection, prepareChatModelPatch } from './agent/chat-model.js
 import { dataPaths, mutableDataResources } from './core/data-paths.js';
 import { acquireDataResources, type ResourceLease } from './core/resource-lock.js';
 import { IngressBudget, type IngressLease } from './core/ingress.js';
+import {RequestBudget,ModelBudgetError} from './agent/request-budget.js';
+import {startModelBudgetServer} from './services/model-budget-server.js';
+import {withServiceRequestScope,serviceRequestScope,type ServiceRequest,type PreparedServiceRequest} from './agent/service-request.js';
 
 const api = new OneBotHttp(config.onebot.httpUrl, config.onebot.token);
 const paths = dataPaths();
@@ -54,7 +57,7 @@ const usage = new SqliteDailyUsageStore(paths.usage);
 usage.onFailure=error=>{if(!stopping){reportFatal(error);void shutdown(1);}};
 const socialStore:SocialRepository = new SqliteSocialStore(paths.social,{onMigrationProgress:({stage,completed,total})=>log('info',`[storage] ${stage} ${completed}/${total}`)});
 socialStore.onFailure=error=>{if(!stopping){reportFatal(error);void shutdown(1);}};
-const media = new MediaService(paths.media, () => getSettings().social);
+const media = new MediaService(paths.media, () => getSettings().social,prepareServiceRequest);
 const shutdownSignal = new AbortController();
 const activeConversations = new Map<string, ToolContext>();
 const activeTopics = new Map<string, { topic: string; until: number }>();
@@ -70,7 +73,7 @@ const ingress = new IngressBudget({
 const engine = new SocialEngine(socialStore, media, api, usage, getSettings, askAdmin, (chat, id, segments, source) => {
   status.messagesOut++;
   if (chat.startsWith('group:') && id) rememberBotReply(Number(chat.split(':')[1]), id, segmentsToText(segments), source === chat);
-}, text => log('info', text));
+}, text => log('info', text),undefined,prepareServiceRequest);
 let scheduler: NodeJS.Timeout | undefined;
 
 const sessions = new Map<string, acp.ActiveSession>();
@@ -97,6 +100,12 @@ const lastGroupReply = new Map<number, number>();
 let selfId = config.bot.selfId;
 let acpCtx: acp.ClientContext | undefined;
 let actionServer: ActionServer | undefined;
+let requestBudget:RequestBudget|undefined,budgetServer:Awaited<ReturnType<typeof startModelBudgetServer>>|undefined;
+function prepareServiceRequest(input:ServiceRequest):Promise<PreparedServiceRequest>{
+  if(!requestBudget)throw new ModelBudgetError('服务请求预算尚未准备好');
+  const source=input.kind==='learning'?{chat:input.chat??'',user:'background',background:true,signal:input.signal,allowed:()=>{const s=getSettings(),chat=input.chat??'';return !stopping&&s.learning.chats.includes(chat)&&allowedChat(s.social,chat)&&(s.learning.memory&&s.social.memoryEnabled||s.learning.lexicon&&chat.startsWith('group:'));}}:serviceRequestScope();
+  if(!source)throw new ModelBudgetError('媒体请求缺少可信会话来源');return requestBudget.prepareService(input,{...source,allowed:()=>{if(!source.allowed())return false;if(input.kind==='learning')return true;const s=getSettings().social;return s.mediaEnabled&&(input.kind==='vision'?s.visionModel:input.kind==='speech'?s.speechModel:s.transcriptionModel)===input.model;}});
+}
 let dshChild: ReturnType<typeof spawn> | undefined;
 let fatalReported=false;
 function reportFatal(error:unknown):void {fatalReported=true;process.send?.({type:'fatal',failure:classifyRuntimeFailure(error)},()=>{});}
@@ -236,8 +245,17 @@ async function runTurn(key: string, prompt: string): Promise<string> {
   let output = '', failure = '';
   let inputTokens: number | null = null, outputTokens: number | null = null;
   const titles: string[] = [];
+  let unbindBudget:()=>void=()=>{};
   turnSignals.set(context, controller.signal);
   try {
+    const active=activeConversations.get(key);if(!requestBudget||!active)throw new ModelBudgetError('模型请求上下文尚未准备好');
+    if(usage.used('social-actions')>=getSettings().social.actionsPerDay)throw new ModelBudgetError('今日 QQ 动作额度已用完，已停止继续调用模型。');
+    unbindBudget=requestBudget.bind(session.sessionId,{chat:key.startsWith('self:')?key:active.chat,user:String(active.user),background:active.origin!=='message',signal:controller.signal,allowed:()=>{
+      if(stopping||activeConversations.get(key)!==active)return false;
+      if(usage.used('social-actions')>=getSettings().social.actionsPerDay)return false;
+      if(active.autonomous){engine.autonomy.authorize(active,'qq_self_state');return true;}
+      return allowedChat(getSettings().social,active.chat,active.user)&&!(active.origin==='message'&&active.chat.startsWith('private:')&&!getSettings().chat.privateAutoReply);
+    }});
     return await withTimeout((async () => {
       let text = '';
       const done = session.prompt(prompt, { cancellationSignal: controller.signal });
@@ -251,8 +269,10 @@ async function runTurn(key: string, prompt: string): Promise<string> {
           const occupancy=readContextUsage(update);
           if(occupancy){contextUsage.set(key,occupancy);if(occupancy.used/occupancy.size*100>=getSettings().context.warningPercent)log('info',`[context] ${key}: ${occupancy.used}/${occupancy.size}（DSH 上报上下文占用，非计费用量）`);}
           if (update.sessionUpdate === 'agent_message_chunk' && update.content.type === 'text') {
+            if(text.length+update.content.text.length>getSettings().requests.maxResponseChars)throw new ModelBudgetError('本轮模型输出超过运行上限，已停止继续生成');
             text += update.content.text;
           } else if (update.sessionUpdate === 'tool_call') {
+            if(!turnToolIds.has(update.toolCallId)&&turnToolIds.size>=getSettings().context.toolsPerTurn)throw new ModelBudgetError('本轮 QQ 与原生工具预算已用完');
             titles.push(update.title);
             turnToolIds.add(update.toolCallId);
             toolCalls.set(update.toolCallId, {
@@ -282,7 +302,7 @@ async function runTurn(key: string, prompt: string): Promise<string> {
         .catch(() => undefined);
     });
   } catch (error) {
-    failure = String(error);
+    failure = redactRuntimeText(String(error));
     controller.abort();
     session.dispose();
     sessions.delete(key);
@@ -292,6 +312,7 @@ async function runTurn(key: string, prompt: string): Promise<string> {
     throw error;
   } finally {
     controller.abort();
+    unbindBudget();
     turnSignals.delete(context);
     for (const id of turnToolIds) toolCalls.delete(id);
     await socialStore.update(d => {const occupancy=contextUsage.get(key);d.turns.push({ id: randomBytes(12).toString('hex'), chat: key, at: started, duration: Date.now() - started, input: prompt.slice(0,16000), output: output.slice(0,16000), tools: titles, error: failure, inputTokens, outputTokens,...(occupancy?{contextUsed:occupancy.used,contextSize:occupancy.size}:{}),generation:store.metadata(key)?.generation??1 }); d.turns = d.turns.slice(-500); });
@@ -576,10 +597,10 @@ async function onMessage(event: MessageEvent): Promise<void> {
         status.lastError = String(error);
         log('error', `[turn] ${key} failed: ${String(error)}`);
         if (turn.sent || turn.silent) return;
+        const budgetFailure=error instanceof ModelBudgetError||/预算|模型或能力请求额度/.test(String(error));
         if (event.message_type === 'private') {
-          await api
-            .sendPrivate(event.user_id, '（我这边刚刚走神了，稍后再试一次？）')
-            .catch(() => undefined);
+          if(!getSettings().chat.privateAutoReply)return;
+          await engine.normalReply(turn,budgetFailure?'当前模型请求已达到运行上限，请稍后再试或由主人调整预算。':'（我这边刚刚走神了，稍后再试一次？）').catch(()=>undefined);
         } else if (trigger.direct) {
           await reply(event, '这条没处理成功，稍后再 @ 我一下。').catch(() => undefined);
         }
@@ -676,6 +697,8 @@ function spawnDsh(patch?: string,policyNonce?:string): ReturnType<typeof spawn> 
     if (!key.startsWith('DSH_')&&!['ONEBOT_TOKEN','BOT_MEDIA_API_KEY','BOT_LEARNING_API_KEY','BOT_ACTION_TOKEN','BOT_ACTION_URL','BOT_ACTION_CONTEXT'].includes(key)) env[key] = value;
   }
   if (config.dsh.home) env.DSH_HOME = config.dsh.home;
+  if(!budgetServer)throw new Error('模型请求预算服务尚未准备好');
+  env.BOT_MODEL_BUDGET_URL=budgetServer.url;env.BOT_MODEL_BUDGET_TOKEN=budgetServer.token;
   if(policyNonce)env.BOT_DSH_POLICY_NONCE=policyNonce;
   const args = ['--profile', config.dsh.profile, ...(patch ? ['--patch', patch] : [])];
 
@@ -703,6 +726,7 @@ function startBridge(patch?: string): void {
   const policyNonce=randomBytes(24).toString('hex');
   const child = spawnDsh(patch,policyNonce);
   let policyBuffer='';
+  let nativePolicyReady=false,modelBudgetReady=false;
   let policyActivated:()=>void=()=>{};
   const policyReady=new Promise<void>(resolve=>{policyActivated=resolve;});
   dshChild = child;
@@ -713,8 +737,8 @@ function startBridge(patch?: string): void {
 
   child.stderr?.on('data', (chunk: Buffer) => {
     policyBuffer+=chunk.toString();
-    for(;;){const end=policyBuffer.indexOf('\n');if(end<0)break;const line=policyBuffer.slice(0,end).replace(/\r$/,'');policyBuffer=policyBuffer.slice(end+1);if(line===`[whale-policy] ${policyNonce}`){status.nativeToolsRestricted=true;policyActivated();}else process.stderr.write(`[dsh] ${line}\n`);}
-    if(policyBuffer.length>16000){process.stderr.write('[dsh] '+policyBuffer.slice(0,16000)+'\n');policyBuffer='';}
+    for(;;){const end=policyBuffer.indexOf('\n');if(end<0)break;const line=policyBuffer.slice(0,end).replace(/\r$/,'');policyBuffer=policyBuffer.slice(end+1);if(line===`[whale-policy] ${policyNonce}`)nativePolicyReady=true;else if(line===`[whale-budget] ${policyNonce}`)modelBudgetReady=true;else process.stderr.write(`[dsh] ${redactRuntimeText(line)}\n`);if(nativePolicyReady&&modelBudgetReady){status.nativeToolsRestricted=true;policyActivated();}}
+    if(policyBuffer.length>16000){process.stderr.write('[dsh] '+redactRuntimeText(policyBuffer.slice(0,16000))+'\n');policyBuffer='';}
   });
   child.on('exit', (code) => {
     status.acpConnected = false;
@@ -743,7 +767,7 @@ function startBridge(patch?: string): void {
         protocolVersion: acp.PROTOCOL_VERSION,
         clientCapabilities: { fs: { readTextFile: false, writeTextFile: false } },
       });
-      try{await withTimeout(policyReady,5000);}catch{throw new Error('受限工具策略未加载，拒绝开放模型；请使用已验证的模型运行组件');}
+      try{await withTimeout(policyReady,5000);}catch{throw new Error('受限工具策略未加载，或请求预算未加载，拒绝开放模型；请使用已验证的模型运行组件');}
       status.acpConnected = true;
       log('info', `[acp] connected to ${init.agentInfo?.name ?? 'agent'} (protocol ${init.protocolVersion})`);
       readyResolve?.();
@@ -770,6 +794,8 @@ async function main(): Promise<void> {
   await groupContext.load();
   await usage.load();
   await socialStore.load();
+  requestBudget=new RequestBudget(usage,getSettings,{onHung:()=>{if(!stopping){reportFatal(Object.assign(new Error('模型请求在取消后仍未结束'),{code:'MODEL_STALLED'}));void shutdown(1);}}});
+  budgetServer=await startModelBudgetServer(requestBudget);registerRuntimeSecret(budgetServer.token);
   dataReady = true;
   stopSettings = watchSettings();
 
@@ -785,7 +811,7 @@ async function main(): Promise<void> {
     if (!active) throw new Error('当前会话上下文不存在');
       const callCtx: ToolContext = { ...active, sent: 0, signal: AbortSignal.any([signal, turnSignal]),budget:active.budget??(active.budget=turnBudget()) };
     try {
-      if ((input as { action?: string })?.action === 'social') return await engine.execute(input, callCtx);
+      if ((input as { action?: string })?.action === 'social') return await withServiceRequestScope({sessionId:key?sessions.get(key)?.sessionId:undefined,chat:callCtx.chat,user:String(callCtx.user),background:callCtx.origin!=='message',signal:callCtx.signal,allowed:()=>{callCtx.authorize?.();if(callCtx.autonomous){engine.autonomy.authorize(callCtx,'qq_self_state');return true;}return allowedChat(getSettings().social,callCtx.chat,callCtx.user);}},()=>engine.execute(input, callCtx));
       if ((input as { action?: string })?.action === 'legacy') {
         const call = LegacyCallSchema.parse(input);
         engine.guardTool(callCtx,call.tool);
@@ -820,8 +846,9 @@ async function main(): Promise<void> {
       if (callCtx.endTopic) active.endTopic = true;
     }
   });
+  registerRuntimeSecret(actionServer.token);
 
-  const modelPatch = await prepareChatModelPatch(config.chatModel, sessionStorePath);
+  const modelPatch = await prepareChatModelPatch(config.chatModel, sessionStorePath,getSettings().requests.maxOutputTokens);
   status.model = config.chatModel.mode === 'profile' ? 'DSH Profile' : config.chatModel.model;
   startBridge(modelPatch);
   await withTimeout(ready, 30_000);
@@ -896,7 +923,7 @@ async function shutdown(code = 0): Promise<void> {
   };
   try {
     await withTimeout((async () => {
-      await Promise.all([actionServer?.close(), stopChild(), queue.drain(), ingress.drain()]);
+      await Promise.all([actionServer?.close(), budgetServer?.close(), stopChild(), queue.drain(), ingress.drain()]);
       await engine.cognition.flush();
       await Promise.all([usage.flush(), store.flush(), groupContext.flush(), socialStore.flush(), flushSettings()]);
       await Promise.all([socialStore.close?.(),usage.close()]);

@@ -143,6 +143,7 @@ export async function prepareComponent({ id, archivePath, root = programRoot, da
           await verifyAcp({node:join(node.directory,'node.exe'),entry:join(payload,'node_modules/@deepseek-ai/dsh/lib/bin.js'),cwd:stage,env:childEnvironment(join(node.directory,'node.exe'),stage),signal,patch:policyPatch});
           await runChild(join(node.directory,'node.exe'),[join(root,'scripts/components/mcp-probe.mjs'),payload,root],{cwd:stage,env:childEnvironment(join(node.directory,'node.exe'),stage),signal,timeout:20000});
           await runChild(join(node.directory,'node.exe'),[join(root,'scripts/components/tool-policy-probe.mjs'),payload,root],{cwd:stage,env:childEnvironment(join(node.directory,'node.exe'),stage),signal,timeout:20000});
+          await runChild(join(node.directory,'node.exe'),[join(root,'scripts/components/model-budget-probe.mjs'),payload,root],{cwd:stage,env:childEnvironment(join(node.directory,'node.exe'),stage),signal,timeout:20000});
         } else if (component === 'napcat') {
           const version = await runChild(join(payload,'node.exe'),['--version'],{cwd:stage,env:childEnvironment(join(payload,'node.exe'),stage),signal,timeout:15000});
           if (version.trim() !== `v${spec.nodeVersion}`) throw new Error('QQ 组件的独立运行环境版本不符');

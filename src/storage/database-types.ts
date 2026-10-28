@@ -6,10 +6,15 @@ export const entityTables=['contacts','memories','stickers','tasks','events','ac
 export type EntityTable=typeof entityTables[number];
 export type EntityRow={table:EntityTable;key:string;ordinal:number;value:unknown};
 export type EntityChange={table:EntityTable;key:string;ordinal?:number;value?:unknown};
+export type ModelRequestRecord={id:string;turn:string;kind:'conversation'|'compaction'|'vision'|'transcription'|'speech'|'learning'|'search'|'fetch';background:boolean;chat:string;user:string;provider:string;model:string;maxOutputTokens:number};
+export type ReportedUsage={inputTokens:number|null;outputTokens:number|null;cacheReadTokens?:number|null;cacheWriteTokens?:number|null;totalTokens?:number|null};
 export type UsageDatabaseRequest=
   |{action:'usage-import';date:string;counters:Record<string,number>;final?:boolean}
   |{action:'usage-summary';date:string}
-  |{action:'usage-consume';date:string;quotas:Quota[];reservationId:string;at:number};
+  |{action:'usage-consume';date:string;quotas:Quota[];reservationId:string;at:number;request?:ModelRequestRecord}
+  |{action:'usage-finish-model';id:string;outcome:'completed'|'failed'|'unknown';usage:ReportedUsage}
+  |{action:'usage-recover-models'}
+  |{action:'usage-request-stats';date:string};
 export type DatabaseRequest=UsageDatabaseRequest
   |{action:'metadata'}
   |{action:'import';rows:Array<EntityRow|{table:'messages';key:string;ordinal:number;value:StoredMessage}>}

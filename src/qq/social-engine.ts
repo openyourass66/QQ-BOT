@@ -20,6 +20,7 @@ import { MemoryMetaSchema } from '../agent/cognition-state.js';
 import { learningModel } from '../agent/learning-model.js';
 import { turnBudget, toolAvailable, toolEnabled } from '../agent/context-policy.js';
 import { QzoneService, type SpacePost } from '../services/qzone.js';
+import type {PrepareServiceRequest} from '../agent/service-request.js';
 
 export class SocialEngine {
   private sending = new Map<string, Promise<unknown>>();
@@ -39,9 +40,9 @@ export class SocialEngine {
     private readonly usage: DailyUsageStore, private readonly settings: () => BotSettings,
     private readonly confirm: (title: string, signal: AbortSignal) => Promise<boolean>,
     private readonly onSent: (chat: string, id: number, segments: Segment[], source?: string) => void,
-    private readonly log: (text: string) => void, qzone?:QzoneService) {
+    private readonly log: (text: string) => void, qzone?:QzoneService,requests?:PrepareServiceRequest) {
       this.qqStickers=new QqStickers(store,media,api);this.autonomy=new Autonomy(store,settings,usage,undefined,media);
-      const model=learningModel();this.cognition=new Cognition(store,settings,usage,model.analyze,model.available);
+      const model=learningModel(process.env,requests);this.cognition=new Cognition(store,settings,usage,model.analyze,model.available,Date.now,model.prepare);
       this.qzone=qzone??new QzoneService(api,{blocked:user=>settings().social.blockedUsers.includes(String(user))});
     }
   guardTool(ctx:ToolContext,name:string):void {

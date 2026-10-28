@@ -47,7 +47,19 @@ partial class App
         new FieldSpec("context.warningPercent", "额度与节奏", "上下文管理", "上下文提醒比例", "依赖 DSH 上报；上下文占用不等于计费用量。", "%", 30, 95, 5),
         new FieldSpec("context.rollover", "额度与节奏", "上下文管理", "高占用时更换会话", "默认沿用 DSH 压缩；开启后在下一轮交接近期记录。"),
         new FieldSpec("context.rolloverPercent", "额度与节奏", "上下文管理", "会话更换比例", "新会话及映射保存成功后才替换旧会话。", "%", 50, 99),
-        new FieldSpec("context.toolsPerTurn", "额度与节奏", "QQ 工具预算", "每轮 QQ 工具调用上限", "QQ 工具共享；不代表 DSH 原生工具全局限制。", "次", 1, 200),
+        new FieldSpec("context.toolsPerTurn", "额度与节奏", "工具预算", "每轮工具调用上限", "QQ 工具与原生搜索、网页读取共享；达到上限后停止本轮工具。", "次", 1, 200),
+        new FieldSpec("requests.perDay", "额度与节奏", "服务请求额度", "每日服务请求总量", "模型生成、压缩、独立媒体、后台学习和原生联网共享；失败或结果未知仍计次。", "次/天", 0, 10000),
+        new FieldSpec("requests.perUserPerDay", "额度与节奏", "服务请求额度", "每位用户每日请求量", "限制由这位用户触发的服务请求；同时受总量和会话额度限制。", "次/天", 0, 10000),
+        new FieldSpec("requests.perChatPerDay", "额度与节奏", "服务请求额度", "每个会话每日请求量", "群聊与私聊各自累计；同时受每日总量限制。", "次/天", 0, 10000),
+        new FieldSpec("requests.backgroundPerDay", "额度与节奏", "服务请求额度", "每日后台服务请求量", "主动行动和后台学习共享，避免无人交互时持续请求。", "次/天", 0, 1000),
+        new FieldSpec("requests.mediaPerDay", "额度与节奏", "服务请求额度", "每日独立媒体请求量", "独立看图、语音识别和语音合成共享；图片随当前对话模型发送时不重复计次。", "次/天", 0, 1000),
+        new FieldSpec("requests.nativeWebPerDay", "额度与节奏", "服务请求额度", "每日原生联网调用量", "搜索与网页读取共享；同时受服务总量和每轮工具上限限制。", "次/天", 0, 1000),
+        new FieldSpec("requests.perMinute", "额度与节奏", "请求节奏与大小", "每分钟服务请求量", "按最近一分钟统计，限制突发请求。", "次", 1, 1000),
+        new FieldSpec("requests.perTurn", "额度与节奏", "请求节奏与大小", "每轮服务请求量", "包含模型续答、重试及压缩；工具调用另受共享工具上限限制。", "次", 1, 100),
+        new FieldSpec("requests.concurrent", "额度与节奏", "请求节奏与大小", "同时执行的服务请求量", "所有会话、后台任务和媒体服务共享。", "个", 1, 16),
+        new FieldSpec("requests.maxOutputTokens", "额度与节奏", "请求节奏与大小", "单次最大输出 Token", "提交给模型的输出上限；计费只记录服务实际上报值。降低后若压缩被阻止，请重新连接模型。", "Token", 128, 32768, 128),
+        new FieldSpec("requests.maxRequestKiB", "额度与节奏", "请求节奏与大小", "单次请求材料大小", "包括上下文、工具定义及图片等材料，超过上限时停止提交。", "KiB", 64, 32768, 64),
+        new FieldSpec("requests.maxResponseChars", "额度与节奏", "请求节奏与大小", "单次返回内容字数", "限制文本、推理内容及工具参数总量；超过上限中止本轮。", "字", 1000, 128000, 1000),
         new FieldSpec("context.filterTools", "功能开关", "能力清单", "按可用条件提供 QQ 工具", "配置变化在下一轮更换会话；执行时重新校验。"),
         new FieldSpec("chat.privateAutoReply", "对话与参与", "参与方式", "自动回复私聊", "收到好友私聊后，允许小鲸自然回应。"),
         new FieldSpec("social.responseMode", "对话与参与", "参与方式", "群聊参与方式", "直接找小鲸的消息仍会优先回应。"),
@@ -320,7 +332,11 @@ partial class App
     }
     static void VerifySettingsInteraction() {
         if(Find<ListBox>("SettingsNav").Items.Count!=7)throw new Exception("设置分类不完整");
+        if(!IsSqliteNotice("(node:123) ExperimentalWarning: SQLite is an experimental feature and might change at any time")||IsSqliteNotice("Error: SQLite database is corrupt"))throw new Exception("SQLite 提示与实际错误未正确区分");
+        if(logs.Any(line=>line.Contains("控制进程异常")))throw new Exception("启动时控制进程报告异常");
         string before=json.Serialize(Collect(settings,""));
+        var requestPaths=new[]{"perDay","perUserPerDay","perChatPerDay","backgroundPerDay","perMinute","perTurn","concurrent","maxOutputTokens","maxRequestKiB","maxResponseChars","mediaPerDay","nativeWebPerDay"};
+        foreach(var requestPath in requestPaths)if(!fieldViews.ContainsKey("requests."+requestPath)||fieldViews["requests."+requestPath].Spec.Category!="额度与节奏")throw new Exception("服务预算设置缺失或分类错误："+requestPath);
         var mode=(ComboBox)fields["social.responseMode"];object originalMode=mode.SelectedValue;
         var number=(TextBox)fields["social.responseProbability"];string originalNumber=number.Text;
         mode.SelectedValue="probability";

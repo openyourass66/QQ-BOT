@@ -122,6 +122,8 @@ partial class App
             Find<Expander>("SettingsGroupQuotas").Visibility=groups.Count>0?Visibility.Visible:Visibility.Collapsed;
             Find<TextBlock>("SettingsGroupQuotaText").Text=string.Join("\n",groups.Select(q=>q["label"]+"：已用 "+q["used"]+" / "+q["limit"]+" · 剩余 "+q["remaining"]));
         }
+        var modelUsage=message.ContainsKey("modelUsage")?message["modelUsage"] as Dictionary<string,object>:null;
+        Find<TextBlock>("SettingsModelUsage").Text=modelUsage==null?"服务用量尚无记录。":"今日服务请求 "+modelUsage["requests"]+" 次（前台 "+modelUsage["foreground"]+" / 后台 "+modelUsage["background"]+"）；已上报完整用量 "+modelUsage["usageKnown"]+" 次，未上报或不适用 "+modelUsage["usageUnknown"]+" 次。\n已上报 Token：输入 "+modelUsage["knownInputTokens"]+" / 输出 "+modelUsage["knownOutputTokens"]+"。结果待核对 "+modelUsage["unknownResults"]+" 次。以上为服务上报值，不估算费用。";
         loading=wasLoading;settingsStatusBusy=false;Find<Button>("SettingsRefresh").Content="刷新额度";Find<Button>("SettingsRefresh").IsEnabled=!socialBusy;
         if(!loading)ReconcileDirtySettings();
     }

@@ -5,6 +5,7 @@ import { z } from 'zod';
 import { config } from './config.js';
 import { SocialSettingsSchema } from '../qq/social-settings.js';
 import { LearningSettingsSchema, ContextSettingsSchema } from '../agent/intelligence-settings.js';
+import {RequestSettingsSchema} from '../agent/request-settings.js';
 
 const GroupSchema = z
   .object({
@@ -27,6 +28,7 @@ const SettingsSchema = z
     installation: z.object({ version: z.literal(1), scopeConfigured: z.boolean() }).optional(),
     learning: LearningSettingsSchema,
     context: ContextSettingsSchema,
+    requests:RequestSettingsSchema,
     social: SocialSettingsSchema,
     identity: z
       .object({

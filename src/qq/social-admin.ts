@@ -5,6 +5,7 @@ import { socialTools } from './social-tools.js';
 import { legacyTools } from './legacy-tools.js';
 import { getSettings, getSettingsPath, saveSettings } from '../core/settings.js';
 import type { DailyUsageStore } from '../core/usage.js';
+import type {SqliteDailyUsageStore} from '../storage/sqlite-usage-store.js';
 import { stickerSearchText } from './sticker-review.js';
 import { reviseMemory, forgetMemory, memoryMeta, fingerprint } from '../agent/cognition.js';
 import { learningModel } from '../agent/learning-model.js';
@@ -151,6 +152,10 @@ export async function socialAdmin(input: unknown, store: SocialRepository, media
   if(a.section==='memories'&&a.op==='edit_memory') {const selected=rows.findIndex(row=>row.id===a.id);if(selected>0)rows.unshift(rows.splice(selected,1)[0]);}
   const usage = live?.usage ?? offlineUsage;
   const quotas = usage?.summary([
+    {key:'service-requests',label:'模型与能力请求',limit:s.requests.perDay},
+    {key:'service-background',label:'后台服务请求',limit:s.requests.backgroundPerDay},
+    {key:'service-media',label:'独立媒体服务',limit:s.requests.mediaPerDay},
+    {key:'native-web',label:'原生联网',limit:s.requests.nativeWebPerDay},
     {key:'social-actions',label:'QQ 动作',limit:s.social.actionsPerDay},
     {key:'proactive',label:'主动消息',limit:s.budgets.proactiveMessagesPerDay},
     {key:'reminders',label:'定时提醒',limit:s.budgets.remindersPerDay},
@@ -161,5 +166,7 @@ export async function socialAdmin(input: unknown, store: SocialRepository, media
     {key:'learning',label:'后台学习',limit:s.learning.dailyCalls},
     ...data.contacts.filter(c=>c.chat.startsWith('group:')).map(c=>({key:c.chat,label:c.name+' 主动消息与提醒',limit:s.chat.group.proactive.perGroupPerDay})),
   ]);
-  return { op: a.op, section: a.section, rows: rows.slice(0,200), total: archive?.total??rows.length, profiles: data.profiles, socialSettings: s.social, settingsPath:getSettingsPath(), quotas:quotas?{...quotas,live:!!live}:null, note, usage: { turns: data.turns.length, tokensKnown: data.turns.filter(t => t.inputTokens !== null).length } };
+  const requestUsage=usage as (DailyUsageStore&Partial<Pick<SqliteDailyUsageStore,'requestStatistics'>>)|undefined;
+  const modelUsage=await requestUsage?.requestStatistics?.();
+  return { op: a.op, section: a.section, rows: rows.slice(0,200), total: archive?.total??rows.length, profiles: data.profiles, socialSettings: s.social, settingsPath:getSettingsPath(), quotas:quotas?{...quotas,live:!!live}:null, modelUsage:modelUsage??null, note, usage: { turns: data.turns.length, tokensKnown: data.turns.filter(t => t.inputTokens !== null).length } };
 }

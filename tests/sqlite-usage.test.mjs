@@ -57,7 +57,7 @@ test('额度已经提交后宿主退出仍保留预扣，不自动退回；不�
 
 test('数据库 schema 1 升级时保留全部既有社交条目',()=>fixture(async({root})=>{
   const path=join(root,'social.json'),store=new SqliteSocialStore(path);try{await store.load();await store.account(123);}finally{await store.close();}
-  const old=new DatabaseSync(path+'.sqlite');try{old.exec('DROP TABLE daily_usage;DROP TABLE quota_reservations;PRAGMA user_version=1;');}finally{old.close();}
+  const old=new DatabaseSync(path+'.sqlite');try{old.exec('DROP TABLE daily_usage;DROP TABLE quota_reservations;DROP TABLE model_requests;PRAGMA user_version=1;');}finally{old.close();}
   const upgraded=new SqliteSocialStore(path);try{await upgraded.load();assert.equal(upgraded.view('account').account,123);}finally{await upgraded.close();}
   const wrong=new SqliteDailyUsageStore(path,now);try{await assert.rejects(wrong.load(),/类型或迁移状态无效/);}finally{await wrong.close();}
 }));

@@ -1,5 +1,6 @@
 import { socialTools } from '../qq/social-tools.js';
 import { legacyTools } from '../qq/legacy-tools.js';
+import {attachModelRequestPolicy} from './model-request-policy.js';
 
 const qqTools = new Set([...socialTools,...legacyTools].map(tool => `mcp__qq__${tool.name}`));
 export const name = 'whale-tool-policy';
@@ -25,6 +26,8 @@ export function nativeToolDenial(execution: {name:string;arguments?:unknown}): s
 export function apply(ctx: {tools:{guard:(check:typeof nativeToolDenial)=>unknown}}): void {
   if(typeof ctx.tools.guard!=='function')throw new Error('模型运行组件不支持必需的工具边界，请使用已验证的受管版本');
   ctx.tools.guard(nativeToolDenial);
+  const budgetEnabled=Boolean(process.env.BOT_MODEL_BUDGET_URL||process.env.BOT_MODEL_BUDGET_TOKEN);
+  if(budgetEnabled)attachModelRequestPolicy(ctx as never,process.env.BOT_MODEL_BUDGET_URL??'',process.env.BOT_MODEL_BUDGET_TOKEN??'');
   const nonce=process.env.BOT_DSH_POLICY_NONCE;
-  if(nonce&&/^[a-f0-9]{48}$/.test(nonce))process.stderr.write(`[whale-policy] ${nonce}\n`);
+  if(nonce&&/^[a-f0-9]{48}$/.test(nonce)){process.stderr.write(`[whale-policy] ${nonce}\n`);if(budgetEnabled)process.stderr.write(`[whale-budget] ${nonce}\n`);}
 }

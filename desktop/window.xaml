@@ -168,6 +168,7 @@
         <Border x:Name="SettingsQuotaPanel" Style="{StaticResource Surface}" Padding="16" Margin="0,0,0,16" Visibility="Collapsed"><StackPanel>
          <DockPanel Margin="0,0,0,10"><Button x:Name="SettingsRefresh" Content="刷新额度" DockPanel.Dock="Right" Style="{StaticResource Quiet}" Margin="10,0,0,0"/><TextBlock x:Name="SettingsQuota" Text="今日额度 · 点击刷新查看已用与剩余量" TextWrapping="Wrap" FontSize="11" LineHeight="18" Foreground="{StaticResource Muted}" VerticalAlignment="Center"/></DockPanel>
          <UniformGrid x:Name="SettingsQuotaCards" Columns="3" Margin="-4,0,-4,0"/>
+         <TextBlock x:Name="SettingsModelUsage" TextWrapping="Wrap" FontSize="11" LineHeight="19" Foreground="{StaticResource Muted}" Margin="4,12,4,0"/>
          <Expander x:Name="SettingsGroupQuotas" Header="各群额度" Visibility="Collapsed" Margin="0,8,0,0"><TextBlock x:Name="SettingsGroupQuotaText" TextWrapping="Wrap" Foreground="{StaticResource Muted}" FontSize="11" LineHeight="20" Margin="0,8,0,0"/></Expander>
         </StackPanel></Border>
         <StackPanel x:Name="Fields"/>

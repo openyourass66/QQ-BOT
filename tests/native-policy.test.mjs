@@ -23,12 +23,12 @@ test('不支持单调守卫的运行组件拒绝启动，守卫绑定真实分�
   assert.equal(guard,nativeToolDenial);assert.ok(guard({name:'read_file',arguments:{path:'.env'}}));
 });
 
-test('ACP 虽然可连接但未加载工具守卫时，桥接拒绝开放模型和 QQ 业务',{timeout:15000},async()=>{
+for(const omitted of ['NATIVE','BUDGET'])test(`ACP 虽然可连接但缺少 ${omitted} 守卫时，桥接拒绝开放模型和 QQ 业务`,{timeout:15000},async()=>{
   const root=await mkdtemp(join(tmpdir(),'qq-no-native-policy-')),wrapper=join(root,process.platform==='win32'?'fake.cmd':'fake-dsh');
   const fake=resolve('tests/fixtures/fake-dsh.mjs');let child,output='';
   try{
     await writeFile(wrapper,process.platform==='win32'?`@echo off\r\n"${process.execPath}" "${fake}" %*\r\n`:`#!/bin/sh\nexec "${process.execPath}" "${fake}" "$@"\n`,{mode:0o700});
-    child=spawn(process.execPath,[resolve('dist/bridge.js')],{windowsHide:true,stdio:['ignore','pipe','pipe'],env:{...process.env,BOT_DSH_BIN:wrapper,BOT_CHAT_MODE:'profile',BOT_WORKSPACE:root,BOT_SETTINGS_FILE:join(root,'settings.json'),SESSION_STORE:join(root,'sessions.json'),BOT_SOCIAL_STORE:join(root,'social.json'),BOT_GROUP_CONTEXT_STORE:join(root,'context.json'),BOT_USAGE_STORE:join(root,'usage.json'),BOT_MEDIA_DIR:join(root,'media'),FAKE_OMIT_NATIVE_POLICY:'1'}});
+    child=spawn(process.execPath,[resolve('dist/bridge.js')],{windowsHide:true,stdio:['ignore','pipe','pipe'],env:{...process.env,BOT_DSH_BIN:wrapper,BOT_CHAT_MODE:'profile',BOT_WORKSPACE:root,BOT_SETTINGS_FILE:join(root,'settings.json'),SESSION_STORE:join(root,'sessions.json'),BOT_SOCIAL_STORE:join(root,'social.json'),BOT_GROUP_CONTEXT_STORE:join(root,'context.json'),BOT_USAGE_STORE:join(root,'usage.json'),BOT_MEDIA_DIR:join(root,'media'),['FAKE_OMIT_'+omitted+'_POLICY']:'1'}});
     child.stdout.on('data',chunk=>output+=chunk);child.stderr.on('data',chunk=>output+=chunk);
     assert.equal((await once(child,'exit'))[0],1,output);assert.match(output,/受限工具策略未加载/);assert.doesNotMatch(output,/\[bridge\] ready/);
   }finally{if(child&&child.exitCode===null){child.kill();await once(child,'exit');}await rm(root,{recursive:true,force:true,maxRetries:10,retryDelay:50});}

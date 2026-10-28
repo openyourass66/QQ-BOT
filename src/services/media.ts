@@ -8,6 +8,9 @@ import { fileURLToPath } from 'node:url';
 import { createHash, randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import type { SocialSettings } from '../qq/social-settings.js';
+import {reportedServiceUsage,type PrepareServiceRequest,type ServiceRequest,type ServiceLimits} from '../agent/service-request.js';
+import type {ReportedUsage} from '../storage/database-types.js';
+import {readJsonLimited,readBytesLimited} from './read-json.js';
 
 function publicAddress(address: string): boolean {
   if (isIP(address) === 4) {
@@ -74,7 +77,11 @@ async function readMediaFile(file: string, signal: AbortSignal, max: number): Pr
 export class MediaService {
   readonly root: string;
   private saves: Promise<void> = Promise.resolve();
-  constructor(root: string, private readonly settings: () => SocialSettings) { this.root = resolve(root); }
+  constructor(root: string, private readonly settings: () => SocialSettings,private readonly prepareRequest?:PrepareServiceRequest) { this.root = resolve(root); }
+  private async request<T>(input:ServiceRequest,operation:(limits:ServiceLimits,report:(usage:ReportedUsage)=>void)=>Promise<T>):Promise<T>{
+    if(!this.prepareRequest)return operation({maxOutputTokens:8192,maxResponseChars:32000},()=>{});
+    const prepared=await this.prepareRequest(input);try{return await prepared.run(operation);}finally{await prepared.close();}
+  }
   save(buffer: Buffer, extension: string): Promise<string> {
     const task = this.saves.then(() => this.saveFile(buffer, extension));
     this.saves = task.then(() => undefined, () => undefined);
@@ -154,7 +161,7 @@ export class MediaService {
     return new URL('/api/v1/services/audio/tts/SpeechSynthesizer', base);
   }
   private async audioError(response: Response, label: string): Promise<Error> {
-    const body = await response.json().catch(() => null) as { code?: unknown; message?: unknown; error?: { code?: unknown; message?: unknown } } | null;
+    const body = await readJsonLimited(response,65536).catch(() => null) as { code?: unknown; message?: unknown; error?: { code?: unknown; message?: unknown } } | null;
     let detail = [body?.code ?? body?.error?.code, body?.message ?? body?.error?.message].filter(v => typeof v === 'string').join('：');
     const key = process.env.BOT_MEDIA_API_KEY;
     if (key) detail = detail.replaceAll(key, '[已隐藏密钥]');
@@ -210,24 +217,29 @@ export class MediaService {
   async vision(images: Array<{ data: string; mimeType: string }>, question: string, signal: AbortSignal): Promise<unknown> {
     const model = this.settings().visionModel;
     if (!model) return { content: [{ type: 'text', text: '以下图片交给当前 Agent 的视觉能力处理；若当前模型不支持图片，请明确说明。' }, ...images.map(i => ({ type: 'image', ...i }))] };
-    const response = await fetch(this.endpoint('chat/completions'), { method: 'POST', headers: { ...this.headers(), 'content-type': 'application/json' }, signal: AbortSignal.any([signal, AbortSignal.timeout(60_000)]), body: JSON.stringify({ model, messages: [{ role: 'user', content: [{ type: 'text', text: question }, ...images.map(i => ({ type: 'image_url', image_url: { url: `data:${i.mimeType};base64,${i.data}` } }))] }] }) });
-    const result = await response.json() as { choices?: Array<{ message: { content: string } }> };
+    return this.request({kind:'vision',model,bytes:Buffer.byteLength(JSON.stringify({model,question}))+images.reduce((size,image)=>size+Buffer.byteLength(image.data)+128,512),signal},async(limits,report)=>{
+    const response = await fetch(this.endpoint('chat/completions'), { method: 'POST', headers: { ...this.headers(), 'content-type': 'application/json' }, signal: AbortSignal.any([signal, AbortSignal.timeout(60_000)]), body: JSON.stringify({ model,max_tokens:limits.maxOutputTokens, messages: [{ role: 'user', content: [{ type: 'text', text: question }, ...images.map(i => ({ type: 'image_url', image_url: { url: `data:${i.mimeType};base64,${i.data}` } }))] }] }) });
+    const result = await readJsonLimited(response,524288) as { choices?: Array<{ message: { content: string } }>;usage?:unknown };report(reportedServiceUsage(result.usage));
     if (!response.ok || typeof result.choices?.[0]?.message?.content !== 'string' || !result.choices[0].message.content.trim()) throw new Error(`视觉服务调用失败或返回空内容 (${response.status})`);
-    return { text: result.choices[0].message.content };
+    if(result.choices[0].message.content.length>limits.maxResponseChars)throw new Error('视觉服务内容超过本轮输出上限');return { text: result.choices[0].message.content };
+    });
   }
   async transcribe(source: string, signal: AbortSignal): Promise<unknown> {
     const model = this.settings().transcriptionModel; if (!model) throw new Error('语音转写模型未配置');
     if (/-tts(?:-|$)/i.test(model)) throw new Error('语音转写模型填成了 TTS 合成模型；请配置服务支持的语音识别（ASR）模型与接口');
     const { buffer } = await this.bytes(source, signal, 25_000_000);
+    return this.request({kind:'transcription',model,bytes:buffer.length+512,signal},async(limits,report)=>{
     const form = new FormData(); form.set('model', model); form.set('file', new Blob([new Uint8Array(buffer)]), 'voice.wav');
     const response = await fetch(this.endpoint('audio/transcriptions'), { method: 'POST', headers: this.headers(), body: form, signal: AbortSignal.any([signal, AbortSignal.timeout(60_000)]) });
     if (!response.ok) throw await this.audioError(response, '语音转写失败');
-    return response.json();
+    const result=await readJsonLimited(response,1048576) as {text?:string;usage?:unknown};report(reportedServiceUsage(result.usage));if(typeof result.text==='string'&&result.text.length>limits.maxResponseChars)throw new Error('语音转写内容超过本轮输出上限');return result;
+    });
   }
   async speech(text: string, signal: AbortSignal): Promise<string> {
     const s = this.settings(); if (!s.speechModel) throw new Error('语音合成模型未配置');
     const qwen = this.qwenSpeechEndpoint(s.speechModel);
     if (qwen && /[\u3400-\u9fff]/u.test(s.speechVoice)) throw new Error('千问合成声音需要填写音色 ID，例如龙安灵希为 longanlingxi，不能填写中文显示名');
+    return this.request({kind:'speech',model:s.speechModel,bytes:Buffer.byteLength(text)+512,signal},async()=>{
     const response = await fetch(qwen ?? this.endpoint('audio/speech'), { method: 'POST', headers: { ...this.headers(), 'content-type': 'application/json', ...(qwen ? { 'X-DashScope-SSE': 'enable' } : {}) }, signal: AbortSignal.any([signal, AbortSignal.timeout(60_000)]), body: JSON.stringify(qwen
       ? { model: s.speechModel, input: { text, voice: s.speechVoice, format: 'mp3', sample_rate: 24000 } }
       : { model: s.speechModel, voice: s.speechVoice, input: text, response_format: 'mp3' }) });
@@ -236,9 +248,10 @@ export class MediaService {
       return this.save(await this.qwenSpeechAudio(response, signal), '.mp3');
     }
     if (/json|text\/|html/i.test(response.headers.get('content-type') ?? '')) throw new Error('语音合成服务返回了文本而非音频，请核对接口协议');
-    const buffer = Buffer.from(await response.arrayBuffer()); if (buffer.length > 25_000_000) throw new Error('合成语音过大');
+    const buffer = await readBytesLimited(response,25_000_000);
     if (!buffer.length) throw new Error('语音合成返回了空音频');
     return this.save(buffer, '.mp3');
+    });
   }
   async video(source: string, question: string, signal: AbortSignal): Promise<unknown> {
     if (!process.env.BOT_FFMPEG_BIN) throw new Error('视频抽帧未配置；请设置 FFmpeg 启动文件');
