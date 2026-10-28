@@ -58,7 +58,7 @@ const usage = new SqliteDailyUsageStore(paths.usage);
 usage.onFailure=error=>{if(!stopping){reportFatal(error);void shutdown(1);}};
 const socialStore:SocialRepository = new SqliteSocialStore(paths.social,{onMigrationProgress:({stage,completed,total})=>log('info',`[storage] ${stage} ${completed}/${total}`)});
 socialStore.onFailure=error=>{if(!stopping){reportFatal(error);void shutdown(1);}};
-const media = new MediaService(paths.media, () => getSettings().social,prepareServiceRequest);
+const media = new MediaService(paths.media, () => getSettings().social,prepareServiceRequest,{index:usage.mediaCacheStore,onFailure:error=>{if(!stopping){reportFatal(error);void shutdown(1);}}});
 const shutdownSignal = new AbortController();
 const operations:QqOperationService=new QqOperationService(usage,socialStore,{settings:getSettings,account:()=>selfId,readAccount:async signal=>Number((await api.call<{user_id:number}>('get_login_info',{},signal)).user_id),stopping:()=>stopping,fatal:error=>{if(!stopping){reportFatal(error);void shutdown(1);}}});
 const activeConversations = new Map<string, ToolContext>();
@@ -823,6 +823,7 @@ async function shutdown(code = 0): Promise<void> {
     await withTimeout((async () => {
       await Promise.all([actionServer?.close(), budgetServer?.close(), operations.close(),stopChild(), queue.drain(), ingress.drain()]);
       await engine.cognition.flush();
+      await media.flush();
       await Promise.all([usage.flush(), store.flush(), groupContext.flush(), socialStore.flush(), flushSettings()]);
       await Promise.all([socialStore.close?.(),usage.close(),store.close(),groupContext.close()]);
     })(), 5000);

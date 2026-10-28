@@ -9,6 +9,8 @@ import {entityTables,DATABASE_LIMITS,type DatabaseRequest,type UsageDatabaseRequ
 import {createUsageSchema,executeUsage} from './usage-database.js';
 import {createRequestSchema} from './request-ledger.js';
 import {createOperationSchema} from './operation-ledger.js';
+import {createMediaCacheSchema,executeMediaCache} from './media-cache-worker.js';
+import type {MediaCacheRequest} from './media-cache-types.js';
 import type {MessageQuery,MessageRef} from './social-repository.js';
 import type {StoredMessage} from '../qq/social-store.js';
 
@@ -65,6 +67,7 @@ function lookup(refs:MessageRef[],evidenceOnly=false){
 }
 function execute(request:DatabaseRequest):unknown {
   if(!meta('initialized')&&!['metadata','import','complete-import','integrity','fingerprint','close'].includes(request.action))throw error('DATABASE_NOT_INITIALIZED','数据库迁移尚未完成，不能开放业务。');
+  if(request.action.startsWith('media-cache-'))return executeMediaCache(request as MediaCacheRequest,{db,meta,setMeta,transaction});
   if(request.action.startsWith('usage-'))return executeUsage(request as UsageDatabaseRequest,{db,meta,setMeta,transaction,error});
   switch(request.action){
     case 'metadata':{
@@ -161,7 +164,7 @@ function execute(request:DatabaseRequest):unknown {
 try{
   db=new DatabaseSync(workerData.path);db.exec('PRAGMA busy_timeout=3000; PRAGMA foreign_keys=ON; PRAGMA trusted_schema=OFF;');
   const version=Number(Object.values(db.prepare('PRAGMA user_version').get()!)[0]),app=Number(Object.values(db.prepare('PRAGMA application_id').get()!)[0]);
-  if(version>7)throw error('DATABASE_SCHEMA_NEWER','数据库版本较新，请使用兼容的程序版本。');
+  if(version>8)throw error('DATABASE_SCHEMA_NEWER','数据库版本较新，请使用兼容的程序版本。');
   if(version===0){
     if(Number(db.prepare("SELECT COUNT(*) AS n FROM sqlite_schema WHERE type='table'").get()!.n))throw error('DATABASE_INVALID','数据文件不是受支持的数据库。');
     transaction(()=>{
@@ -176,12 +179,13 @@ try{
   if(version<5)transaction(()=>{createOperationSchema(db);setMeta('operations_count',0);setMeta('operations_bytes',0);});
   if(version<6)transaction(()=>db.exec('CREATE INDEX IF NOT EXISTS thoughts_due ON entity_thoughts(state,due,key);PRAGMA user_version=6;'));
   if(version<7)transaction(()=>db.exec('CREATE INDEX IF NOT EXISTS learning_chat_state ON entity_learning_jobs(chat,state);PRAGMA user_version=7;'));
+  if(version<8)transaction(()=>createMediaCacheSchema(db));
   db.exec('PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA wal_autocheckpoint=1000;');
   port.postMessage({type:'ready'});
   port.on('message',({id,request}:{id:number;request:DatabaseRequest})=>{
     const started=performance.now();
     try{
-      const reads=['metadata','query-messages','lookup-messages','latest-incoming','integrity','fingerprint','query-plan','export-social','usage-summary','usage-request-stats','due-tasks','due-thoughts','usage-op-read','usage-op-list'];
+      const reads=['metadata','query-messages','lookup-messages','latest-incoming','integrity','fingerprint','query-plan','export-social','usage-summary','usage-request-stats','due-tasks','due-thoughts','usage-op-read','usage-op-list','media-cache-read','media-cache-statistics'];
       const result=reads.includes(request.action)?readSnapshot(()=>execute(request)):execute(request);if(Buffer.byteLength(JSON.stringify(result))>DATABASE_LIMITS.responseBytes)throw error('DATABASE_RESPONSE_TOO_LARGE','查询结果过大，请缩小查询范围或分页读取。');
       port.postMessage({id,ok:true,result,elapsedMs:performance.now()-started});if(request.action==='close')port.close();
     }catch(failure){const e=failure as Error&{code?:string;errcode?:number};port.postMessage({id,ok:false,error:{code:e.code?.startsWith('DATABASE_')?e.code:e.errcode===13?'ENOSPC':'DATABASE_OPERATION_FAILED',message:e.code?.startsWith('DATABASE_')?e.message:'数据库操作失败，请保留数据并查看诊断。'}});}

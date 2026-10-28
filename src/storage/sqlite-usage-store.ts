@@ -7,6 +7,7 @@ import {verifyMigrationSource} from './social-migration.js';
 import type {ModelRequestRecord,ReportedUsage} from './database-types.js';
 import type {OperationRecord,StoredOperation} from './operation-types.js';
 import {operationDigest,currentOperation} from '../core/operation-context.js';
+import type {MediaCacheStore} from './media-cache-types.js';
 
 export const usageDatabasePath=(path:string)=>path+'.sqlite';
 const hash=(bytes:Uint8Array|string)=>createHash('sha256').update(bytes).digest('hex');
@@ -34,6 +35,7 @@ async function ensureDatabase(path:string,date:string):Promise<string>{
 
 export class SqliteDailyUsageStore extends DailyUsageStore {
   readonly instanceId=randomUUID();
+  readonly mediaCacheStore:MediaCacheStore={call:request=>{if(!this.loaded||this.closing)return Promise.reject(new Error('额度仓储未打开或已经关闭'));return this.database!.call(request);}};
   private database?:DatabaseClient;
   private chain:Promise<unknown>=Promise.resolve();
   private queued=0;
@@ -47,7 +49,7 @@ export class SqliteDailyUsageStore extends DailyUsageStore {
     try{
       const metadata=await database.call<{initialized:boolean;usageInitialized:boolean;source:{sha256?:string;kind?:string}}>({action:'metadata'});
       if(!metadata.initialized||!metadata.usageInitialized||metadata.source?.kind!=='daily-usage')throw failure('额度数据库类型或迁移状态无效，请保留文件并核对。');
-      await verifyMigrationSource(this.path,metadata.source);await database.call({action:'usage-recover-models'});await database.call({action:'usage-op-recover'});const current=await database.call<{date:string;counters:Record<string,number>}>({action:'usage-summary',date:shanghaiDate(this.now())});this.data={version:1,...current};this.loaded=true;
+      await verifyMigrationSource(this.path,metadata.source);await database.call({action:'usage-recover-models'});await database.call({action:'usage-op-recover'});await database.call({action:'media-cache-recover'});const current=await database.call<{date:string;counters:Record<string,number>}>({action:'usage-summary',date:shanghaiDate(this.now())});this.data={version:1,...current};this.loaded=true;
     }catch(error){await database.close();throw error;}
   }
   override consume(getQuotas:()=>Quota[],onReserved:()=>void=()=>{}):Promise<void>{

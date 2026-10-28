@@ -2,15 +2,17 @@ import http from 'node:http';
 import https from 'node:https';
 import { lookup } from 'node:dns/promises';
 import { isIP } from 'node:net';
-import { writeFile, mkdir, stat, realpath, readdir, rename, rm, open } from 'node:fs/promises';
-import { resolve, dirname, relative, isAbsolute } from 'node:path';
+import { realpath, open } from 'node:fs/promises';
+import { resolve, relative, isAbsolute } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createHash, randomUUID } from 'node:crypto';
+import { createHash } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import type { SocialSettings } from '../qq/social-settings.js';
 import {reportedServiceUsage,type PrepareServiceRequest,type ServiceRequest,type ServiceLimits} from '../agent/service-request.js';
 import type {ReportedUsage} from '../storage/database-types.js';
 import {readJsonLimited,readBytesLimited} from './read-json.js';
+import {MediaCache} from './media-cache.js';
+import type {MediaCacheStore} from '../storage/media-cache-types.js';
 
 function publicAddress(address: string): boolean {
   if (isIP(address) === 4) {
@@ -76,31 +78,16 @@ async function readMediaFile(file: string, signal: AbortSignal, max: number): Pr
 
 export class MediaService {
   readonly root: string;
-  private saves: Promise<void> = Promise.resolve();
-  constructor(root: string, private readonly settings: () => SocialSettings,private readonly prepareRequest?:PrepareServiceRequest) { this.root = resolve(root); }
+  private cache:MediaCache;
+  constructor(root: string, private readonly settings: () => SocialSettings,private readonly prepareRequest?:PrepareServiceRequest,options:{index?:MediaCacheStore;onFailure?:(error:Error)=>void}={}) { this.root = resolve(root);this.cache=new MediaCache(this.root,options.index,{onFailure:options.onFailure}); }
   private async request<T>(input:ServiceRequest,operation:(limits:ServiceLimits,report:(usage:ReportedUsage)=>void)=>Promise<T>):Promise<T>{
     if(!this.prepareRequest)return operation({maxOutputTokens:8192,maxResponseChars:32000},()=>{});
     const prepared=await this.prepareRequest(input);try{return await prepared.run(operation);}finally{await prepared.close();}
   }
   save(buffer: Buffer, extension: string): Promise<string> {
-    const task = this.saves.then(() => this.saveFile(buffer, extension));
-    this.saves = task.then(() => undefined, () => undefined);
-    return task;
+    return this.cache.save(buffer,extension);
   }
-  private async saveFile(buffer: Buffer, extension: string): Promise<string> {
-    if (!/^\.[a-z0-9]{1,10}$/i.test(extension)) throw new Error('媒体文件扩展名无效');
-    await mkdir(this.root, { recursive: true });
-    const file = resolve(this.root, createHash('sha256').update(buffer).digest('hex') + extension);
-    if (await stat(file).then(s => s.isFile(), () => false)) return file;
-    let total = 0;
-    for (const name of await readdir(this.root)) total += await stat(resolve(this.root,name)).then(s => s.isFile() ? s.size : 0, () => 0);
-    const limit = Number(process.env.BOT_MEDIA_MAX_BYTES || 536870912);
-    if (!Number.isFinite(limit) || total + buffer.length > limit) throw new Error('媒体库空间额度不足，请清理不再使用的媒体或调整 BOT_MEDIA_MAX_BYTES');
-    const temp = file + '.' + randomUUID() + '.tmp';
-    try { await writeFile(temp, buffer); await rename(temp, file); }
-    finally { await rm(temp, { force: true }).catch(() => undefined); }
-    return file;
-  }
+  flush():Promise<void>{return this.cache.flush();}
   async bytes(source: string, signal: AbortSignal, max = 12_000_000): Promise<{ buffer: Buffer; mime: string }> {
     if (/^https?:\/\//i.test(source)) return downloadPublic(source, signal, max);
     const file = await realpath(source.startsWith('file:') ? fileURLToPath(source) : resolve(source));
@@ -260,10 +247,10 @@ export class MediaService {
     const prefix = createHash('sha256').update(buffer).digest('hex');
     const output = resolve(this.root, `${prefix}-%02d.jpg`);
     const count = this.settings().videoFrames;
-    await new Promise<void>((done, reject) => {
+    try{await new Promise<void>((done, reject) => {
       const child = spawn(process.env.BOT_FFMPEG_BIN!, ['-hide_banner', '-loglevel', 'error', '-y', '-i', input, '-vf', 'fps=1/3,scale=640:-2', '-frames:v', String(count), output], { windowsHide: true, stdio: 'ignore', signal: AbortSignal.any([signal, AbortSignal.timeout(45_000)]) });
       child.once('error', reject); child.once('exit', code => code === 0 ? done() : reject(new Error('视频解码失败')));
-    });
+    });}finally{await this.cache.reconcile();}
     const images = [];
     for (let i = 1; i <= count; i++) { try { images.push(await this.image(resolve(this.root, `${prefix}-${String(i).padStart(2,'0')}.jpg`), signal)); } catch (e) { if ((e as NodeJS.ErrnoException).code === 'ENOENT') break; throw e; } }
     if (!images.length) throw new Error('未取得视频画面');

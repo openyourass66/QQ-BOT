@@ -63,7 +63,7 @@ test('schema 6 升级保留整理状态、游标与凭证，领取查询使用�
   const job=await store.claimLearning(claim());await store.updateLearningClaim(job.id,job.claim.id,'preparing',d=>{d.cognition.jobs[0].state='completed';d.cognition.scopes[message.chat]={cursor:100,cursorIds:[1],lastAttempt:100};});await store.close();
   const old=new DatabaseSync(path+'.sqlite');try{old.exec('DROP INDEX learning_chat_state;PRAGMA user_version=6;');}finally{old.close();}
   const upgraded=keep(new SqliteSocialStore(path));await upgraded.load();const state=upgraded.view('cognition').cognition;assert.equal(state.jobs[0].claim.id,job.claim.id);assert.equal(state.jobs[0].state,'completed');assert.equal(state.scopes[message.chat].cursor,100);await upgraded.close();
-  const db=new DatabaseSync(path+'.sqlite',{readOnly:true});try{assert.equal(db.prepare('PRAGMA user_version').get().user_version,7);assert.match(JSON.stringify(db.prepare("EXPLAIN QUERY PLAN SELECT 1 FROM entity_learning_jobs WHERE chat=? AND state IN ('preparing','running') LIMIT 1").all(message.chat)),/learning_chat_state/);}finally{db.close();}
+  const db=new DatabaseSync(path+'.sqlite',{readOnly:true});try{assert.equal(db.prepare('PRAGMA user_version').get().user_version,8);assert.match(JSON.stringify(db.prepare("EXPLAIN QUERY PLAN SELECT 1 FROM entity_learning_jobs WHERE chat=? AND state IN ('preparing','running') LIMIT 1").all(message.chat)),/learning_chat_state/);}finally{db.close();}
 }));
 
 test('学习发送完整原文和记忆；材料超限在模型前拒绝，不截断末尾的否定或推进游标',()=>fixture(async({store,usage,s})=>{
