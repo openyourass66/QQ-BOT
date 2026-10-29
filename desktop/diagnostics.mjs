@@ -7,6 +7,7 @@ import { readJsonLimited } from '../dist/services/read-json.js';
 import WebSocket from 'ws';
 import { installedComponent } from '../scripts/component-paths.mjs';
 import { resolveCredentialEnv } from '../scripts/credentials.mjs';
+import { sameRuntimePath } from '../scripts/app-paths.mjs';
 
 export async function probeSocket(env) {
   let url;
@@ -53,7 +54,7 @@ export async function diagnose(root, { dataRoot = root, externalOnebot = false, 
   catch (error) { add('对话模型配置', false, error.message, true, 'BOT_CHAT_MODE'); }
   const exists = async path => access(path).then(() => true, () => false);
   const managed = await installedComponent('napcat', dataRoot, root);
-  const managedSelected = Boolean(managed && resolve(dataRoot,env.BOT_NAPCAT_DIR || 'napcat/shell') === join(managed.directory,'napcat'));
+  const managedSelected = Boolean(managed && await sameRuntimePath(resolve(dataRoot,env.BOT_NAPCAT_DIR || 'napcat/shell'),join(managed.directory,'napcat')));
   if (process.platform === 'win32' && env.QQBOT_LOW_INTEGRITY !== undefined) add('桌面进程完整性级别', env.QQBOT_LOW_INTEGRITY !== '1', env.QQBOT_LOW_INTEGRITY === '1' ? '请退出后运行 npm run desktop:build，重新生成普通用户级别的 EXE。' : '普通用户级别，可访问用户配置与系统托盘');
   const [major, minor] = process.versions.node.split('.').map(Number);
   add('Node.js 运行环境', major === 22 && minor >= 13 || major >= 24, `${process.version}；需要 22.13–22.x 或 24 及以上。`);

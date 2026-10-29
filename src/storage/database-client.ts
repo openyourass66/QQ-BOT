@@ -1,5 +1,6 @@
 import {Worker} from 'node:worker_threads';
 import {DATABASE_LIMITS,type DatabaseRequest} from './database-types.js';
+import {assertApplicationRuntime} from '../core/node-runtime.js';
 
 const databaseError=(code:string,message:string)=>Object.assign(new Error(message),{code});
 type Pending={bytes:number;action:string;timer:NodeJS.Timeout;resolve:(value:any)=>void;reject:(error:Error)=>void};
@@ -19,6 +20,7 @@ export class DatabaseClient {
   get pendingBytes(){return this.bytes;}
   open():Promise<void>{
     return this.opening??=(async()=>{
+      assertApplicationRuntime();
       if(this.closing)throw databaseError('DATABASE_CLOSED','数据库已经关闭。');
       const worker=new Worker(this.options.workerUrl??new URL('./database-worker.js',import.meta.url),{workerData:{path:this.path},execArgv:[]});this.worker=worker;
       await new Promise<void>((resolve,reject)=>{

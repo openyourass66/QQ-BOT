@@ -19,6 +19,12 @@ async function canonical(path) {
   }
 }
 
+/** 按实际目录身份比较路径，兼容 Windows 短名称、目录联接和大小写。 */
+export async function sameRuntimePath(left,right) {
+  const [a,b]=await Promise.all([canonical(resolve(left)),canonical(resolve(right))]);
+  return process.platform==='win32'?a.toLowerCase()===b.toLowerCase():a===b;
+}
+
 /** 只解析目录，不创建文件；供原生窗口、后台与命令行共用。 */
 export async function runtimeLayout({ root = programRoot, sourceRoot = root, cwd = process.cwd(), env = process.env, args = [], platform = process.platform } = {}) {
   root = await canonical(resolve(root));

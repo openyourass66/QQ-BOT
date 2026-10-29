@@ -6,6 +6,7 @@ import { RuntimeConfiguration } from './runtime-configuration.mjs';
 import { ProcessGuard } from './process-guard.mjs';
 import { ProcessSupervisor } from './supervisor.mjs';
 import { consumeLines } from './bounded-lines.mjs';
+import { sameRuntimePath } from './app-paths.mjs';
 import { classifyRuntimeFailure } from '../dist/core/runtime-failure.js';
 
 export const runtimeActions=new Set(["qq-login","components","components-cancel","onboarding","model","qzone-check","knowledge","social","memory","settings-status","load","settings","env","runtime","connection","persona","diagnose","start","restart","restartBridge","stop","quit"]);
@@ -99,7 +100,7 @@ async function launch(name, script, overrides = {}, recovering=false) {
   if (name === 'napcat') {
     const { installedComponent } = await import('../scripts/component-paths.mjs');
     const managed = await installedComponent('napcat',dataRoot,root);
-    if (managed && resolve(dataRoot,env.BOT_NAPCAT_DIR || 'napcat/shell') === join(managed.directory,'napcat')) execPath = join(managed.directory,'node.exe');
+    if (managed && await sameRuntimePath(resolve(dataRoot,env.BOT_NAPCAT_DIR || 'napcat/shell'),join(managed.directory,'napcat'))) execPath = join(managed.directory,'node.exe');
   }
   const child = await processGuard.fork(script,{cwd:dataRoot,env,execPath});
   children.set(name, child);

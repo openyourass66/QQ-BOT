@@ -6,7 +6,7 @@ import { join, resolve } from 'node:path';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { createInterface } from 'node:readline';
-import { runtimeLayout, prepareRuntime } from '../scripts/app-paths.mjs';
+import { runtimeLayout, prepareRuntime, sameRuntimePath } from '../scripts/app-paths.mjs';
 import { validateRuntimeEnv } from '../desktop/runtime-fields.mjs';
 
 const manifest = JSON.stringify({ formatVersion: 1, appId: 'whale-workbench', version: '0.2.0' });
@@ -39,7 +39,7 @@ test('源码目录保持兼容，自定义目录与便携模式明确区分，�
 });
 
 test('发行版从用户目录初始化，覆盖程序版本后仍保留原配置、人设与数据', async () => {
-  const root = await mkdtemp(join(tmpdir(), 'qq-installed-'));
+  const root = await realpath(await mkdtemp(join(tmpdir(), 'qq-installed-')));
   try {
     const app = join(root, '只读程序'), local = join(root, 'Local AppData');
     await mkdir(join(app, 'templates'), { recursive: true });
@@ -83,6 +83,8 @@ test('数据目录联接与程序目录联接归一，多个入口使用同一�
     const a = await runtimeLayout({ root: join(root, 'actual'), env: { BOT_DATA_DIR: join(root, 'actual/new') } });
     const b = await runtimeLayout({ root: join(root, 'alias'), env: { BOT_DATA_DIR: join(root, 'alias/new') } });
     assert.equal(a.programRoot, b.programRoot); assert.equal(a.dataRoot, b.dataRoot);
+    assert.equal(await sameRuntimePath(join(root,'actual/new'),join(root,'alias/new')),true);
+    assert.equal(await sameRuntimePath(join(root,'actual/new'),join(root,'actual/other')),false);
     await rm(join(root, 'alias'), { recursive: process.platform === 'win32' });
   } finally { await rm(root, { recursive: true, force: true }); }
 });
@@ -110,7 +112,7 @@ test('命令行从任意工作目录启动发行入口，按选定数据目录�
 });
 
 test('桌面发行后台的读取、保存、子进程与日志统一使用数据目录，程序目录不写入个人文件', { timeout: 20000 }, async () => {
-  const root = await mkdtemp(join(tmpdir(), 'qq-host-layout-'));
+  const root = await realpath(await mkdtemp(join(tmpdir(), 'qq-host-layout-')));
   let child;
   try {
     const app = join(root, 'app'), data = join(root, '数据目录');

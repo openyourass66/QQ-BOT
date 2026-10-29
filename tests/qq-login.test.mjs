@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtemp,mkdir,writeFile,readFile,rm,readdir,rename} from 'node:fs/promises';
+import {mkdtemp,mkdir,writeFile,readFile,rm,readdir,rename,symlink} from 'node:fs/promises';
 import {createServer} from 'node:net';
 import {join} from 'node:path';
 import {tmpdir} from 'node:os';
@@ -56,6 +56,16 @@ test('已有手工配置及自定义 QQ 路径不被自动准备覆盖',()=>fixt
   await mkdir(join(qq.runtime,'config'),{recursive:true});const path=join(qq.runtime,'config/webui.json');await writeFile(path,'original-personal-config');
   await assert.rejects(qq.prepare(options.shell),/手工/);assert.equal(await readFile(path,'utf8'),'original-personal-config');
   assert.deepEqual(await readdir(join(qq.runtime,'config')),['webui.json']);
+}));
+
+test('受管 QQ 按实际目录识别组件别名，拒绝不同目录',()=>fixture(async options=>{
+  const alias=join(options.root,'组件 alias');
+  await symlink(options.shell,alias,process.platform==='win32'?'junction':'dir');
+  try{
+    const qq=new ManagedQQ(options);
+    assert.equal((await qq.prepare(alias)).phase,'starting');
+    await assert.rejects(qq.selected(join(options.root,'other-shell')),/自定义/);
+  }finally{await rm(alias,{recursive:process.platform==='win32'});}
 }));
 
 test('中断的 QQ 准备仅恢复摘要相符的自有文件，不覆盖新修改，已占用端口不重复启动',()=>fixture(async options=>{

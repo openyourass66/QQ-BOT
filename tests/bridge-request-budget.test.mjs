@@ -22,7 +22,7 @@ test('桥接总预算耗尽不进入模型，失败提示仍受联系范围约�
   const ws=new WebSocketServer({host:'127.0.0.1',port:0}),connected=once(ws,'connection');http.listen(0,'127.0.0.1');await once(http,'listening');if(!ws.address())await once(ws,'listening');
   const settingsPath=join(root,'settings.json'),settings={social:{allowAll:false,allowedUsers:['20001'],actionsPerDay:1},requests:{perDay:0},chat:{delay:{minMs:0,maxMs:0}}};
   try{
-    await writeFile(settingsPath,JSON.stringify(settings));const wrapper=join(root,process.platform==='win32'?'dsh.cmd':'dsh'),fake=resolve('tests/fixtures/fake-dsh.mjs');
+    await writeFile(settingsPath,JSON.stringify(settings));const wrapper=join(root,process.platform==='win32'?'dsh.cmd':'fixture-dsh'),fake=resolve('tests/fixtures/fake-dsh.mjs');
     await writeFile(wrapper,process.platform==='win32'?`@echo off\r\n"${process.execPath}" "${fake}" %*\r\n`:`#!/bin/sh\nexec "${process.execPath}" "${fake}" "$@"\n`,{mode:0o700});
     child=spawn(process.execPath,[resolve('dist/bridge.js')],{windowsHide:true,stdio:['ignore','pipe','pipe'],env:{...process.env,ONEBOT_HTTP_URL:`http://127.0.0.1:${http.address().port}`,ONEBOT_WS_URL:`ws://127.0.0.1:${ws.address().port}`,ONEBOT_TOKEN:'fixture-private-token',BOT_SELF_ID:'10000',BOT_DSH_BIN:wrapper,BOT_DSH_PROFILE:'acp',BOT_CHAT_MODE:'profile',BOT_WORKSPACE:root,BOT_SETTINGS_FILE:settingsPath,SESSION_STORE:join(root,'sessions.json'),BOT_USAGE_STORE:join(root,'usage.json'),BOT_SOCIAL_STORE:join(root,'social.json'),BOT_GROUP_CONTEXT_STORE:join(root,'context.json'),FAKE_GROUP_PROMPTS:prompts,BOT_ACTION_TOKEN:'',BOT_ACTION_URL:''}});
     child.stdout.on('data',part=>{output+=part;});child.stderr.on('data',part=>{output+=part;});const [socket]=await withTimeout(connected,10000);
