@@ -8,15 +8,15 @@ using System.Diagnostics;
 
 partial class App
 {
-    static bool quickSetupMode, quickReady, onboardingBusy;
+    static bool quickSetupMode, quickReady, onboardingBusy, setupComplete;
     static int quickStep, quickRevision, checkedQuickRevision;
     static Dictionary<string,string> detectionBaseline = new Dictionary<string,string>();
-    static readonly string[] quickTitles = { "1 检测环境", "2 选择模型", "3 连接 QQ", "4 检查并启动" };
+    static readonly string[] quickTitles = { "1 检测环境", "2 选择模型", "3 连接 QQ", "4 选择范围并启动" };
     static readonly string[] quickDescriptions = {
-        "先选择 QQ 接入方式，再检测 DSH 和 QQ 路径。已有 QQ 服务可跳过本机 NapCat 部署。",
+        "可先准备运行组件，也可检测已安装的 DSH 和 QQ。已有 QQ 服务可跳过本机 QQ 组件。",
         "已有 DSH 模型配置可直接沿用；首次使用建议选择本项目 API Key。Profile 和账号模式需先在 DSH 完成配置或登录。",
-        "本机通常使用默认地址，只需核对 NapCat 的端口和令牌。机器人 QQ 可以自动识别，无需手填。",
-        "检查当前输入后即可保存并启动。媒体、搜索、人设和行为参数可以稍后在全部设置中调整。"
+        "可创建安全连接并扫码登录 QQ；已有服务可核对地址与令牌。机器人 QQ 自动识别。",
+        "读取已登录 QQ 的好友和群，选择主人与聊天范围，再检查并启动。新实例先使用基础聊天，后台自主活动与空间另行开启。"
     };
     static HashSet<string> QuickKeys() {
         var keys = quickStep==0 ? new[]{"BOT_ONEBOT_MODE","BOT_DSH_BIN","BOT_QQ_DIR"} : quickStep==1 ? new[]{"BOT_CHAT_MODE","BOT_CHAT_MODEL","QQ_BOT_DEEPSEEK_API_KEY","BOT_CHAT_BASE_URL"} : quickStep==2 ? new[]{"ONEBOT_HTTP_URL","ONEBOT_WS_URL","ONEBOT_TOKEN"} : new string[0];
@@ -35,19 +35,36 @@ partial class App
         }
         Find<Button>("OpenQuickSetup").Click+=(s,e)=>OpenQuickSetup();
         Find<Button>("StartSetup").Click+=(s,e)=>OpenQuickSetup();
-        Find<Button>("OpenAllSettings").Click+=(s,e)=>NavigateRuntime(Math.Max(0,Find<ListBox>("RuntimeNav").SelectedIndex));
+        Find<Button>("OpenAllSettings").Click+=(s,e)=>NavigateRuntime(RuntimePage);
         Find<Button>("QuickBack").Click+=(s,e)=>ShowQuickStep(Math.Max(0,quickStep-1));
         Find<Button>("QuickNext").Click+=(s,e)=>{
             foreach(string key in QuickKeys())if(!ValidateRuntimeField(key)){runtimeInputs[key].Focus();return;}
             ShowQuickStep(Math.Min(3,quickStep+1));
         };
         Find<Button>("DetectEnvironment").Click+=(s,e)=>RequestOnboarding("detect");
+        Find<Button>("PrepareComponents").Click+=(s,e)=>OpenComponents();
+        Find<Button>("ConnectManagedQQ").Click+=(s,e)=>OpenQQLogin();
         Find<Button>("CheckSetup").Click+=(s,e)=>RequestOnboarding("check");
+        Find<Button>("SetupScope").Click+=(s,e)=>OpenScopeSetup();
         Find<Button>("SetupGuide").Click+=(s,e)=>{
             ShowSetupGuide();
         };
     }
-    static void OpenQuickSetup() {quickSetupMode=true;Find<TabControl>("Tabs").SelectedIndex=3;ShowQuickStep(quickStep);}
+    static string SetupCompletionPath { get { return System.IO.Path.Combine(dataRoot,"data/desktop/setup-complete"); } }
+    static void CompleteSetup() {
+        if(NeedsScope())return;
+        Find<Border>("SetupPrompt").Visibility=Visibility.Collapsed;
+        if(setupComplete)return;
+        setupComplete=true;
+        try {System.IO.Directory.CreateDirectory(System.IO.Path.GetDirectoryName(SetupCompletionPath));System.IO.File.WriteAllText(SetupCompletionPath,"1");}
+        catch { /* Keep the prompt hidden for this session if preferences cannot be saved. */ }
+    }
+    static void RefreshSetupPrompt(bool needsSetup) {
+        setupComplete=!NeedsScope()&&(setupComplete||System.IO.File.Exists(SetupCompletionPath));
+        if(!needsSetup)CompleteSetup();
+        Find<Border>("SetupPrompt").Visibility=needsSetup&&!setupComplete?Visibility.Visible:Visibility.Collapsed;
+    }
+    static void OpenQuickSetup() {quickSetupMode=true;SelectedPage=MainPage.Runtime;ShowQuickStep(quickStep);}
     static void ShowQuickStep(int step) {
         quickStep=step;FilterRuntime();RefreshQuickSetup();Find<ScrollViewer>("RuntimeScroll").ScrollToTop();
         Find<TextBlock>("QuickNotice").Text=quickDescriptions[quickStep];
@@ -82,7 +99,11 @@ partial class App
         Find<Button>("DetectEnvironment").IsEnabled=editable;
         Find<Button>("CheckSetup").IsEnabled=editable;
         Find<Button>("DetectEnvironment").Visibility=quickStep==0?Visibility.Visible:Visibility.Collapsed;
+        Find<Button>("PrepareComponents").Visibility=quickStep==0?Visibility.Visible:Visibility.Collapsed;
+        Find<Button>("ConnectManagedQQ").Visibility=quickStep==2&&RuntimeValue("BOT_ONEBOT_MODE")!="external"?Visibility.Visible:Visibility.Collapsed;
         Find<Button>("CheckSetup").Visibility=quickStep==3?Visibility.Visible:Visibility.Collapsed;
+        Find<Button>("SetupScope").Visibility=quickStep==3?Visibility.Visible:Visibility.Collapsed;
+        Find<Button>("SetupScope").IsEnabled=editable;
         Find<Button>("SetupGuide").Visibility=quickStep==0||quickStep==3?Visibility.Visible:Visibility.Collapsed;
         Find<StackPanel>("QuickResults").Visibility=quickStep==3?Visibility.Visible:Visibility.Collapsed;
         Find<Button>("QuickBack").Visibility=quickSetupMode&&quickStep>0?Visibility.Visible:Visibility.Collapsed;
@@ -90,7 +111,7 @@ partial class App
         Find<Button>("QuickBack").IsEnabled=Find<Button>("QuickNext").IsEnabled=!onboardingBusy&&!chatModelBusy;
         Find<Button>("SaveRuntime").Visibility=Find<Button>("SaveRuntimeRestart").Visibility=!quickSetupMode||quickStep==3?Visibility.Visible:Visibility.Collapsed;
         Find<Button>("SaveRuntime").Content=quickSetupMode?"仅保存配置":"保存连接与媒体";
-        Find<TextBlock>("RuntimeSaveScope").Text=quickSetupMode?"先完成基础连接，其余功能可以稍后设置。":"保存本页所有分类；机器人设置中的草稿另行保存。";
+        Find<TextBlock>("RuntimeSaveScope").Text=quickScope!=null?"同时保存所选主人与联系范围；其余行为草稿另行保存。":quickSetupMode?"先完成基础连接与使用范围，其余功能稍后设置。":"保存本页所有分类；机器人设置中的草稿另行保存。";
         Find<Button>("SaveRuntimeRestart").Content=quickSetupMode?"保存并启动":"保存并重新启动";
         Find<Button>("SaveRuntimeRestart").IsEnabled=editable&&(!quickSetupMode||quickReady);
         Find<Button>("SaveRuntime").IsEnabled=editable;
@@ -107,6 +128,7 @@ partial class App
     }
     static void RequestOnboarding(string operation) {
         if(onboardingBusy||chatModelBusy||dirtySections.Contains("env")){Feedback("请先完成当前操作或保存高级环境文件。");return;}
+        if(operation=="check"&&NeedsScope()&&quickScope==null){Find<TextBlock>("QuickNotice").Text="请先选择主人与联系范围。";OpenScopeSetup();return;}
         if(operation=="check"&&!ValidateConnectionForm())return;
         onboardingBusy=true;checkedQuickRevision=quickRevision;
         detectionBaseline=runtimeInputs.ToDictionary(pair=>pair.Key,pair=>RuntimeValue(pair.Key));
@@ -114,6 +136,7 @@ partial class App
         RefreshQuickSetup();Send("onboarding",new {operation=operation,runtime=detectionBaseline});
     }
     static void RenderOnboarding(Dictionary<string,object> message) {
+        if((string)message["operation"]=="contacts"){RenderScopeContacts(message);return;}
         onboardingBusy=false;
         if((string)message["operation"]=="detect") {
             int applied=0;
@@ -147,10 +170,10 @@ partial class App
     static Window CreateSetupGuide() {
         var guide=new Window {Title="组件安装指引",Owner=window,Width=640,Height=Math.Min(720,SystemParameters.WorkArea.Height-40),MinWidth=520,MinHeight=500,WindowStartupLocation=WindowStartupLocation.CenterOwner,Resources=window.Resources,Background=window.Background,Foreground=window.Foreground,FontFamily=window.FontFamily,FontSize=13};
         var content=new StackPanel {Margin=new Thickness(24)};
-        content.Children.Add(new TextBlock {Text="准备好组件，再回来自动检测",FontSize=21,FontWeight=FontWeights.SemiBold,TextWrapping=TextWrapping.Wrap,Margin=new Thickness(0,0,0,10)});
-        content.Children.Add(new TextBlock {Text="程序只检查已安装的组件。下面的按钮打开官方说明，由你选择安装；现有账号与配置继续保留。",Foreground=Ink("Muted"),TextWrapping=TextWrapping.Wrap,LineHeight=21,Margin=new Thickness(0,0,0,20)});
+        content.Children.Add(new TextBlock {Text="准备组件与手动安装指引",FontSize=21,FontWeight=FontWeights.SemiBold,TextWrapping=TextWrapping.Wrap,Margin=new Thickness(0,0,0,10)});
+        content.Children.Add(new TextBlock {Text="可在快速配置中点击“准备运行组件”。下面也提供官方说明，适合已有环境或手动安装；现有账号与配置继续保留。",Foreground=Ink("Muted"),TextWrapping=TextWrapping.Wrap,LineHeight=21,Margin=new Thickness(0,0,0,20)});
         AddSetupGuideItem(content,"1 · 模型运行器 DSH","安装 DeepSeek Harness。返回后检测或选择安装目录中的 dsh.cmd；使用已有模型配置或账号登录时，请先在 DSH 完成相应配置。","打开 DSH 官方下载","https://deepseek.com/harness/");
-        AddSetupGuideItem(content,"2 · QQ 与 NapCat","已有 NapCat 服务：先按官方说明启动并登录 QQ，再选择“连接已运行的 QQ 服务”。本机由工作台启动：需要 QQ、napcat/shell/napcat.mjs 及 napcat/node-runtime/QQNT.dll（官方 Node 适配库）。","打开 NapCat 官方安装说明","https://napneko.github.io/guide/boot/Shell","下载 QQ Windows 版","https://im.qq.com/pcqq/");
+        AddSetupGuideItem(content,"2 · QQ 与 NapCat","已有服务：先登录 QQ，再选择“连接已运行的 QQ 服务”。本机受管组件：点击“准备运行组件”，无需选择系统 QQ。手动 Shell 模式仍需 QQ 目录、napcat.mjs 和官方 Node 适配库 QQNT.dll。","打开 NapCat 官方安装说明","https://napneko.github.io/guide/boot/Shell","下载 QQ Windows 版","https://im.qq.com/pcqq/");
         AddSetupGuideItem(content,"3 · 核对两个连接地址","在 NapCat 网络设置启用 HTTP 服务（通常 3000）和正向 WebSocket 服务（通常 3001）。将对应地址及 access_token 填入本工作台；不要选择反向 WebSocket。","查看 NapCat 网络配置","https://napneko.github.io/config/basic");
         var close=new Button {Content="返回快速配置",Style=(Style)window.FindResource("Primary"),HorizontalAlignment=HorizontalAlignment.Right,Margin=new Thickness(0,12,0,0)};close.Click+=(s,e)=>guide.Close();content.Children.Add(close);
         guide.Content=new ScrollViewer {Content=content,Background=window.Background,VerticalScrollBarVisibility=ScrollBarVisibility.Auto};return guide;
@@ -167,11 +190,13 @@ partial class App
     }
     static void ShowSetupGuide() {CreateSetupGuide().ShowDialog();}
     static void VerifyQuickSetupInteraction() {
-        string original=RuntimeValue("BOT_DSH_BIN"),mode=RuntimeValue("BOT_CHAT_MODE"),key=RuntimeValue("QQ_BOT_DEEPSEEK_API_KEY");OpenQuickSetup();ShowQuickStep(0);Feedback("快速配置和全部设置共用草稿，切换页面不会丢失输入。");
+        if(Find<Border>("SetupPrompt").Visibility!=Visibility.Visible)throw new Exception("首次配置未显示首页引导");
+        Capture(System.IO.Path.Combine(root,"quick-first-use-overview.png"),MainPage.Overview);
+        string original=RuntimeValue("BOT_DSH_BIN"),mode=RuntimeValue("BOT_CHAT_MODE"),key=RuntimeValue("QQ_BOT_DEEPSEEK_API_KEY");OpenQuickSetup();ShowQuickStep(0);window.UpdateLayout();Feedback("快速配置和全部设置共用草稿，切换页面不会丢失输入。");
         if(Find<ListBox>("RuntimeNav").Visibility!=Visibility.Collapsed||runtimeInputs["BOT_DSH_BIN"].IsVisible==false)throw new Exception("快速配置未显示基础环境");
-        Capture(System.IO.Path.Combine(root,"quick-environment.png"),3);
-        ShowQuickStep(1);Capture(System.IO.Path.Combine(root,"quick-profile.png"),3);
-        ((ComboBox)runtimeInputs["BOT_CHAT_MODE"]).SelectedValue="project";((PasswordBox)runtimeInputs["QQ_BOT_DEEPSEEK_API_KEY"]).Password="native-setup-key";Capture(System.IO.Path.Combine(root,"quick-model.png"),3);
+        Capture(System.IO.Path.Combine(root,"quick-environment.png"),MainPage.Runtime);
+        ShowQuickStep(1);Capture(System.IO.Path.Combine(root,"quick-profile.png"),MainPage.Runtime);
+        ((ComboBox)runtimeInputs["BOT_CHAT_MODE"]).SelectedValue="project";((PasswordBox)runtimeInputs["QQ_BOT_DEEPSEEK_API_KEY"]).Password="native-setup-key";Capture(System.IO.Path.Combine(root,"quick-model.png"),MainPage.Runtime);
         ((ComboBox)runtimeInputs["BOT_CHAT_MODE"]).SelectedValue=mode;((PasswordBox)runtimeInputs["QQ_BOT_DEEPSEEK_API_KEY"]).Password=key;
         ShowQuickStep(3);quickReady=true;RefreshQuickSetup();
         ((TextBox)runtimeInputs["BOT_DSH_BIN"]).Text=original+"-changed";
@@ -184,9 +209,27 @@ partial class App
         if(RuntimeValue("BOT_DSH_BIN")!="user-selected.cmd")throw new Exception("自动检测覆盖了用户输入");((TextBox)runtimeInputs["BOT_DSH_BIN"]).Text=original;
         var rows=new object[]{new Dictionary<string,object>{{"name","DSH 启动入口"},{"ok",false},{"required",true},{"detail","请检测或选择已安装的 DSH 启动文件。"},{"key","BOT_DSH_BIN"}},new Dictionary<string,object>{{"name","NapCat Shell"},{"ok",false},{"required",false},{"detail","使用已有 QQ 服务，本机组件可跳过。"},{"key","BOT_NAPCAT_DIR"}}};
         checkedQuickRevision=quickRevision;RenderOnboarding(new Dictionary<string,object>{{"operation","check"},{"ok",false},{"rows",rows},{"message","请处理需处理的项目，再重新检查。"}});
-        Capture(System.IO.Path.Combine(root,"quick-check.png"),3);
-        double width=window.Width,height=window.Height;window.Width=1000;window.Height=720;Capture(System.IO.Path.Combine(root,"quick-compact.png"),3);window.Width=width;window.Height=height;
+        Capture(System.IO.Path.Combine(root,"quick-check.png"),MainPage.Runtime);
+        double width=window.Width,height=window.Height;window.Width=1000;window.Height=720;Capture(System.IO.Path.Combine(root,"quick-compact.png"),MainPage.Runtime);window.Width=width;window.Height=height;
         var guide=CreateSetupGuide();guide.Show();guide.UpdateLayout();CaptureContent((FrameworkElement)guide.Content,System.IO.Path.Combine(root,"quick-guide.png"));guide.Close();
         NavigateRuntime(0);if(!Find<Button>("SaveRuntimeRestart").IsEnabled)throw new Exception("退出快速配置后无法保存全部设置");
+        NavigateRuntime(4);OpenQuickSetup();Find<Button>("OpenAllSettings").RaiseEvent(new RoutedEventArgs(Button.ClickEvent));window.UpdateLayout();
+        if(SelectedPage!=MainPage.Runtime||Find<TextBlock>("RuntimeTitle").Text!="扩展服务"||!runtimeInputs["BOT_LEARNING_BASE_URL"].IsVisible||Find<Expander>("AdvancedEnv").Visibility!=Visibility.Collapsed)throw new Exception("退出快速配置后未返回原来的扩展服务分类");
+        NavigateSetting("approval.adminQq");window.UpdateLayout();
+        if(SelectedPage!=MainPage.Settings||Find<TextBlock>("PageTitle").Text!="机器人设置"||Find<TextBlock>("SettingsTitle").Text!="身份与审批"||!fields["approval.adminQq"].IsVisible)throw new Exception("跨页设置入口未定位到身份与审批");
+        NavigateRuntime(0);Find<ListBox>("SettingsNav").SelectedIndex=0;
+        var status=new Dictionary<string,object>{{"type","status"},{"qqOnline",true},{"wsConnected",true},{"acpConnected",true},{"messagesIn",0},{"messagesOut",0},{"sessions",0},{"pendingMessages",0},{"startedAt",DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()}};
+        if(NeedsScope()) {
+            Event(json.Serialize(status));
+            if(setupComplete||Find<Border>("SetupPrompt").Visibility!=Visibility.Visible)throw new Exception("未设置联系范围就隐藏了首次配置引导");
+            ((Dictionary<string,object>)settings["installation"])["scopeConfigured"]=true;
+        }
+        Event(json.Serialize(status));
+        setupComplete=false;RefreshSetupPrompt(true);
+        if(Find<Border>("SetupPrompt").Visibility!=Visibility.Collapsed)throw new Exception("已配置状态没有在重新加载后保留");
+        status["qqOnline"]=false;Event(json.Serialize(status));
+        if(Find<Border>("SetupPrompt").Visibility!=Visibility.Collapsed)throw new Exception("暂时离线重新显示了首次配置引导");
+        OpenQuickSetup();if(Find<Border>("QuickSetupPanel").Visibility!=Visibility.Visible||Find<Border>("SetupPrompt").Visibility!=Visibility.Collapsed)throw new Exception("配置完成后无法手动打开快速配置");
+        NavigateRuntime(0);Capture(System.IO.Path.Combine(root,"quick-completed-overview.png"),MainPage.Overview);
     }
 }

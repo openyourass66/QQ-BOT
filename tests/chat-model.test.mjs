@@ -21,7 +21,8 @@ test('项目模型配置：独立凭据引用、不在覆盖文件中写入密�
   assert.deepEqual(chatModelSelection(config), { provider: 'deepseek-official', model: 'custom-flash' });
   const dir = await mkdtemp(join(tmpdir(), 'qq-chat-patch-'));
   try {
-    assert.equal(await prepareChatModelPatch(readChatModelConfig({}), join(dir, 'sessions.json')), undefined);
+    const profilePatch=JSON.parse(await readFile(await prepareChatModelPatch(readChatModelConfig({}), join(dir, 'sessions.json')),'utf8'));
+    assert.ok(profilePatch.some(p=>p.insert?.some(plugin=>plugin.id==='whale-tool-policy')));
     const path = await prepareChatModelPatch(config, join(dir, 'sessions.json'));
     const content = await readFile(path, 'utf8');
     assert.ok(!content.includes(config.apiKey));
@@ -29,6 +30,7 @@ test('项目模型配置：独立凭据引用、不在覆盖文件中写入密�
     assert.equal(patch.find(p => p.id === 'llm-deepseek').config.apiKeyEnv, 'QQ_BOT_DEEPSEEK_API_KEY');
     assert.equal(patch.find(p => p.id === 'acp').config.model, 'custom-flash');
     assert.equal(patch.find(p => p.id === 'web-search-deepseek').config.apiKeyEnv, 'QQ_BOT_DEEPSEEK_API_KEY');
+    assert.equal(patch.find(p => p.id === 'web-deepseek-api').config.apiKeyEnv, 'QQ_BOT_DEEPSEEK_API_KEY');
     const account = chatModelPatches(readChatModelConfig({ BOT_CHAT_MODE: 'account' }));
     assert.equal(account.find(p => p.id === 'acp').config.provider, 'deepseek-account');
     assert.ok(!account.some(p => p.id === 'llm-deepseek'));

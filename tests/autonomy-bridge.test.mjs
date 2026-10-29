@@ -1,3 +1,4 @@
+import {readSocialData} from './helpers/social-data.mjs';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
@@ -35,7 +36,7 @@ test('完整后台链路：真实 ACP/MCP 保存想法、主动聊天、安静�
     for(const stream of[child.stdout,child.stderr])stream.on('data',chunk=>output+=chunk);
     const [socket]=await connected;
     socket.send(JSON.stringify({post_type:'message',message_type:'private',self_id:10000,user_id:20001,time:Math.floor(now/1000),message_id:1,message:[{type:'text',data:{text:'AUTONOMY_SEED SECRET_AUTONOMY：只在私聊说的事'}},{type:'image',data:{file:image}}],sender:{user_id:20001,nickname:'测试朋友'}}));
-    const data=async()=>JSON.parse(await readFile(join(dir,'social.json'),'utf8'));
+    const data=async()=>await readSocialData(join(dir,'social.json'));
     await until(async()=>(await data()).turns.length>=1);assert.equal(sent.length,0);
     now+=6*60000;await writeFile(clock,String(now));await until(async()=>(await data()).autonomous.decisions.length>=1);
     assert.equal(sent.length,1);assert.equal(sent[0].message,'昨天说的猫猫表情找到了吗？');

@@ -1,0 +1,41 @@
+name: 回归验证
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: regression-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  regression:
+    name: ${{ matrix.os }} / Node ${{ matrix.node }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        node: ['22.13.0', '24']
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: ${{ matrix.node }}
+          package-manager-cache: false
+      - name: 安装锁定依赖
+        run: npm ci
+      - name: 检查类型
+        run: npm run typecheck
+      - name: 隔离回归
+        run: npm run test:isolated -- --test-concurrency=2
+      - name: 编译 Windows 工作台
+        if: matrix.os == 'windows-latest' && matrix.node == '24'
+        run: npm run desktop:build

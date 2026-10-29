@@ -106,6 +106,20 @@ test('旧环境默认值从表单隐藏但仍保留在文件中，不覆盖当�
   const env=await readFile(join(root,'.env'),'utf8');assert.match(env,/ADMIN_QQ=123456/);assert.match(env,/GROUP_PREFIX=old-prefix/);assert.match(env,/ALLOW_EXEC=1/);
 }));
 
+test('旧搜索配置不影响设置加载和保存，搜索入口与 QQ 工具清单已移除',()=>fixture(async({root,worker,a})=>{
+  const legacy=structuredClone(a);legacy.web={provider:'tavily',searchesPerTurn:2};legacy.features.browsing={enabled:false,maxNavigations:3,maxScreenshots:2};
+  await writeFile(join(root,'a.json'),JSON.stringify(legacy));
+  await writeFile(join(root,'.env'),'BOT_SETTINGS_FILE=a.json\nBOT_WORKSPACE=.\nBOT_CHAT_MODE=profile\nBOT_SEARCH_URL=https://example.test/search\nBOT_SEARCH_API_KEY=fixture-old-search-key\nBOT_TAVILY_API_KEY=fixture-old-tavily-key\n');
+  const loaded=await worker('load');assert.equal(loaded.ok,true);assert.equal(loaded.result.settings.web,undefined);assert.equal(loaded.result.settings.features.browsing,undefined);
+  assert.equal(loaded.result.runtimeFields.some(field=>/BOT_SEARCH|BOT_TAVILY/.test(field.key)),false);
+  const capabilities=await worker('social',{op:'list',section:'capabilities'});assert.equal(capabilities.ok,true);
+  assert.equal(capabilities.result.rows.some(row=>['qq_search','qq_web_read','managed-web'].includes(row.id)),false);
+  assert.match(capabilities.result.rows.find(row=>row.id==='search').summary,/DSH.*DeepSeek.*原生搜索/);
+  const draft=structuredClone(loaded.result.settings);draft.identity.name='保留其他设置';
+  const saved=await worker('settings',{draft,baseline:loaded.result.settings,paths:['identity.name']});assert.equal(saved.ok,true);
+  const stored=JSON.parse(await readFile(join(root,'a.json'),'utf8'));assert.equal(stored.identity.name,'保留其他设置');assert.equal(stored.web,undefined);assert.equal(stored.features.browsing,undefined);
+}));
+
 test('从活动定位旧记忆不受前 200 条限制，返回同一条可编辑记录',()=>fixture(async({root,worker})=>{
   const store=new SocialStore(join(root,'data/social.json'));await store.load();
   await store.update(d=>{d.memories=Array.from({length:205},(_,i)=>({id:'memory-'+i,chat:'private:10001',user:'10001',name:'测试好友',text:'事实 '+i,at:i+1}));});

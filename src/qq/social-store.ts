@@ -6,16 +6,19 @@ import type { MessageEvent, Segment } from './onebot.js';
 import { segmentsToText } from './onebot.js';
 import { StoredStickerAnalysisSchema } from './sticker-review.js';
 import { AutonomousStateSchema } from '../agent/autonomous-state.js';
-import { CognitionStateSchema, MemoryMetaSchema } from '../agent/cognition-state.js';
+import { CognitionStateSchema, MemoryMetaSchema, type LearningClaim, type LearningJob } from '../agent/cognition-state.js';
+import type {SocialRepository,SocialField,MessageQuery,MessageRef} from '../storage/social-repository.js';
+import {currentOperation} from '../core/operation-context.js';
 
-const segment = z.object({ type: z.string(), data: z.record(z.unknown()) });
+const segment = z.object({ type: z.string(), data: z.record(z.string(), z.unknown()) });
 const message = z.object({ chat: z.string(), id: z.number().int().safe(), user: z.number().int().safe(), name: z.string(), at: z.number(), text: z.string(), segments: z.array(segment), self: z.boolean(), recalled: z.boolean().default(false) });
 const contact = z.object({ chat: z.string(), name: z.string(), at: z.number() });
 const memory = z.object({ id: z.string(), chat: z.string(), user: z.string(), name: z.string(), text: z.string(), at: z.number() });
 const qqSticker = z.object({ resId: z.string().min(1), emojiId: z.string(), md5: z.string().regex(/^[a-f0-9]{32}$/), url: z.string(), cachePath: z.string(), description: z.string() });
 const sticker = z.object({ id: z.string(), file: z.string(), note: z.string(), tags: z.array(z.string()), uses: z.number(), at: z.number(), analysis: StoredStickerAnalysisSchema.optional(), md5: z.string().regex(/^[a-f0-9]{32}$/).optional(), qq: qqSticker.optional(), qqPresent: z.boolean().default(false) });
-const task = z.object({ id: z.string(), chat: z.string(), creator: z.string(), text: z.string(), due: z.number(), interval: z.number().default(0), state: z.enum(['pending', 'blocked', 'running', 'sent', 'failed', 'unknown', 'cancelled']), error: z.string().default(''), retryAt: z.number().default(0) });
-const event = z.object({ id: z.string(), chat: z.string(), type: z.string(), at: z.number(), data: z.record(z.unknown()), handled: z.boolean().default(false) });
+export const ScheduledTaskSchema = z.object({ id: z.string(), chat: z.string(), creator: z.string(), text: z.string(), due: z.number(), interval: z.number().default(0), state: z.enum(['pending', 'blocked', 'running', 'sent', 'failed', 'unknown', 'cancelled']), error: z.string().default(''), retryAt: z.number().default(0),claim:z.object({id:z.string().min(1).max(128),owner:z.string().min(1).max(128),at:z.number().finite()}).optional() });
+const task=ScheduledTaskSchema;
+const event = z.object({ id: z.string(), chat: z.string(), type: z.string(), at: z.number(), data: z.record(z.string(), z.unknown()), handled: z.boolean().default(false) });
 const action = z.object({ id: z.string(), chat: z.string(), tool: z.string(), at: z.number(), state: z.enum(['running', 'success', 'failed', 'unknown']), summary: z.string() });
 const turn = z.object({ id: z.string(), chat: z.string(), at: z.number(), duration: z.number(), input: z.string(), output: z.string(), tools: z.array(z.string()), error: z.string(), inputTokens: z.number().nullable(), outputTokens: z.number().nullable(), contextUsed:z.number().nonnegative().optional(),contextSize:z.number().positive().optional(),generation:z.number().optional() });
 const profile = z.object({ chat: z.string().regex(/^(group|private):\d+$/), persona: z.string().max(10000), responseMode: z.enum(['inherit','mention','keywords','probability','all']).default('inherit'), keywords: z.array(z.string().max(64)).max(100).default([]), probability: z.number().int().min(0).max(100).default(10), proactive: z.boolean().default(true) });
@@ -24,9 +27,11 @@ export type SocialData = z.infer<typeof schema>;
 export type StoredMessage = z.infer<typeof message>;
 export type ScheduledTask = z.infer<typeof task>;
 
-export class SocialStore {
-  private data: SocialData = schema.parse({ version: 2, messages: [], contacts: [], memories: [], stickers: [], tasks: [], events: [], actions: [], turns: [] });
-  private chain: Promise<unknown> = Promise.resolve();
+export class SocialStore implements SocialRepository {
+  protected readonly instanceId=randomUUID();
+  private received=new Set<string>();
+  protected data: SocialData = schema.parse({ version: 2, messages: [], contacts: [], memories: [], stickers: [], tasks: [], events: [], actions: [], turns: [] });
+  protected chain: Promise<unknown> = Promise.resolve();
   constructor(readonly path: string) {}
   async load(): Promise<void> {
     let found=false;
@@ -42,27 +47,48 @@ export class SocialStore {
     }
     catch (e) { if (found || (e as NodeJS.ErrnoException).code !== 'ENOENT') throw e; }
     // A process crash during a send has an unknown outcome; never repeat it automatically.
-    await this.update(d => {
-      for(const job of d.cognition.jobs) if(job.state==='running'){job.state='unknown';job.summary='上次分析中断，已保留处理游标，不自动重复提交';}
-      for (const item of d.actions) if (item.state === 'running') item.state = 'unknown';
-      for (const item of d.tasks) if (item.state === 'running') { item.state = 'unknown'; item.error = '上次执行中断，请核对聊天记录后再安排'; }
-      for (const item of d.autonomous.thoughts) if(item.state==='running'){
-        item.state='unknown';item.result='上次执行中断，结果待核对，不自动重试';
-        if(item.kind==='chat'){
-          let c=d.autonomous.contacts.find(c=>c.chat===item.chat);
-          if(!c){c={chat:item.chat,incomingAt:0,proactiveAt:0,unanswered:0,attemptAt:0};d.autonomous.contacts.push(c);}
-          c.unanswered=1;c.attemptAt=Date.now();
-        }
-      }
-      d.autonomous.contacts=d.autonomous.contacts.slice(-5000);
-      for (const item of d.autonomous.posts) if(item.state==='running')item.state='unknown';
-    });
+    await this.update(d => recoverInterrupted(d));
+    this.received=new Set(this.data.messages.filter(message=>!message.self).map(message=>message.chat+'/'+message.id));
   }
   snapshot(): SocialData { return structuredClone(this.data); }
+  view(...fields:SocialField[]):SocialData {
+    const result=schema.parse({version:2,messages:[],contacts:[],memories:[],stickers:[],tasks:[],events:[],actions:[],turns:[]});
+    for(const field of fields)Object.assign(result,{[field]:structuredClone(this.data[field])});
+    return result;
+  }
+  context(chat:string):SocialData|Promise<SocialData> {
+    const data=this.view('memories','cognition');data.memories=data.memories.filter(m=>m.chat===chat);
+    data.cognition.memories=Object.fromEntries(data.memories.filter(m=>data.cognition.memories[m.id]).map(m=>[m.id,data.cognition.memories[m.id]]));
+    data.cognition.lexicon=data.cognition.lexicon.filter(l=>l.chat===chat);data.cognition.suppressed=data.cognition.suppressed.filter(s=>s.chat===chat);
+    data.cognition.scopes=Object.fromEntries(Object.entries(data.cognition.scopes).filter(([key])=>key===chat));data.cognition.jobs=data.cognition.jobs.filter(j=>j.chat===chat);
+    data.messages=structuredClone(this.data.messages.filter(m=>m.chat===chat));return data;
+  }
+  queryMessages(query:MessageQuery):{rows:StoredMessage[];total:number}|Promise<{rows:StoredMessage[];total:number}> {
+    const {chat,ids,after,incomingOnly,excludeUsers=[],ascending=false}=query;
+    const limit=Math.min(20000,Math.max(1,query.limit??100)),offset=Math.max(0,query.offset??0),text=query.query?.toLocaleLowerCase();
+    const rows=this.data.messages.filter(m=>(chat===undefined||m.chat===chat)&&(!ids||ids.includes(m.id))&&(after===undefined||m.at>=after)&&(!incomingOnly||!m.self&&!m.recalled)&&!excludeUsers.includes(String(m.user))&&(!text||`${m.name} ${m.text} ${m.chat}`.toLocaleLowerCase().includes(text))).sort((a,b)=>ascending?a.at-b.at:b.at-a.at);
+    return {rows:structuredClone(rows.slice(offset,offset+limit)),total:rows.length};
+  }
+  latestIncoming(excludeUsers:string[]=[]):StoredMessage[]|Promise<StoredMessage[]> {
+    const rows=new Map<string,StoredMessage>();for(const m of this.data.messages)if(!m.self&&!m.recalled&&!excludeUsers.includes(String(m.user))&&(!rows.has(m.chat)||rows.get(m.chat)!.at<=m.at))rows.set(m.chat,m);return structuredClone([...rows.values()]);
+  }
+  lookupMessages(refs:MessageRef[]):StoredMessage[]|Promise<StoredMessage[]>{const keys=new Set(refs.map(r=>`${r.chat}/${r.id}`));return structuredClone(this.data.messages.filter(m=>keys.has(`${m.chat}/${m.id}`)));}
+  updateWithMessages<T>(_chat:string,_ids:number[],fn:(draft:SocialData)=>T):Promise<T>{return this.update(fn);}
   profile(chat: string): SocialData['profiles'][number] | undefined { return structuredClone(this.data.profiles.find(p => p.chat === chat)); }
   memories(chat: string): SocialData['memories'] { return structuredClone(this.data.memories.filter(m => m.chat === chat)); }
   contacts(): SocialData['contacts'] { return structuredClone(this.data.contacts); }
-  dueTasks(now: number): ScheduledTask[] { return structuredClone(this.data.tasks.filter(t => ['pending','blocked'].includes(t.state) && t.due <= now && t.retryAt <= now).slice(0,10)); }
+  dueTasks(now: number): ScheduledTask[]|Promise<ScheduledTask[]> { return structuredClone(this.data.tasks.filter(t => ['pending','blocked'].includes(t.state) && t.due <= now && t.retryAt <= now).sort((a,b)=>Math.max(a.due,a.retryAt)-Math.max(b.due,b.retryAt)||a.due-b.due).slice(0,10)); }
+  claimTask(id:string,now:number):Promise<ScheduledTask|undefined>{return this.update(d=>{const current=d.tasks.find(t=>t.id===id);if(!current||!['pending','blocked'].includes(current.state)||current.due>now||current.retryAt>now)return undefined;current.state='running';current.error='';current.claim={id:randomUUID(),owner:this.instanceId,at:now};return current;});}
+  dueThoughts(now:number):SocialData['autonomous']['thoughts']|Promise<SocialData['autonomous']['thoughts']>{return structuredClone(this.data.autonomous.thoughts.filter(t=>t.state==='pending'&&t.due<=now&&t.expires>now).sort((a,b)=>a.due-b.due||a.id.localeCompare(b.id)).slice(0,200));}
+  claimThought(id:string,now:number):Promise<SocialData['autonomous']['thoughts'][number]|undefined>{return this.update(d=>{const current=d.autonomous.thoughts.find(t=>t.id===id);if(!current||current.state!=='pending'||current.due>now||current.expires<=now)return undefined;current.state='running';current.claim={id:randomUUID(),owner:this.instanceId,at:now};return current;});}
+  updateThoughtClaim(id:string,claimId:string,fn:(draft:SocialData)=>void):Promise<boolean>{return this.update(d=>{const current=d.autonomous.thoughts.find(t=>t.id===id);if(!current||current.state!=='running'||current.claim?.id!==claimId)return false;fn(d);return true;});}
+  claimLearning(input:LearningClaim):Promise<LearningJob|undefined>{return this.update(d=>{
+    if(d.cognition.jobs.some(job=>job.id===input.id||job.chat===input.chat&&(['preparing','running'].includes(job.state)||!input.manual&&job.state==='unknown'&&job.batch===input.batch)))return undefined;
+    if(d.cognition.jobs.length>=200){const index=d.cognition.jobs.findIndex(job=>!['preparing','running'].includes(job.state));if(index<0)throw new Error('资料整理任务已达到容量上限');d.cognition.jobs.splice(index,1);}
+    const job:LearningJob={id:input.id,chat:input.chat,at:input.at,batch:input.batch,sources:input.sources,state:'preparing',summary:'准备分析',claim:{id:input.id,owner:this.instanceId,at:input.at}};d.cognition.jobs.push(job);return job;
+  });}
+  updateLearningClaim(id:string,claimId:string,state:'preparing'|'running',fn:(draft:SocialData)=>void,_refs?:MessageRef[]):Promise<boolean>{return this.update(d=>{const current=d.cognition.jobs.find(job=>job.id===id);if(!current||current.state!==state||current.claim?.id!==claimId)return false;fn(d);return true;});}
+  finishTask(id:string,claimId:string,result:{state:'pending'|'blocked'|'sent'|'failed'|'unknown';error:string;retryAt:number;due?:number}):Promise<boolean>{return this.update(d=>{const current=d.tasks.find(t=>t.id===id);if(!current||current.state!=='running'||current.claim?.id!==claimId)return false;Object.assign(current,result);return true;});}
   update<T>(fn: (draft: SocialData) => T): Promise<T> {
     const job = this.chain.then(async () => {
       const next = structuredClone(this.data);
@@ -74,8 +100,8 @@ export class SocialStore {
       for (let attempt = 0; ; attempt++) {
         try { await rename(`${this.path}.tmp`, this.path); break; }
         catch (error) {
-          if (process.platform !== 'win32' || !['EPERM','EACCES','EBUSY'].includes((error as NodeJS.ErrnoException).code ?? '') || attempt >= 5) throw error;
-          await new Promise(resolve => setTimeout(resolve, 20 * (attempt + 1)));
+          if (process.platform !== 'win32' || !['EPERM','EACCES','EBUSY'].includes((error as NodeJS.ErrnoException).code ?? '') || attempt >= 8) throw error;
+          await new Promise(resolve => setTimeout(resolve, 40 * (attempt + 1)));
         }
       }
       this.data = validated;
@@ -87,16 +113,17 @@ export class SocialStore {
   flush(): Promise<unknown> { return this.chain; }
   async account(id: number): Promise<void> {
     if (this.data.account === id) return;
-    if (this.data.account && this.data.account !== id) throw new Error('QQ 账号与社交数据不匹配，请为新账号指定独立数据文件');
+    if (this.data.account && this.data.account !== id) throw Object.assign(new Error('QQ 账号与社交数据不匹配，请为新账号指定独立数据文件'),{code:'ACCOUNT_CHANGED'});
     await this.update(d => { d.account = id; });
   }
-  async record(event: MessageEvent, days: number, perChat: number): Promise<void> {
+  async record(event: MessageEvent, days: number, perChat: number): Promise<boolean> {
     const chat = event.message_type === 'group' ? `group:${event.group_id}` : `private:${event.user_id === event.self_id ? (event as unknown as { target_id?: number }).target_id ?? event.user_id : event.user_id}`;
-    await this.add({ chat, id: event.message_id, user: event.user_id, name: event.sender.card || event.sender.nickname, at: event.time * 1000, text: segmentsToText(event.message), segments: event.message, self: event.user_id === event.self_id, recalled: false }, days, perChat);
+    const receipt=chat+'/'+event.message_id;if(this.received.has(receipt))return false;if(this.received.size>=200000)throw new Error('兼容存储入站记录达到容量上限，请先整理。');this.received.add(receipt);
+    try{await this.add({ chat, id: event.message_id, user: event.user_id, name: event.sender.card || event.sender.nickname, at: event.time * 1000, text: segmentsToText(event.message), segments: event.message, self: event.user_id === event.self_id, recalled: false }, days, perChat);return true;}catch(error){this.received.delete(receipt);throw error;}
   }
-  async add(entry: StoredMessage, days = 30, perChat = 2000): Promise<void> {
-    await this.update(d => {
-      if (d.messages.some(m => m.chat === entry.chat && m.id === entry.id)) return;
+  async add(entry: StoredMessage, days = 30, perChat = 2000): Promise<boolean> {
+    return this.update(d => {
+      if (d.messages.some(m => m.chat === entry.chat && m.id === entry.id)) return false;
       d.messages.push(entry);
       d.messages.sort((a,b) => a.at - b.at);
       const counts = new Map<string, number>();
@@ -108,13 +135,14 @@ export class SocialStore {
       if (c) c.at = Math.max(c.at, entry.at);
       else d.contacts.push({ chat: entry.chat, name: entry.chat.startsWith('private:') ? entry.name : entry.chat, at: entry.at });
       d.contacts = d.contacts.slice(-5000);
+      return true;
     });
   }
-  messages(chat: string, limit = 30, offset = 0, query = ''): StoredMessage[] {
+  messages(chat: string, limit = 30, offset = 0, query = ''): StoredMessage[]|Promise<StoredMessage[]> {
     const all = this.data.messages.filter(m => m.chat === chat && (!query || m.text.includes(query)));
     return structuredClone(all.slice(Math.max(0, all.length - offset - limit), Math.max(0, all.length - offset)));
   }
-  message(chat: string, id: number): StoredMessage {
+  message(chat: string, id: number): StoredMessage|Promise<StoredMessage> {
     const found = this.data.messages.find(m => m.chat === chat && m.id === id);
     if (!found) throw new Error('当前会话找不到该消息，请先查询近期消息，使用返回的真实消息编号');
     return structuredClone(found);
@@ -124,8 +152,8 @@ export class SocialStore {
     await this.add({ chat, id, user, name, at: Date.now(), text: segmentsToText(segments), segments, self: true, recalled: false });
   }
   async beginAction(chat: string, tool: string): Promise<string> {
-    const id = randomUUID();
-    await this.update(d => { d.actions.push({ id, chat, tool, at: Date.now(), state: 'running', summary: '' }); d.actions = d.actions.slice(-2000); });
+    const id = currentOperation()?.record.id??randomUUID();
+    await this.update(d => { if(d.actions.some(action=>action.id===id))return;d.actions.push({ id, chat, tool, at: Date.now(), state: 'running', summary: '' }); d.actions = d.actions.slice(-2000); });
     return id;
   }
   async endAction(id: string, state: 'success' | 'failed' | 'unknown', summary: string): Promise<void> {
@@ -147,4 +175,23 @@ export class SocialStore {
       return item;
     });
   }
+}
+export {schema as SocialDataSchema};
+
+export function recoverInterrupted(d:SocialData,now=Date.now()):void {
+      for(const job of d.cognition.jobs)if(job.state==='preparing'){job.state='failed';job.summary='上次准备分析中断，尚未提交分析，处理游标保留';}
+      for(const job of d.cognition.jobs) if(job.state==='running'){job.state='unknown';job.summary='上次分析中断，已保留处理游标，不自动重复提交';}
+      for (const item of d.actions) if (item.state === 'running') item.state = 'unknown';
+      for (const item of d.tasks) if (item.state === 'running') { item.state = 'unknown'; item.error = '上次执行中断，请核对聊天记录后再安排'; }
+      for (const item of d.autonomous.thoughts) if(item.state==='running'){
+        item.state='unknown';item.result='上次执行中断，结果待核对，不自动重试';
+        if(item.kind==='chat'){
+          let c=d.autonomous.contacts.find(c=>c.chat===item.chat);
+          if(!c){c={chat:item.chat,incomingAt:0,proactiveAt:0,unanswered:0,attemptAt:0};d.autonomous.contacts.push(c);}
+          c.unanswered=1;c.attemptAt=now;
+        }
+      }
+      d.autonomous.contacts=d.autonomous.contacts.slice(-5000);
+      for (const item of d.autonomous.posts) if(item.state==='running')item.state='unknown';
+      for (const item of d.autonomous.spaceComments) if(item.state==='running')item.state='unknown';
 }

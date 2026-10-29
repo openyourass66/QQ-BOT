@@ -8,8 +8,14 @@ $references += @('PresentationFramework.dll', 'PresentationCore.dll', 'WindowsBa
 $output = if ($OutputPath) { [IO.Path]::GetFullPath($OutputPath) } else { Join-Path $projectRoot 'QQ-BOT.exe' }
 & (Join-Path $PSScriptRoot 'build-icon.ps1')
 $iconPath = Join-Path $PSScriptRoot 'assets/whale.ico'
-& (Join-Path $framework 'csc.exe') /nologo /codepage:65001 /target:winexe /platform:x64 /optimize+ "/out:$output" "/win32icon:$iconPath" "/resource:$iconPath,whale.ico" @references (Join-Path $PSScriptRoot 'App.cs') (Join-Path $PSScriptRoot 'SettingsView.cs') (Join-Path $PSScriptRoot 'RuntimeView.cs') (Join-Path $PSScriptRoot 'QuickSetupView.cs') (Join-Path $PSScriptRoot 'ActivityView.cs') (Join-Path $PSScriptRoot 'KnowledgeView.cs') (Join-Path $PSScriptRoot 'NativeTray.cs')
+& (Join-Path $framework 'csc.exe') /nologo /codepage:65001 /target:winexe /platform:x64 /optimize+ "/out:$output" "/win32icon:$iconPath" "/resource:$iconPath,whale.ico" @references (Join-Path $PSScriptRoot 'App.cs') (Join-Path $PSScriptRoot 'SettingsView.cs') (Join-Path $PSScriptRoot 'RuntimeView.cs') (Join-Path $PSScriptRoot 'QuickSetupView.cs') (Join-Path $PSScriptRoot 'ComponentView.cs') (Join-Path $PSScriptRoot 'QQLoginView.cs') (Join-Path $PSScriptRoot 'ScopeSetupView.cs') (Join-Path $PSScriptRoot 'ActivityView.cs') (Join-Path $PSScriptRoot 'KnowledgeView.cs') (Join-Path $PSScriptRoot 'NativeTray.cs')
 if ($LASTEXITCODE -ne 0) { throw '桌面端编译失败' }
+$guardOutput = Join-Path $PSScriptRoot 'runtime-guard.exe'
+& (Join-Path $framework 'csc.exe') /nologo /codepage:65001 /target:exe /platform:x64 /optimize+ "/out:$guardOutput" ('/reference:' + (Join-Path $framework 'System.Web.Extensions.dll')) (Join-Path $PSScriptRoot 'ProcessGuard.cs')
+if ($LASTEXITCODE -ne 0) { throw '进程保护组件编译失败' }
+$cleanerOutput = Join-Path $PSScriptRoot 'media-cleaner.exe'
+& (Join-Path $framework 'csc.exe') /nologo /codepage:65001 /target:exe /platform:x64 /optimize+ "/out:$cleanerOutput" ('/reference:' + (Join-Path $framework 'System.Web.Extensions.dll')) (Join-Path $PSScriptRoot 'MediaCleanup.cs')
+if ($LASTEXITCODE -ne 0) { throw '媒体维护组件编译失败' }
 # A low-integrity workspace must not lower the desktop app or its Node children.
 & icacls.exe $output /setintegritylevel Medium | Out-Null
 if ($LASTEXITCODE -ne 0) { throw '无法设置桌面程序的普通用户完整性级别，请检查生成文件权限' }

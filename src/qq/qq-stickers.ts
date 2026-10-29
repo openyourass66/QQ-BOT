@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { SocialStore, type SocialData } from './social-store.js';
+import type { SocialData } from './social-store.js';
+import type {SocialRepository} from '../storage/social-repository.js';
 import { MediaService, imageMime } from '../services/media.js';
 import type { OneBotHttp } from './onebot.js';
 
@@ -19,7 +20,7 @@ function nativeSuccess(result: unknown): void {
 /** QQ 收藏是数据源；本地仅保留图片缓存和理解记录。 */
 export class QqStickers {
   private chain: Promise<unknown> = Promise.resolve();
-  constructor(private readonly store: SocialStore, private readonly media: MediaService, private readonly api: OneBotHttp) {}
+  constructor(private readonly store: SocialRepository, private readonly media: MediaService, private readonly api: OneBotHttp) {}
   private serial<T>(run: () => Promise<T>): Promise<T> {
     const next = this.chain.catch(() => undefined).then(run); this.chain = next.catch(() => undefined); return next;
   }
@@ -31,7 +32,7 @@ export class QqStickers {
   }
   private async syncNow(signal: AbortSignal): Promise<Favorite[]> {
     const list = favorites(await this.api.call('fetch_custom_face_detail',{count:2000},signal));
-    const snapshot = this.store.snapshot(), hashes = new Map<string,string>();
+    const snapshot = this.store.view('stickers'), hashes = new Map<string,string>();
     for (const item of snapshot.stickers) {
       if (item.md5 || item.qq?.md5 || !item.file) continue;
       try { hashes.set(item.id,md5Of((await this.media.bytes(item.file,signal)).buffer)); }
@@ -82,12 +83,12 @@ export class QqStickers {
     });
   }
   async collectLegacy(id: string, signal: AbortSignal): Promise<void> {
-    const item=this.store.snapshot().stickers.find(s=>s.id===id);if(!item?.file)throw new Error('本地表情缓存不存在，无法补入 QQ 收藏');
+    const item=this.store.view('stickers').stickers.find(s=>s.id===id);if(!item?.file)throw new Error('本地表情缓存不存在，无法补入 QQ 收藏');
     await this.collect(item.file,signal);
   }
   async image(id: string, signal: AbortSignal): Promise<{type:'image';data:string;mimeType:string}> {
     await this.sync(signal);
-    const item=this.store.snapshot().stickers.find(s=>s.id===id);
+    const item=this.store.view('stickers').stickers.find(s=>s.id===id);
     if(!item?.qqPresent||!item.qq)throw new Error('这张表情当前不在 QQ 收藏中，请先收藏或刷新 QQ 列表');
     if(item.file) {
       try {
@@ -111,7 +112,7 @@ export class QqStickers {
   remove(id: string, signal: AbortSignal): Promise<void> {
     return this.serial(async()=>{
       await this.account(signal);let list=await this.syncNow(signal);
-      const item=this.store.snapshot().stickers.find(s=>s.id===id);if(!item)throw new Error('表情不存在');
+      const item=this.store.view('stickers').stickers.find(s=>s.id===id);if(!item)throw new Error('表情不存在');
       const favorite=list.find(f=>f.resId===item.qq?.resId||f.md5===(item.md5??item.qq?.md5));if(!favorite)return;
       nativeSuccess(await this.api.call('delete_custom_face',{res_id:favorite.resId},signal));
       for(let attempt=0;attempt<5;attempt++){list=await this.syncNow(signal);if(!list.some(f=>f.md5===favorite.md5))return;await new Promise(r=>setTimeout(r,150));signal.throwIfAborted();}

@@ -24,10 +24,10 @@ export const config = {
     token: env('ONEBOT_TOKEN'),
   },
   dsh: {
-    bin: env('BOT_DSH_BIN', 'dsh.cmd'),
+    bin: /[\\/]/.test(env('BOT_DSH_BIN')) ? resolve(env('BOT_DSH_BIN')) : env('BOT_DSH_BIN', 'dsh.cmd'),
     profile: env('BOT_DSH_PROFILE', 'acp'),
-    home: env('BOT_DSH_HOME'),
-    workspace: resolve(env('BOT_WORKSPACE', process.cwd())),
+    home: env('BOT_DSH_HOME') ? resolve(env('BOT_DSH_HOME')) : '',
+    workspace: resolve(env('BOT_WORKSPACE', 'bot-workspace')),
   },
   bot: {
     selfId: num('BOT_SELF_ID', 0),
@@ -43,5 +43,9 @@ export const config = {
     queuePerConversation: boundedNum('QUEUE_PER_CONVERSATION', 5, 1, 100),
     queueTotal: boundedNum('QUEUE_TOTAL', 50, 1, 1000),
     maxConcurrentTurns: boundedNum('MAX_CONCURRENT_TURNS', 4, 1, 32),
+    ingressPerConversation: boundedNum('INGRESS_PER_CONVERSATION', 50, 1, 1000),
+    ingressTotal: boundedNum('INGRESS_TOTAL', 500, 1, 10000),
+    ingressMaxBytes: boundedNum('INGRESS_MAX_BYTES', 16 * 1024 * 1024, 1024, 256 * 1024 * 1024),
+    batchMaxBytes: boundedNum('BATCH_MAX_BYTES', 64 * 1024, 1024, 1024 * 1024),
   },
 };

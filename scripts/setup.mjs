@@ -3,18 +3,19 @@ import { constants } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-export async function setup(root) {
+export async function setup(root, dataRoot = root) {
+  await mkdir(dataRoot, { recursive: true });
   const created = [];
   async function copyMissing(source, destination) {
     try {
-      await copyFile(join(root, source), join(root, destination), constants.COPYFILE_EXCL);
+      await copyFile(join(root, source), join(dataRoot, destination), constants.COPYFILE_EXCL);
       created.push(destination);
     } catch (error) {
       if (error.code !== 'EEXIST') throw error;
     }
   }
   await copyMissing('.env.example', '.env');
-  await mkdir(join(root, 'bot-workspace'), { recursive: true });
+  await mkdir(join(dataRoot, 'bot-workspace'), { recursive: true });
   await copyMissing('templates/bot-persona.md', 'bot-workspace/AGENTS.md');
   return created;
 }

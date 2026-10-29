@@ -1,3 +1,4 @@
+import {copyRuntimeHost} from './helpers/runtime.mjs';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { fork, spawn } from 'node:child_process';
@@ -7,6 +8,7 @@ import { join, resolve } from 'node:path';
 import { createInterface } from 'node:readline';
 import { createServer } from 'node:http';
 import { once } from 'node:events';
+import { pathToFileURL } from 'node:url';
 
 test('桌面配置：中文往返、完整设置校验、无效保存保留文件、工作区切换保护', async () => {
   const root = await mkdtemp(join(tmpdir(), 'qq-desktop-config-'));
@@ -71,7 +73,8 @@ test('桌面配置：中文往返、完整设置校验、无效保存保留文�
 test('桌面控制：重复启动、模型重连、完整重启、仅在配置保存成功后重启和退出清理', async () => {
   const root = await mkdtemp(join(tmpdir(), 'qq-desktop-host-'));
   for (const dir of ['desktop', 'dist', 'scripts']) await mkdir(join(root, dir));
-  await cp(resolve('desktop/host.mjs'), join(root, 'desktop/host.mjs'));
+  await copyRuntimeHost(root);
+  for (const file of ['app-paths.mjs', 'setup.mjs', 'component-paths.mjs']) await cp(resolve('scripts', file), join(root, 'scripts', file));
   await writeFile(join(root, 'desktop/diagnostics.mjs'), "export async function diagnose(){return {ok:true,rows:[]}}; export async function environment(){return {ONEBOT_TOKEN:'secret-test-token'}}; export async function onebotOnline(){return false};");
   await writeFile(join(root, 'dist/bridge.js'), "console.log('bridge-started'); console.log('token=secret-test-token'); process.on('message', m => { if (m === 'shutdown') { console.log('graceful-stop'); process.exit(); } }); setInterval(() => {}, 1000);");
   await writeFile(join(root, 'scripts/napcat-node.mjs'), "console.log('napcat-started'); setInterval(() => {}, 1000);");
@@ -148,4 +151,22 @@ test('启动诊断识别缺失运行依赖，不把进程启动误判成连接�
     assert.ok(result.rows.some(row => row.name === '机器人构建文件' && !row.ok));
     assert.ok(result.rows.some(row => row.name === 'NapCat Node 适配库' && !row.ok));
   } finally { await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }); }
+});
+
+test('桌面空间检查复用当前输入的 QQ 连接，不保存草稿、不发评论或泄露凭据',async()=>{
+  const root=await mkdtemp(join(tmpdir(),'qq-desktop-space-')),calls=[];
+  const http=createServer(async(req,res)=>{let raw='';for await(const chunk of req)raw+=chunk;calls.push({path:req.url,token:req.headers.authorization,args:JSON.parse(raw)});res.setHeader('content-type','application/json');res.end(JSON.stringify({status:'ok',retcode:0,data:req.url==='/get_login_info'?{user_id:10000}:{cookies:'uin=o10000; p_uin=o10000; p_skey=fixture-private-space-cookie'}}));});
+  http.listen(0,'127.0.0.1');await once(http,'listening');
+  const worker=data=>new Promise((done,reject)=>{
+    const child=fork(resolve('desktop/config-worker.mjs'),[],{cwd:root,env:{...process.env,BOT_SETTINGS_FILE:join(root,'settings.json'),BOT_WORKSPACE:root},execArgv:['--import',pathToFileURL(resolve('tests/fixtures/qzone-fetch.mjs')).href],silent:true});
+    let reply;child.once('message',value=>{reply=value;});child.once('exit',()=>reply?done(reply):reject(new Error('空间检查未返回结果')));child.once('error',reject);child.send({action:'qzone-check',data});
+  });
+  try {
+    const original='# original connection\nONEBOT_HTTP_URL=http://127.0.0.1:1\nONEBOT_TOKEN=old-fixture-token\nBOT_QZONE_ADAPTER_URL=https://unused.example/\n';await writeFile(join(root,'.env'),original);
+    const checked=await worker({runtime:{ONEBOT_HTTP_URL:`http://127.0.0.1:${http.address().port}`,ONEBOT_TOKEN:'input-fixture-token'}});
+    assert.equal(checked.ok,true);assert.equal(checked.result.account,10000);assert.match(checked.result.message,/空间连接正常/);
+    assert.deepEqual(calls.map(call=>call.path),['/get_login_info','/get_cookies']);assert.equal(calls[1].args.domain,'user.qzone.qq.com');assert.ok(calls.every(call=>call.token==='Bearer input-fixture-token'));
+    assert.doesNotMatch(JSON.stringify(checked),/fixture-private-space-cookie|input-fixture-token/);assert.equal(await readFile(join(root,'.env'),'utf8'),original);
+    assert.equal((await worker({runtime:{BOT_QZONE_ADAPTER_URL:'https://example.test/'}})).ok,false);
+  }finally{http.closeAllConnections();await new Promise(done=>http.close(done));await rm(root,{recursive:true,force:true,maxRetries:10,retryDelay:100});}
 });

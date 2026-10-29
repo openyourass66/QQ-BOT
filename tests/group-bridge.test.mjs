@@ -8,6 +8,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { WebSocketServer } from 'ws';
 import { withTimeout } from '../dist/core/runtime.js';
+import {DatabaseSync} from 'node:sqlite';
 
 test('群聊链路：连续 @、排队上下文、引用、追问、异常反馈与重启恢复', { timeout: 30000 }, async () => {
   const dir = await mkdtemp(join(tmpdir(), 'qq-group-'));
@@ -25,6 +26,7 @@ test('群聊链路：连续 @、排队上下文、引用、追问、异常反馈
   const ws = new WebSocketServer({ port: 0, host: '127.0.0.1' }); if (!ws.address()) await once(ws, 'listening');
   const settingsFile = join(dir, 'settings.json'), promptsFile = join(dir, 'prompts.jsonl');
   const contextFile = join(dir, 'group-context.json');
+  const persistedGroups=()=>{const db=new DatabaseSync(contextFile+'.sqlite',{readOnly:true});try{const rows=db.prepare("SELECT payload FROM entity_state WHERE key<>'$groups'").all().map(row=>JSON.parse(row.payload));const groups={};for(const row of rows.sort((a,b)=>a.position-b.position))(groups[row.group]??=[]).push(row.entry);return groups;}finally{db.close();}};
   await writeFile(settingsFile, JSON.stringify({ identity: { name: '小鲸鱼' }, chat: { group: { cooldownMs: 60000, contextLines: 30, proactive: { enabled: true } }, delay: { minMs: 0, maxMs: 0, chunkSize: 4000 } } }));
   const fixture = resolve('tests/fixtures/fake-dsh.mjs'), wrapper = join(dir, process.platform === 'win32' ? 'fake.cmd' : 'fake-dsh');
   await writeFile(wrapper, process.platform === 'win32' ? `@echo off\r\n"${process.execPath}" "${fixture}"\r\n` : `#!/bin/sh\nexec "${process.execPath}" "${fixture}"\n`, { mode: 0o700 });
@@ -37,7 +39,7 @@ test('群聊链路：连续 @、排队上下文、引用、追问、异常反馈
     const last = sent.at(-1);
     if (!last) return true;
     try {
-      const { groups } = JSON.parse(await readFile(contextFile, 'utf8'));
+      const groups=persistedGroups();
       return groups[`10000:${last.group_id}`]?.some((entry) => entry.messageId === last.messageId);
     } catch (error) { if (error.code === 'ENOENT') return false; throw error; }
   });
@@ -118,7 +120,7 @@ test('群聊链路：连续 @、排队上下文、引用、追问、异常反馈
     assert.equal(sent.slice(beforeOverflow).filter((item) => item.message.includes('消息有点多')).length, 1);
 
     await stop();
-    const persisted = JSON.parse(await readFile(contextFile, 'utf8')).groups['10000:30001'];
+    const persisted = persistedGroups()['10000:30001'];
     assert.ok(persisted.some((item) => item.role === 'user' && item.text.includes('问题甲')));
     assert.ok(persisted.some((item) => item.role === 'assistant' && item.text === '群回答 1'));
     const previousSent = sent.length;

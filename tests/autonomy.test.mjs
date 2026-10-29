@@ -13,6 +13,7 @@ import { QqActionPolicy } from '../dist/qq/qq-actions.js';
 import { socialAdmin } from '../dist/qq/social-admin.js';
 import { imageHash } from '../dist/qq/sticker-review.js';
 import { fakeQqFavorites, mockStickerAnalysis, completeCollection } from './helpers/sticker-review.mjs';
+import {IntervalClock} from '../dist/core/interval-clock.js';
 
 const minute=60000,hour=3600000;
 const png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jP1kAAAAASUVORK5CYII=','base64');
@@ -33,7 +34,7 @@ async function fixture(run) {
       if(action==='send_qzone_msg')return {tid:'post-'+next++};return {message_id:next++};
     }};
     const engine=new SocialEngine(store,media,api,usage,()=>settings,async()=>true,()=>{},()=>{});
-    const autonomy=new Autonomy(store,()=>settings,usage,()=>clock.now,media);engine.autonomy=autonomy;
+    const autonomy=new Autonomy(store,()=>settings,usage,()=>clock.now,media,new IntervalClock(()=>clock.now,()=>clock.now));engine.autonomy=autonomy;
     const policy=new QqActionPolicy(api,usage,()=>settings,async()=>true);
     const ctx=(extra={})=>({chat:'private:20001',self:10000,user:20001,sent:0,silent:false,signal:new AbortController().signal,...extra});
     const call=(tool,args={},context=ctx())=>engine.execute({action:'social',tool,args},context);

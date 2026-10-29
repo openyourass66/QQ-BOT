@@ -83,7 +83,7 @@ test('完整桥接链路：群上下文、连续回复顺序、超时恢复、DS
       env: { ...process.env,
         ONEBOT_HTTP_URL: `http://127.0.0.1:${http.address().port}`,
         ONEBOT_WS_URL: `ws://127.0.0.1:${wsServer.address().port}`,
-        ONEBOT_TOKEN: '', BOT_SELF_ID: '10000', ADMIN_QQ: '0', ALLOW_EXEC: '0',
+        ONEBOT_TOKEN: 'fixture-onebot-token', BOT_MEDIA_API_KEY:'fixture-private-media',BOT_LEARNING_API_KEY:'fixture-private-learning',BOT_SELF_ID: '10000', ADMIN_QQ: '0', ALLOW_EXEC: '0',
         BOT_DSH_BIN: wrapper, BOT_WORKSPACE: dir, BOT_DSH_PROFILE: 'acp',
         BOT_CHAT_MODE: 'project', BOT_CHAT_MODEL: 'test-project-model', QQ_BOT_DEEPSEEK_API_KEY: 'project-test-key',
         FAKE_MODEL_EVENTS: join(dir, 'model-events.jsonl'),
@@ -121,24 +121,25 @@ test('完整桥接链路：群上下文、连续回复顺序、超时恢复、DS
     assert.match(privateReplies[2].message, /第二条/);
     const modelEvents = (await readFile(join(dir, 'model-events.jsonl'), 'utf8')).trim().split('\n').map(JSON.parse);
     assert.ok(modelEvents[0].args.includes('--patch'));
+    assert.equal(modelEvents[0].serviceCredentialsPresent,false,'DSH 不应继承 QQ、媒体或后台分析凭据');
     assert.equal(modelEvents[0].args.at(-1), join(dir, 'dsh', 'chat-model.patch.json'));
     assert.ok(modelEvents.some(event => event.sessionId === 'saved-private' && event.value === JSON.stringify(['deepseek-official', 'test-project-model'])));
     assert.ok(modelEvents.some(event => event.sessionId === 'test-session-1' && event.configId === 'model'));
     assert.ok(!(await readFile(join(dir, 'dsh', 'chat-model.patch.json'), 'utf8')).includes('project-test-key'));
 
-    send('MCP点赞');
+    send('MCP点赞', false, 12345);
     await waitReply((r) => r.message === 'MCP调用成功');
-    send('MCP点赞');
+    send('MCP点赞', false, 12345);
     await waitReply((r) => r.message.includes('MCP拒绝:') && r.message.includes('额度不足'));
     assert.equal(likes, 1);
 
     let after = replies.length;
-    send('MCP空间');
+    send('MCP空间', false, 12345);
     const cancelledApproval = await waitReply((r) => r.user_id === 12345 && r.message.includes('审批正文'), after);
     const cancelledId = /授权请求 #([a-f0-9]{6})/.exec(cancelledApproval.message)[1];
     await waitReply((r) => r.message.includes('走神'), after);
     after = replies.length;
-    send('MCP空间');
+    send('MCP空间', false, 12345);
     const approval = await waitReply((r) => r.user_id === 12345 && r.message.includes('审批正文'), after);
     assert.match(approval.message, /https:\/\/example.test\/picture.png/);
     assert.equal(posts, 0);
@@ -163,7 +164,7 @@ test('完整桥接链路：群上下文、连续回复顺序、超时恢复、DS
     send('恢复成功');
     await waitReply((r) => r.message.includes('恢复成功'));
     after = replies.length;
-    send('MCP点赞');
+    send('MCP点赞', false, 12345);
     await waitReply((r) => r.message.includes('MCP拒绝:') && r.message.includes('额度不足'), after);
     send('测试崩溃');
     const [code] = await withTimeout(exited, 8000);

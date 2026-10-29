@@ -136,7 +136,8 @@ test('取消中的空间审批不会发布；参数不能自报 confirmed 绕过
 test('真实 MCP 子进程共用桥接额度，鉴权失败及未知动作不触发远端', () => fixture(async ({ makePolicy, settings, calls }) => {
   settings.budgets.likesPerDay = 1;
   const policy = makePolicy();
-  const service = await startActionServer((input, abort) => policy.execute(input, abort));
+  const traces=[];
+  const service = await startActionServer((input, abort,_conversation,operationId) => {traces.push(operationId);return policy.execute(input, abort);});
   const clients = [];
   try {
     assert.equal((await fetch(`${service.url}/actions`, { method: 'POST', body: '{}' })).status, 401);
@@ -152,6 +153,7 @@ test('真实 MCP 子进程共用桥接额度，鉴权失败及未知动作不触
       }));
     }
     const results = await Promise.all(clients.map((client) => client.callTool({ name: 'qq_like', arguments: { user_id: 12345 } })));
+    const sdkTraces=traces.filter(Boolean);assert.equal(sdkTraces.length,2);assert.ok(sdkTraces.every(id=>/^[a-f0-9]{64}$/.test(id)));assert.notEqual(sdkTraces[0],sdkTraces[1]);
     assert.equal(results.filter((result) => result.isError === true).length, 1);
     assert.match(JSON.stringify(results), /额度不足/);
     assert.equal(calls.length, 1);
@@ -181,4 +183,15 @@ test('关闭动作服务会取消待审批请求', async () => {
   await service.close();
   await request;
   assert.equal(cancelled, true);
+});
+
+test('动作 HTTP 接口在读取请求前拒绝错误编号并限制三十二个活动请求',async()=>{
+  let release;const gate=new Promise(done=>{release=done;});let entered=0;
+  const service=await startActionServer(async()=>{entered++;await gate;return {done:true};}),headers={authorization:`Bearer ${service.token}`,'content-type':'application/json','x-bot-operation':'a'.repeat(64)},requests=[];
+  try{
+    assert.equal((await fetch(`${service.url}/actions`,{method:'POST',headers:{...headers,'x-bot-operation':'invalid'},body:'{}'})).status,400);assert.equal(entered,0);
+    for(let i=0;i<32;i++)requests.push(fetch(`${service.url}/actions`,{method:'POST',headers,body:'{}'}));
+    const end=Date.now()+5000;while(entered<32){if(Date.now()>end)throw new Error('并发请求没有就绪');await new Promise(done=>setTimeout(done,10));}
+    assert.equal((await fetch(`${service.url}/actions`,{method:'POST',headers,body:'{}'})).status,429);assert.equal(entered,32);release();assert.ok((await Promise.all(requests)).every(response=>response.status===200));
+  }finally{release();await Promise.allSettled(requests);await service.close();}
 });
