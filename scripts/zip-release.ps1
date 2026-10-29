@@ -11,4 +11,25 @@ foreach ($path in @($releaseRoot.TrimEnd('\'), $sourcePath)) {
 }
 if (Get-Item -LiteralPath $targetPath -Force -ErrorAction SilentlyContinue) { throw 'Archive target already exists' }
 Add-Type -AssemblyName System.IO.Compression.FileSystem
-[IO.Compression.ZipFile]::CreateFromDirectory($sourcePath,$targetPath,[IO.Compression.CompressionLevel]::Optimal,$true)
+Add-Type -AssemblyName System.IO.Compression
+$temporaryPath = $targetPath + '.tmp-' + [guid]::NewGuid().ToString('N')
+$archive = $null
+try {
+    $archive = [IO.Compression.ZipFile]::Open($temporaryPath,[IO.Compression.ZipArchiveMode]::Create)
+    function Write-ArchiveDirectory([string]$Directory,[string]$Prefix) {
+        $entries = @(Get-ChildItem -LiteralPath $Directory -Force)
+        if ($entries.Count -eq 0) { [void]$archive.CreateEntry($Prefix); return }
+        foreach ($entry in $entries) {
+            if ($entry.Attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'Archive input must not contain links' }
+            $name = $Prefix + $entry.Name
+            if ($entry.PSIsContainer) { Write-ArchiveDirectory $entry.FullName ($name + '/') }
+            else { [void][IO.Compression.ZipFileExtensions]::CreateEntryFromFile($archive,$entry.FullName,$name,[IO.Compression.CompressionLevel]::Optimal) }
+        }
+    }
+    Write-ArchiveDirectory $sourcePath ((Split-Path -Leaf $sourcePath) + '/')
+    $archive.Dispose(); $archive = $null
+    [IO.File]::Move($temporaryPath,$targetPath)
+} finally {
+    if ($archive) { $archive.Dispose() }
+    if (Test-Path -LiteralPath $temporaryPath) { Remove-Item -LiteralPath $temporaryPath -Force }
+}
