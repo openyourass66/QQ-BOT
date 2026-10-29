@@ -10,6 +10,10 @@
 
 QQ 原生库的资料目录通过实例适配器指向当前数据目录的 `napcat/qq-profile/`。适配器只在加载固定组件的 `wrapper.node` 时包装公开入口，不修改二进制、系统 QQ 路径配置或其它模块。原生入口结构不兼容时拒绝继续启动。NapCat 的配置和工作文件仍位于 `napcat/node-runtime/`，组件更新不会重新选择系统 QQ 账号目录。
 
+本机启动器启用 NapCat 主进程管理登录 Worker，以便登录失效时重建登录服务。受管模式通过继承的 `--import` 在每个新建 Worker 加载原生库前安装上述目录隔离；重建后仍使用同一实例的资料、配置和登录材料。缺少绝对实例路径时拒绝启动；不通过清空登录数据恢复服务。手工 Shell 模式保留原有资料位置，外部 OneBot 不由本程序重启。
+
+更新启动脚本后须在工作台点击「重新启动」，仅「重连模型」不会更新 QQ 进程。登录凭据失效或要求额外验证时，仍须在登录窗口或本机 WebUI 按官方流程重新扫码和验证。当前修复先纳入源码；既有 `rc5` 和已打开的旧候选窗口不包含此改动。
+
 WebUI 凭据只在管理进程内存中缓存，支持文件令牌轮换与有限的认证重试；不会把上游敏感错误原文转发到工作台。主工作日志隐藏上游输出的 WebUI 令牌、登录 URL 和终端二维码。NapCat 自己仍可能在其缓存和日志中保存登录二维码、账号材料，应保护整个数据目录，默认诊断与分发不得包含这些目录。不能把工作台日志脱敏描述为上游从不落盘。
 
 登录适配使用固定版本的[QQ 登录路由](https://github.com/NapNeko/NapCatQQ/blob/v4.18.41/packages/napcat-webui-backend/src/router/QQLogin.ts)和[认证路由](https://github.com/NapNeko/NapCatQQ/blob/v4.18.41/packages/napcat-webui-backend/src/router/auth.ts)，默认网络配置格式参照[官方说明](https://napneko.github.io/config/basic)。实现为独立适配，尚不承诺其它 NapCat 版本兼容。

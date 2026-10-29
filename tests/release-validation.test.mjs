@@ -27,6 +27,7 @@ test('发行校验发现缺失的生产依赖、语法错误和越界引用',()=
 
 test('发行校验拒绝遗漏的登录模块、原生保护助手与个人数据',()=>fixture(async({root,write})=>{
   await rm(join(root,'scripts/qq-runtime.mjs'));await assert.rejects(validateRelease(root),/qq-runtime/);await write('scripts/qq-runtime.mjs');
+  await rm(join(root,'scripts/qq-profile-preload.mjs'));await assert.rejects(validateRelease(root),/qq-profile-preload/);await write('scripts/qq-profile-preload.mjs');
   await rm(join(root,'desktop/runtime-guard.exe'));await assert.rejects(validateRelease(root),/runtime-guard/);await write('desktop/runtime-guard.exe');
   await write('.env','fixture-private-token');await assert.rejects(validateRelease(root),/个人配置/);await rm(join(root,'.env'));await mkdir(join(root,'user-data'));await assert.rejects(validateRelease(root),/user-data/);
 }));

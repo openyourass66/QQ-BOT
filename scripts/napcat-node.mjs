@@ -14,6 +14,11 @@ if (process.platform !== 'win32') throw new Error('此 NapCat Node 启动器仅�
 const managed = await installedComponent('napcat',layout.dataRoot,root);
 const selectedShell = resolve(layout.dataRoot,process.env.BOT_NAPCAT_DIR || 'napcat/shell');
 const managedSelected = managed && selectedShell === join(managed.directory,'napcat');
+// 登录失效后由 NapCat 主进程重建 Worker，单进程模式不会初始化重启回调。
+const processMode = {
+  NAPCAT_DISABLE_PIPE:'1',NAPCAT_DISABLE_MULTI_PROCESS:'0',NAPCAT_DISABLE_MULTIPROCESSING:'0',
+  NAPCAT_FORCE_NODE_PROCESS:'1',NAPCAT_WORKER_PROCESS:'0',
+};
 if (managedSelected && resolve(process.execPath).toLowerCase() !== join(managed.directory,'node.exe').toLowerCase()) {
   // 命令行也使用组件自己的原生运行库，与桌面入口保持一致。
   await new Promise((done,reject) => {
@@ -28,6 +33,8 @@ if (managedSelected && resolve(process.execPath).toLowerCase() !== join(managed.
   const profile = join(layout.dataRoot,'napcat/qq-profile');
   await mkdir(profile,{recursive:true,mode:0o700});
   installQQProfileIsolation(join(managed.directory,'wrapper.node'),profile);
+  // 固定组件通过 fork 创建和重建登录 Worker；每次启动都须先安装实例隔离。
+  process.execArgv.push('--import',new URL('./qq-profile-preload.mjs',import.meta.url).href);
   await mkdir(join(runtime,'config'),{recursive:true});
   try { await writeFile(join(runtime,'config/webui.json'),JSON.stringify({host:'127.0.0.1',port:6099,token:randomBytes(24).toString('hex')},null,2)+'\n',{flag:'wx'}); }
   catch(error){if(error.code!=='EEXIST')throw error;}
@@ -35,7 +42,7 @@ if (managedSelected && resolve(process.execPath).toLowerCase() !== join(managed.
     NAPCAT_WRAPPER_PATH:join(managed.directory,'wrapper.node'),
     NAPCAT_QQ_PACKAGE_INFO_PATH:join(managed.directory,'package.json'),
     NAPCAT_QQ_VERSION_CONFIG_PATH:join(managed.directory,'config.json'),
-    NAPCAT_DISABLE_PIPE:'1',NAPCAT_DISABLE_MULTI_PROCESS:'1',NAPCAT_WORKDIR:runtime,
+    ...processMode,NAPCAT_WORKDIR:runtime,
     NAPCAT_QUICK_ACCOUNT:/^\d+$/.test(process.env.BOT_SELF_ID||'')&&process.env.BOT_SELF_ID!=='0'?process.env.BOT_SELF_ID:'',
   });
   process.chdir(runtime);
@@ -76,7 +83,7 @@ Object.assign(process.env, {
   NAPCAT_WRAPPER_PATH: join(runtime, 'wrapper.node'),
   NAPCAT_QQ_PACKAGE_INFO_PATH: join(runtime, 'package.json'),
   NAPCAT_QQ_VERSION_CONFIG_PATH: join(runtime, 'config.json'),
-  NAPCAT_DISABLE_PIPE: '1', NAPCAT_DISABLE_MULTI_PROCESS: '1',
+  ...processMode,
   NAPCAT_WORKDIR: runtime, NAPCAT_QUICK_ACCOUNT: process.env.BOT_SELF_ID || '',
 });
 // 部分原生组件按工作目录写数据库，统一放入被忽略的运行目录。
