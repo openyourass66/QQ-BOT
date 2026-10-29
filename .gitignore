@@ -36,6 +36,14 @@
 # 运行时数据：会话、聊天存档、媒体、个人记忆与人设库
 /data/
 /bot-workspace/
+/dsh/
+
+# 源码模式的组件安装产物；固定清单、DSH package 文件和许可继续提交
+/components/active.json
+/components/.staging/
+/components/node/
+/components/napcat/
+/components/dsh/*/
 
 # NapCat 运行时（含账号配置与依赖）
 /napcat/
