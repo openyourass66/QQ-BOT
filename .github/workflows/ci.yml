@@ -35,7 +35,9 @@ jobs:
       - name: 检查类型
         run: npm run typecheck
       - name: 隔离回归
-        run: npm run test:isolated -- --test-concurrency=2
+        # Windows 的 SQLite/ACP/DPAPI 子进程启动较重，避免跨文件争用放大等待时间。
+        # 文件内部的并发、抢锁与额度竞争检查仍完整执行。
+        run: npm run test:isolated -- --test-concurrency=${{ runner.os == 'Windows' && 1 || 2 }}
       - name: 编译 Windows 工作台
         if: matrix.os == 'windows-latest' && matrix.node == '24'
         run: npm run desktop:build
