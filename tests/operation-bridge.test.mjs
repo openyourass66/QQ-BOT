@@ -8,6 +8,7 @@ import {mkdtemp,writeFile,readFile,rm} from 'node:fs/promises';
 import {join,resolve} from 'node:path';
 import {tmpdir} from 'node:os';
 import {readSocialData} from './helpers/social-data.mjs';
+import {withTimeout} from '../dist/core/runtime.js';
 
 test('真实桥接绑定本轮身份：HTTP 重复只发送一次，换正文和自报编号拒绝，未知结果不重发', {timeout:25000},async()=>{
   const root=await mkdtemp(join(tmpdir(),'qq-operation-bridge-')),calls=[];let child,output='',next=100;
@@ -20,10 +21,10 @@ test('真实桥接绑定本轮身份：HTTP 重复只发送一次，换正文和
   const events=join(root,'events.jsonl'),social=join(root,'social.json');
   const until=async check=>{const end=Date.now()+8000;while(!await check()){if(Date.now()>end)throw new Error('等待事务桥接超时\n'+output);await new Promise(done=>setTimeout(done,25));}};
   try{
-    const wrapper=join(root,process.platform==='win32'?'dsh.cmd':'dsh'),script=resolve('tests/fixtures/fake-dsh.mjs');await writeFile(wrapper,process.platform==='win32'?`@echo off\r\n"${process.execPath}" "${script}"\r\n`:`#!/bin/sh\nexec "${process.execPath}" "${script}"\n`,{mode:0o700});
+    const wrapper=join(root,process.platform==='win32'?'dsh.cmd':'fixture-dsh'),script=resolve('tests/fixtures/fake-dsh.mjs');await writeFile(wrapper,process.platform==='win32'?`@echo off\r\n"${process.execPath}" "${script}"\r\n`:`#!/bin/sh\nexec "${process.execPath}" "${script}"\n`,{mode:0o700});
     await writeFile(join(root,'settings.json'),JSON.stringify({chat:{delay:{minMs:0,maxMs:0}},social:{autonomy:'autonomous',actionsPerMinute:100}}));const connected=once(ws,'connection');
     child=spawn(process.execPath,[resolve('dist/bridge.js')],{env:{...process.env,BOT_DSH_BIN:wrapper,BOT_WORKSPACE:root,ONEBOT_HTTP_URL:`http://127.0.0.1:${http.address().port}`,ONEBOT_WS_URL:`ws://127.0.0.1:${ws.address().port}`,SESSION_STORE:join(root,'sessions.json'),BOT_SOCIAL_STORE:social,BOT_SETTINGS_FILE:join(root,'settings.json'),BOT_SELF_ID:'10000',FAKE_OPERATION_EVENTS:events,TURN_TIMEOUT_MS:'6000'},stdio:['ignore','pipe','pipe']});for(const stream of [child.stdout,child.stderr])stream.on('data',chunk=>output+=chunk);
-    const [socket]=await connected,readEvents=async()=>{try{return (await readFile(events,'utf8')).trim().split('\n').filter(Boolean).map(JSON.parse);}catch(error){if(error.code==='ENOENT')return [];throw error;}};
+    const [socket]=await withTimeout(connected,10000),readEvents=async()=>{try{return (await readFile(events,'utf8')).trim().split('\n').filter(Boolean).map(JSON.parse);}catch(error){if(error.code==='ENOENT')return [];throw error;}};
     for(let id=1;id<=2;id++){
       socket.send(JSON.stringify({post_type:'message',message_type:'private',self_id:10000,user_id:20001,message_id:id,time:Math.floor(Date.now()/1000),message:[{type:'text',data:{text:'OPERATION_REPLAY'}}],sender:{user_id:20001,nickname:'测试好友'}}));
       await until(async()=>(await readEvents()).length>=id);await until(async()=>(await readSocialData(social)).turns.length>=id);

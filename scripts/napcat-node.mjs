@@ -3,7 +3,7 @@ import { randomBytes } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { enterRuntime, prepareRuntime } from './app-paths.mjs';
+import { enterRuntime, prepareRuntime, sameRuntimePath } from './app-paths.mjs';
 import { installedComponent } from './component-paths.mjs';
 import { installQQProfileIsolation } from './qq-profile.mjs';
 
@@ -13,13 +13,13 @@ enterRuntime(layout);
 if (process.platform !== 'win32') throw new Error('此 NapCat Node 启动器仅支持 Windows');
 const managed = await installedComponent('napcat',layout.dataRoot,root);
 const selectedShell = resolve(layout.dataRoot,process.env.BOT_NAPCAT_DIR || 'napcat/shell');
-const managedSelected = managed && selectedShell === join(managed.directory,'napcat');
+const managedSelected = managed && await sameRuntimePath(selectedShell,join(managed.directory,'napcat'));
 // 登录失效后由 NapCat 主进程重建 Worker，单进程模式不会初始化重启回调。
 const processMode = {
   NAPCAT_DISABLE_PIPE:'1',NAPCAT_DISABLE_MULTI_PROCESS:'0',NAPCAT_DISABLE_MULTIPROCESSING:'0',
   NAPCAT_FORCE_NODE_PROCESS:'1',NAPCAT_WORKER_PROCESS:'0',
 };
-if (managedSelected && resolve(process.execPath).toLowerCase() !== join(managed.directory,'node.exe').toLowerCase()) {
+if (managedSelected && !await sameRuntimePath(process.execPath,join(managed.directory,'node.exe'))) {
   // 命令行也使用组件自己的原生运行库，与桌面入口保持一致。
   await new Promise((done,reject) => {
     const child = spawn(join(managed.directory,'node.exe'),[fileURLToPath(import.meta.url)],{cwd:layout.dataRoot,env:process.env,stdio:'inherit',windowsHide:true});

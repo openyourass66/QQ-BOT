@@ -2,7 +2,7 @@
 
 基于 DSH（ACP）与 NapCat（OneBot 11）的 QQ 机器人，提供 Windows 原生 WPF 控制台，支持私聊、群聊、人设、长期记忆和受权限与额度约束的 QQ 操作。
 
-当前为 **0.2.0 开发版本**，主要交付平台是 Windows 10/11 x64。本机候选已完成真实 QQ 登录和私聊回复，最新源码全量隔离回归为 **478 项通过**；安装程序、完整备份恢复界面、升级回退、干净系统及长时验收仍待完成。实施范围见[精简改造方案](docs/product-readiness-plan.md)，实际结果见[实施进展](docs/implementation-status.md)。
+当前为 **0.2.0 开发版本**，主要交付平台是 Windows 10/11 x64。本机候选已完成真实 QQ 登录和私聊回复，最新源码全量隔离回归为 **481 项通过**；安装程序、完整备份恢复界面、升级回退、干净系统及长时验收仍待完成。实施范围见[精简改造方案](docs/product-readiness-plan.md)，实际结果见[实施进展](docs/implementation-status.md)。
 
 现有 `rc5` 候选来源为 `a756d38`，尚未包含后续登录进程重建修复。源码更新和候选包分别记录版本；合并主分支不代表正式发行验收完成。
 
@@ -34,7 +34,7 @@ QQ ↔ NapCat / OneBot 11 ↔ bridge ↔ DSH（ACP）
 
 以下为源码运行要求。完整候选包内置应用 Node 和生产依赖，无需另装开发工具；首次使用仍需联网准备 QQ/DSH 组件并配置模型，详见[组件与打包](docs/components-and-packaging.md)。
 
-- Node.js **22.13–22.x，或 24 及以上**，以及 npm。
+- Node.js **22.20–22.x，或 24 及以上**，以及 npm。旧 Node 22.13 已复现数据库原生崩溃，不作为应用运行环境；QQ 组件仍使用固定包内独立运行库。
 - 模型凭据和网络；DSH 可在工作台中准备，也可使用自行维护的配置。
 - 原生桌面端需要 Windows 10/11 与 .NET Framework 4.8，无需 Electron 或 .NET SDK。
 - QQ 账号；可在工作台准备固定 NapCat 组件并扫码，也可连接已有 OneBot 服务。

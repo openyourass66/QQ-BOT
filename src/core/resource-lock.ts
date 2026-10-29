@@ -1,6 +1,7 @@
 import { lstat, mkdir, realpath, stat } from 'node:fs/promises';
 import { basename, dirname, join, resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
+import { assertApplicationRuntime } from './node-runtime.js';
 
 export class ResourceLockedError extends Error {
   readonly code = 'BOT_RESOURCE_LOCKED';
@@ -39,6 +40,7 @@ export async function acquireDataResources(
   resources: ReadonlyArray<{ path: string; label: string }>,
   signal?: AbortSignal,
 ): Promise<ResourceLease> {
+  assertApplicationRuntime();
   const resolved = new Map<string, string>();
   for (const resource of resources) {
     signal?.throwIfAborted();
