@@ -1,3 +1,5 @@
+import {readSocialData} from './helpers/social-data.mjs';
+import {readSessionMappings} from './helpers/runtime-data.mjs';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
@@ -12,7 +14,6 @@ import { DEFAULT_SETTINGS } from '../dist/core/settings.js';
 async function scenario(fail,learning=false,changePolicy=false) {
   const root=await mkdtemp(join(tmpdir(),'qq-intelligence-bridge-')),replies=[],analysisRequests=[];let child,output='',message=100;
   const http=createServer(async(req,res)=>{let raw='';for await(const c of req)raw+=c;let data={};
-    if(req.url==='/search'){res.setHeader('content-type','application/json');res.end(JSON.stringify({results:[{title:'Fixture source',url:'https://example.test/source',snippet:'Fixture snippet'}]}));return;}
     if(req.url==='/v1/messages'){analysisRequests.push(JSON.parse(raw));res.setHeader('content-type','application/json');res.end(JSON.stringify({content:[{type:'text',text:JSON.stringify({memories:[{user:'20001',text:'喜欢喝黑咖啡',evidence:[{messageId:11,quote:'我一直喜欢喝黑咖啡'}]}],lexicon:[]})}],usage:{input_tokens:123,output_tokens:45}}));return;}
     if(req.url==='/get_login_info')data={user_id:10000,nickname:'测试'};
     if(req.url==='/get_group_list')data=[{group_id:30001,group_name:'测试群'}];
@@ -22,19 +23,19 @@ async function scenario(fail,learning=false,changePolicy=false) {
   });
   http.listen(0,'127.0.0.1');await once(http,'listening');const ws=new WebSocketServer({port:0,host:'127.0.0.1'});if(!ws.address())await once(ws,'listening');
   const connected=once(ws,'connection'),settings=structuredClone(DEFAULT_SETTINGS),events=join(root,'events.jsonl');
-  settings.context.filterTools=true;settings.context.rollover=true;settings.social.filesEnabled=false;settings.social.mediaEnabled=false;settings.chat.delay.minMs=0;settings.chat.delay.maxMs=0;
+  settings.context.filterTools=true;settings.context.rollover=true;settings.context.toolsPerTurn=2;settings.social.filesEnabled=false;settings.social.mediaEnabled=false;settings.chat.delay.minMs=0;settings.chat.delay.maxMs=0;
   if(changePolicy)settings.context.rollover=false;
   if(learning){Object.assign(settings.learning,{memory:true,chats:['group:30001'],minMessages:3,idleMinutes:1});await writeFile(join(root,'social.json'),JSON.stringify({version:1,account:10000,messages:[11,12,13].map(id=>({id,chat:'group:30001',user:20001,name:'甲',at:Date.now()-600000+id,text:id===11?'我一直喜欢喝黑咖啡':'这是普通聊天文字 '+id,segments:[{type:'text',data:{text:'文字'}}],self:false,recalled:false})),contacts:[],memories:[],stickers:[],tasks:[],events:[],actions:[],turns:[]}));}
   const settingsPath=join(root,'settings.json');await writeFile(settingsPath,JSON.stringify(settings));await writeFile(join(root,'AGENTS.md'),'测试人设');
   const wrapper=join(root,process.platform==='win32'?'intelligence dsh.cmd':'intelligence-dsh'),fake=resolve('tests/fixtures/intelligence-dsh.mjs');
   await writeFile(wrapper,process.platform==='win32'?`@echo off\r\n"${process.execPath}" "${fake}" %*\r\n`:`#!/bin/sh\nexec "${process.execPath}" "${fake}" "$@"\n`,{mode:0o700});
   const wait=async predicate=>{const until=Date.now()+10000;while(Date.now()<until){if(await predicate())return;await new Promise(done=>setTimeout(done,40));}throw new Error('fixture timeout: '+output.slice(-1400));};
-  const data=async name=>JSON.parse(await readFile(join(root,name),'utf8'));
+  const data=async name=>name==='social.json'?readSocialData(join(root,name)):name==='sessions.json'?readSessionMappings(join(root,name)):JSON.parse(await readFile(join(root,name),'utf8'));
   try{
     child=spawn(process.execPath,[resolve('dist/bridge.js')],{env:{...process.env,BOT_CHAT_MODE:'profile',BOT_DSH_BIN:wrapper,BOT_DSH_PROFILE:'acp',BOT_WORKSPACE:root,BOT_SETTINGS_FILE:settingsPath,
       ONEBOT_HTTP_URL:`http://127.0.0.1:${http.address().port}`,ONEBOT_WS_URL:`ws://127.0.0.1:${ws.address().port}`,
       SESSION_STORE:join(root,'sessions.json'),BOT_SOCIAL_STORE:join(root,'social.json'),BOT_USAGE_STORE:join(root,'usage.json'),BOT_GROUP_CONTEXT_STORE:join(root,'context.json'),BOT_MEDIA_DIR:join(root,'media'),INTELLIGENCE_EVENTS:events,INTELLIGENCE_FAIL_SECOND:fail?'1':'0',
-      INTELLIGENCE_TEST_TOOLS:'1',BOT_SEARCH_URL:`http://127.0.0.1:${http.address().port}/search`,BOT_LEARNING_API_KEY:'fixture-analysis-key',BOT_LEARNING_BASE_URL:`http://127.0.0.1:${http.address().port}`,BOT_LEARNING_MODEL:'fixture-analysis'},stdio:['ignore','pipe','pipe'],windowsHide:true});
+      INTELLIGENCE_TEST_TOOLS:'1',BOT_LEARNING_API_KEY:'fixture-analysis-key',BOT_LEARNING_BASE_URL:`http://127.0.0.1:${http.address().port}`,BOT_LEARNING_MODEL:'fixture-analysis'},stdio:['ignore','pipe','pipe'],windowsHide:true});
     child.stdout.on('data',c=>{output+=c;});child.stderr.on('data',c=>{output+=c;});
     const [socket]=await Promise.race([connected,new Promise((_,reject)=>setTimeout(()=>reject(new Error('connection timeout '+output)),10000).unref())]);
     await wait(()=>output.includes('[bridge] ready'));
@@ -44,8 +45,9 @@ async function scenario(fail,learning=false,changePolicy=false) {
     let social=await data('social.json');assert.equal(social.turns[0].contextUsed,90);assert.equal(social.turns[0].contextSize,100);assert.equal(social.turns[0].inputTokens,null);
     const original=(await data('sessions.json')).sessions['group:30001'].sessionId;
     const firstEvents=(await readFile(events,'utf8')).trim().split('\n').map(JSON.parse),manifest=JSON.parse(firstEvents.find(e=>e.kind==='new').servers[0].env.find(e=>e.name==='BOT_QQ_TOOLS').value);
-    assert.ok(manifest.includes('qq_web_read'));assert.ok(!manifest.includes('qq_send_file'));assert.ok(!manifest.includes('qq_transcribe'));
-    const tools=firstEvents.find(e=>e.kind==='tools');assert.equal(tools.first,false);assert.equal(tools.second,false);assert.equal(tools.third,true);assert.match(tools.reason,/搜索次数/);
+    assert.ok(manifest.includes('qq_recent_messages'));assert.ok(!manifest.includes('qq_search'));assert.ok(!manifest.includes('qq_web_read'));assert.ok(!manifest.includes('qq_send_file'));assert.ok(!manifest.includes('qq_transcribe'));
+    assert.match(firstEvents.find(e=>e.kind==='prompt').text,/DSH.*原生搜索与网页读取/);
+    const tools=firstEvents.find(e=>e.kind==='tools');assert.equal(tools.first,false);assert.equal(tools.second,false);assert.equal(tools.third,true);assert.match(tools.reason,/QQ 工具调用次数/);
     if(learning){assert.match(firstEvents.find(e=>e.kind==='prompt').text,/喜欢喝黑咖啡/);assert.equal(analysisRequests.length,1);assert.equal(analysisRequests[0].tools,undefined);assert.equal(social.cognition.jobs[0].inputTokens,123);}
     if(changePolicy){settings.social.filesEnabled=true;await writeFile(settingsPath,JSON.stringify(settings));await wait(()=>output.includes('reloaded from file'));}
     send(2);await wait(()=>replies.length===2);

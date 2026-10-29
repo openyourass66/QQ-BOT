@@ -1,20 +1,30 @@
 # 依赖与构建产物
 /node_modules/
 /dist/
+/web/dist/
 /release/
+/user-data/
 /desktop/bin/
 /desktop/obj/
 # 可选便携 Node 运行库，由本机部署，不纳入源码
 /runtime/
 /QQ-BOT*.exe
 /QQ-BOT*.pdb
+/desktop/runtime-guard.exe
+/desktop/media-cleaner.exe
 *.tsbuildinfo
+# 数据资源互斥文件及其 SQLite 附属文件
+*.qqbot-lock.sqlite
+*.qqbot-lock.sqlite-journal
+*.qqbot-lock.sqlite-wal
+*.qqbot-lock.sqlite-shm
 
 # 本地环境与密钥；配置示例保留在仓库
 .env
 .env.*
 !.env.example
 /.credentials.yaml
+/.credentials/
 /.dsh/
 /bot.config.json
 /bot.config.json.*
@@ -30,19 +40,8 @@
 # NapCat 运行时（含账号配置与依赖）
 /napcat/
 
-# 原生界面预览与测试输出；不忽略桌面端源素材
-/desktop-preview*.png
-/page-*.png
-/runtime-*.png
-/settings-*.png
-/model-*.png
-/knowledge-*.png
-/quick-*.png
-/qq-favorites-*.png
-/autonomy-*.png
-/activity-*.png
-/memory-*.png
-/dropdown.png
+# 原生界面预览与测试输出；源素材放在 desktop/assets 或测试夹具目录
+/*.png
 /smoke-result.txt
 *.desktop.tmp
 

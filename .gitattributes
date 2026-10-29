@@ -1,0 +1,4 @@
+# 固定摘要的输入不随 Windows 的自动换行设置改变。
+components/dsh/package-lock.json text eol=lf
+# 上游许可保留原始字节及原有行尾空格。
+components/licenses/NapCat.txt -text whitespace=-blank-at-eol

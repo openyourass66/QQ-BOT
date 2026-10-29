@@ -1,0 +1,217 @@
+{
+  "measuredAt": "2026-10-27T09:40:05.054Z",
+  "storageSourceSha256": "a092a21877c5781fa5859184616c1315087305755cc9d2f64bdad85a617a981a",
+  "diagnosticOnly": true,
+  "note": "固定 20 会话的短串行诊断，不替代 30 分钟并发负载或连续运行验收；初始迁移和首次保留期清理另列。归档上限为 50000 条。RSS 包含 Worker，生成夹具后已请求 GC。",
+  "node": "v22.20.0",
+  "platform": "win32",
+  "cpu": "12th Gen Intel(R) Core(TM) i7-12650H",
+  "logicalCpus": 16,
+  "totalMemoryGiB": 15.738166809082031,
+  "results": [
+    {
+      "requestedMessages": 10000,
+      "retainedMessages": 10126,
+      "round": 1,
+      "samples": 100,
+      "migrationMs": 1437.8704,
+      "firstRecordMs": 6.884199999999964,
+      "archiveMs": {
+        "p50": 1.526,
+        "p95": 2.012,
+        "p99": 2.983,
+        "max": 7.77
+      },
+      "workerMs": {
+        "p50": 1.389,
+        "p95": 1.743,
+        "p99": 2.66,
+        "max": 7.648
+      },
+      "queryMs": {
+        "p50": 3.416,
+        "p95": 4.039,
+        "p99": 4.044,
+        "max": 4.044
+      },
+      "eventLoopP99Ms": 19.529727,
+      "eventLoopMaxMs": 19.529727,
+      "rssMiB": 127.65234375,
+      "files": {
+        "main": 48443392,
+        "-wal": 4140632,
+        "-shm": 32768
+      }
+    },
+    {
+      "requestedMessages": 10000,
+      "retainedMessages": 10126,
+      "round": 2,
+      "samples": 100,
+      "migrationMs": 1361.7147999999997,
+      "firstRecordMs": 6.303699999999935,
+      "archiveMs": {
+        "p50": 1.512,
+        "p95": 1.831,
+        "p99": 3.146,
+        "max": 7.842
+      },
+      "workerMs": {
+        "p50": 1.385,
+        "p95": 1.651,
+        "p99": 2.639,
+        "max": 7.722
+      },
+      "queryMs": {
+        "p50": 3.298,
+        "p95": 3.992,
+        "p99": 4.101,
+        "max": 4.101
+      },
+      "eventLoopP99Ms": 24.248319,
+      "eventLoopMaxMs": 24.248319,
+      "rssMiB": 128.9765625,
+      "files": {
+        "main": 48451584,
+        "-wal": 4136512,
+        "-shm": 32768
+      }
+    },
+    {
+      "requestedMessages": 10000,
+      "retainedMessages": 10126,
+      "round": 3,
+      "samples": 100,
+      "migrationMs": 1350.2122000000004,
+      "firstRecordMs": 5.9854999999997744,
+      "archiveMs": {
+        "p50": 1.434,
+        "p95": 1.798,
+        "p99": 2.97,
+        "max": 8.601
+      },
+      "workerMs": {
+        "p50": 1.329,
+        "p95": 1.632,
+        "p99": 2.716,
+        "max": 8.48
+      },
+      "queryMs": {
+        "p50": 3.293,
+        "p95": 3.659,
+        "p99": 4.034,
+        "max": 4.034
+      },
+      "eventLoopP99Ms": 16.195583,
+      "eventLoopMaxMs": 16.195583,
+      "rssMiB": 132.13671875,
+      "files": {
+        "main": 48451584,
+        "-wal": 4136512,
+        "-shm": 32768
+      }
+    },
+    {
+      "requestedMessages": 50000,
+      "retainedMessages": 40000,
+      "round": 1,
+      "samples": 100,
+      "migrationMs": 7111.037499999999,
+      "firstRecordMs": 15.603100000000268,
+      "archiveMs": {
+        "p50": 1.619,
+        "p95": 1.956,
+        "p99": 2.993,
+        "max": 7.845
+      },
+      "workerMs": {
+        "p50": 1.508,
+        "p95": 1.769,
+        "p99": 2.866,
+        "max": 7.734
+      },
+      "queryMs": {
+        "p50": 3.721,
+        "p95": 4.022,
+        "p99": 4.192,
+        "max": 4.192
+      },
+      "eventLoopP99Ms": 22.642687,
+      "eventLoopMaxMs": 22.642687,
+      "rssMiB": 196.02734375,
+      "files": {
+        "main": 240787456,
+        "-wal": 4301312,
+        "-shm": 32768
+      }
+    },
+    {
+      "requestedMessages": 50000,
+      "retainedMessages": 40000,
+      "round": 2,
+      "samples": 100,
+      "migrationMs": 6986.718400000002,
+      "firstRecordMs": 16.058000000000902,
+      "archiveMs": {
+        "p50": 1.686,
+        "p95": 2.272,
+        "p99": 3.049,
+        "max": 8.115
+      },
+      "workerMs": {
+        "p50": 1.562,
+        "p95": 2.006,
+        "p99": 2.904,
+        "max": 7.942
+      },
+      "queryMs": {
+        "p50": 3.696,
+        "p95": 4.104,
+        "p99": 4.297,
+        "max": 4.297
+      },
+      "eventLoopP99Ms": 16.482303,
+      "eventLoopMaxMs": 16.482303,
+      "rssMiB": 196.66796875,
+      "files": {
+        "main": 240787456,
+        "-wal": 4301312,
+        "-shm": 32768
+      }
+    },
+    {
+      "requestedMessages": 50000,
+      "retainedMessages": 40000,
+      "round": 3,
+      "samples": 100,
+      "migrationMs": 6912.258300000001,
+      "firstRecordMs": 14.673000000002503,
+      "archiveMs": {
+        "p50": 1.612,
+        "p95": 1.983,
+        "p99": 2.936,
+        "max": 7.997
+      },
+      "workerMs": {
+        "p50": 1.497,
+        "p95": 1.864,
+        "p99": 2.714,
+        "max": 7.865
+      },
+      "queryMs": {
+        "p50": 3.613,
+        "p95": 4.069,
+        "p99": 4.194,
+        "max": 4.194
+      },
+      "eventLoopP99Ms": 22.609919,
+      "eventLoopMaxMs": 22.609919,
+      "rssMiB": 196.375,
+      "files": {
+        "main": 240787456,
+        "-wal": 4301312,
+        "-shm": 32768
+      }
+    }
+  ]
+}

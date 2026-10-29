@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtemp, readFile, writeFile, mkdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { SocialStore } from '../dist/qq/social-store.js';
 import { SocialEngine, parseShanghaiTime } from '../dist/qq/social-engine.js';
 import { MediaService, downloadPublic } from '../dist/services/media.js';
@@ -16,7 +17,7 @@ async function fixture(run) {
   const dir = await mkdtemp(join(tmpdir(), 'qq-social-'));
   const store = new SocialStore(join(dir,'social.json')); await store.load(); await store.account(10000);
   const usage = new DailyUsageStore(join(dir,'usage.json')); await usage.load();
-  const settings = structuredClone(DEFAULT_SETTINGS); settings.social.messagesPerMinute = 100;
+  const settings = structuredClone(DEFAULT_SETTINGS); settings.social.messagesPerMinute = 100; settings.approval.adminQq = 20001;
   const calls = []; let nextId = 100;
   const favorites=fakeQqFavorites();
   const api = { hasLocalMedia:true,call: async (action, params) => {
@@ -31,7 +32,7 @@ async function fixture(run) {
   } };
   const media = new MediaService(join(dir,'media'), () => settings.social);
   const engine = new SocialEngine(store,media,api,usage,() => settings,async () => true,() => {},() => {});
-  const ctx = () => ({ chat:'group:30001',self:10000,user:20001,sent:0,silent:false,signal:new AbortController().signal });
+  const ctx = () => ({ chat:'group:30001',self:10000,user:20001,origin:'message',sent:0,silent:false,signal:new AbortController().signal });
   const call = async (tool,args={}, context=ctx()) => {
     const invoke=args=>engine.execute({action:'social',tool,args},context),result=await invoke(args);
     return tool==='qq_collect_sticker'?completeCollection(result,args,invoke):result;
@@ -40,6 +41,34 @@ async function fixture(run) {
   finally { await rm(dir,{recursive:true,force:true,maxRetries:10,retryDelay:100}); }
 }
 const entry = (id, extra={}) => ({ chat:'group:30001',id,user:20001,name:'甲',at:Date.now(),text:'测试',segments:[{type:'text',data:{text:'测试'}}],self:false,recalled:false,...extra });
+
+test('普通群友无法枚举联系人、访问其它群、读取申请凭据或修改他人的提醒',()=>fixture(async({engine,ctx,call,store,settings,calls})=>{
+  const member={...ctx(),user:20002};
+  for(const tool of ['qq_get_friend_list','qq_get_group_list'])await assert.rejects(engine.legacy(tool,{},member),/仅机器人主人/);
+  await assert.rejects(call('qq_chats',{},member),/仅机器人主人/);
+  await assert.rejects(engine.legacy('qq_get_group_member_list',{group_id:30002},member),/当前群/);
+  await assert.rejects(engine.target(member,'private:20001'),/跨会话/);
+  assert.equal(calls.length,0);
+  settings.chat.group.proactive.enabled=true;
+  const reminder=await call('qq_set_reminder',{text:'主人的提醒',delay_minutes:1},ctx());
+  assert.deepEqual(await call('qq_reminders',{},member),[]);
+  await assert.rejects(call('qq_cancel_reminder',{reminder_id:reminder.id},member),/只能取消自己/);
+  await store.addEvent('group:30001','request:group',{flag:'private-flag',token:'private-token',sub_type:'invite'});
+  assert.deepEqual(await call('qq_events',{},member),[]);
+  const events=await call('qq_events');assert.equal(events.length,1);assert.doesNotMatch(JSON.stringify(events),/private-flag|private-token/);
+  const capabilities=await call('qq_capabilities',{},member);assert.equal(capabilities.settings.allowedUsers,undefined);assert.equal(capabilities.tools.some(t=>t.name==='qq_chats'),false);
+  settings.social.autonomy='autonomous';await engine.normalReply(member,'正常聊天');assert.ok(calls.some(c=>c.action==='send_group_msg'));
+}));
+
+test('后台来源不能靠主人 QQ 删除锁定记忆，实际确认展示正文并在策略变化后失效',()=>fixture(async({engine,ctx,call,store,settings,api,media,usage,calls})=>{
+  const memory=await call('qq_memory_append',{user_id:20001,name:'甲',text:'锁定的事实'});
+  await store.update(d=>{d.cognition.memories[memory.id].locked=true;});
+  await assert.rejects(call('qq_memory_remove',{memory_id:memory.id},{...ctx(),origin:'background'}),/锁定的记忆/);
+  settings.social.autonomy='confirm';
+  const changing=new SocialEngine(store,media,api,usage,()=>settings,async text=>{assert.match(text,/实际正文/);assert.match(text,/group:30001/);settings.social.blockedGroups.push('30001');return true;},()=>{},()=>{});
+  await assert.rejects(changing.execute({action:'social',tool:'qq_reply',args:{text:'实际正文'}},ctx()),/确认已过期/);
+  assert.equal(calls.some(c=>c.action==='send_group_msg'),false);
+}));
 
 test('回复当前会话不扣主动额度，引用与 @ 使用真实消息和群成员', () => fixture(async ({store,call,ctx,calls,usage}) => {
   await store.add(entry(-12)); const turn=ctx();
@@ -123,10 +152,34 @@ test('表情收藏转存、备注、查看和发送闭环；不读取库外文�
   assert.equal((await call('qq_stickers',{query:'赞同'})).length,1);
   assert.ok((await call('qq_sticker_image',{sticker_id:sticker.id})).content.some(c=>c.type==='image'));
   await call('qq_send_sticker',{sticker_id:sticker.id}); assert.equal(store.snapshot().stickers[0].uses,1);
-  assert.ok(calls.some(c=>Array.isArray(c.params.message)&&c.params.message[0].type==='image'));
+  const sent=calls.find(c=>c.action==='send_group_msg').params.message[0];
+  assert.equal(sent.type,'image');assert.equal(sent.data.sub_type,1);assert.equal(sent.data.summary,'[动画表情]');
   await assert.rejects(media.bytes(join(dir,'social.json'),new AbortController().signal),/媒体库/);
   settings.social.stickersEnabled=false; await assert.rejects(call('qq_send_sticker',{sticker_id:sticker.id}),/关闭/);
 }));
+for (const chat of ['group:30001','private:20001']) for (const [extension,encoded] of [
+  ['png','iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jP1kAAAAASUVORK5CYII='],
+  ['gif','R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7'],
+]) test(`${chat} 的 ${extension} 收藏按自定义表情发送，普通图片保持原格式`,()=>fixture(async({call,store,media,calls,ctx})=>{
+  const buffer=Buffer.from(encoded,'base64'),file=await media.save(buffer,'.'+extension);
+  await store.add(entry(-12,{chat,segments:[{type:'image',data:{file}}]}));
+  const context=ctx();context.chat=chat;
+  const sticker=await call('qq_collect_sticker',{message_id:-12},context);
+  await call('qq_send_sticker',{sticker_id:sticker.id,reply_to:-12,...(chat.startsWith('group:')?{at_user:20001}:{})},context);
+  const action=chat.startsWith('group:')?'send_group_msg':'send_private_msg';
+  const message=calls.find(c=>c.action===action).params.message;
+  assert.deepEqual(message.slice(0,-1),[{type:'reply',data:{id:'-12'}},...(chat.startsWith('group:')?[{type:'at',data:{qq:'20001'}}]:[])]);
+  const sent=message.at(-1);
+  assert.equal(sent.type,'image');assert.equal(sent.data.sub_type,1);assert.equal(sent.data.summary,'[动画表情]');
+  assert.deepEqual(await readFile(fileURLToPath(sent.data.file)),buffer);
+  assert.equal(store.message(chat,100).segments.at(-1).data.sub_type,1);
+  assert.equal(store.snapshot().stickers[0].uses,1);
+  await call('qq_send_image',{source:file},context);
+  const ordinary=calls.filter(c=>c.action===action).at(-1).params.message[0];
+  assert.equal(ordinary.type,'image');assert.equal(ordinary.data.sub_type,undefined);assert.equal(ordinary.data.summary,undefined);
+  assert.deepEqual(await readFile(fileURLToPath(ordinary.data.file)),buffer);
+}));
+
 test('撤回核验自己的消息与会话，负消息 ID 可用；合并转发可展开', () => fixture(async ({store,call,engine,ctx,calls}) => {
   await store.add(entry(-1));
   await assert.rejects(engine.legacy('qq_recall',{message_id:-1},ctx()),/只能撤回/);
@@ -195,12 +248,55 @@ test('真实申请事件只能处理一次，失败不自动重试未知结果',
   await assert.rejects(call('qq_handle_request',{event_id:id,approve:true}),/已经处理/);
   assert.equal(calls.filter(c=>c.action==='set_group_add_request').length,1);
 }));
+
+test('账号管理只允许真实主人消息，普通群友与后台任务不随自主模式获得权限', () => fixture(async ({engine,call,ctx,calls,settings,store}) => {
+  const id = await store.addEvent('group:30001','request:group',{flag:'real-owner-flag',sub_type:'invite'});
+  for (const mode of ['autonomous','sensitive','confirm']) {
+    settings.social.autonomy = mode;
+    for (const context of [{...ctx(),user:20002}, {...ctx(),origin:'notice'}, {...ctx(),origin:'background'}, {...ctx(),origin:undefined}, {...ctx(),proactive:true}, {...ctx(),reminder:true}]) {
+      for (const tool of ['qq_set_profile','qq_set_avatar','qq_set_group_card']) await assert.rejects(engine.legacy(tool,{nickname:'冒充',file:'https://example.com/x.png',group_id:30001},context), /仅机器人主人/);
+      await assert.rejects(call('qq_handle_request',{event_id:id,approve:true},context), /仅机器人主人/);
+    }
+  }
+  settings.approval.adminQq = 0;
+  await assert.rejects(engine.legacy('qq_set_profile',{nickname:'未设置主人'},ctx()), /仅机器人主人/);
+  assert.equal(calls.length, 0); assert.equal(store.snapshot().events[0].handled, false);
+  assert.equal(store.snapshot().actions.length, 0);
+  settings.approval.adminQq = 20001; settings.social.autonomy = 'autonomous';
+  await call('qq_reply',{text:'普通群友仍可正常对话'},{...ctx(),user:20002});
+  assert.equal(calls.filter(c=>c.action==='send_group_msg').length, 1);
+}));
+
+test('主人在私聊查看并处理真实申请，跨群读取不向普通群友公开', () => fixture(async ({store,call,ctx,calls,settings}) => {
+  const id = await store.addEvent('group:30002','request:group',{flag:'pending-real',sub_type:'invite'});
+  const owner = {...ctx(),chat:'private:20001'};
+  assert.equal((await call('qq_events',{},owner)).length, 1);
+  assert.equal((await call('qq_events',{},ctx())).length, 0);
+  assert.equal((await call('qq_events',{}, {...ctx(),chat:'private:20002',user:20002})).length, 0);
+  settings.social.blockedGroups.push('30002');
+  assert.equal((await call('qq_events',{},owner)).length, 0);
+  await assert.rejects(call('qq_handle_request',{event_id:id,approve:true},owner), /屏蔽/);
+  settings.social.blockedGroups = [];
+  await call('qq_handle_request',{event_id:id,approve:true},owner);
+  assert.equal(calls.filter(c=>c.action==='set_group_add_request').length, 1);
+}));
+
+test('确认期间切换主人后再次核验身份，旧主人的待执行动作失效', () => fixture(async ({store,media,api,usage,ctx,settings,calls}) => {
+  settings.social.autonomy = 'confirm';
+  const engine = new SocialEngine(store,media,api,usage,()=>settings,async()=>{settings.approval.adminQq=20002;return true;},()=>{},()=>{});
+  await assert.rejects(engine.legacy('qq_set_profile',{nickname:'旧主人请求'},ctx()), /仅机器人主人/);
+  assert.equal(calls.length,0);
+  settings.approval.adminQq=20001; settings.social.autonomy='autonomous';
+  const success = new SocialEngine(store,media,api,usage,()=>settings,async()=>true,()=>{},()=>{});
+  await success.legacy('qq_set_profile',{nickname:'主人请求',signature:'主人签名'},ctx());
+  assert.deepEqual(calls.map(c=>c.action),['set_qq_profile','set_self_longnick']);
+}));
 test('媒体缺少服务时明确不可用；下载拒绝内网与非 HTTP；决定潜水不发送', () => fixture(async ({call,ctx,media}) => {
   const signal=ctx().signal;
   await assert.rejects(downloadPublic('http://127.0.0.1/secret',signal),/内网/);
   await assert.rejects(downloadPublic('file:///secret',signal),/无效/);
   await assert.rejects(media.speech('hello',signal),/未配置/);
-  await assert.rejects(call('qq_qzone_feed'),/未配置/);
+  await assert.rejects(call('qq_qzone_feed'),/空间浏览已关闭/);
   const context=ctx(); await call('qq_finish',{reason:'这段与我无关',active_topic:'咖啡'},context);
   assert.equal(context.silent,true); assert.equal(context.topic,'咖啡'); assert.equal(context.sent,0);
 }));

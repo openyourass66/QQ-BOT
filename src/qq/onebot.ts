@@ -25,6 +25,8 @@ export interface MessageEvent {
   group_id?: number;
 }
 
+export const MESSAGE_LIMITS = { segments: 128, textBytes: 32 * 1024, eventBytes: 256 * 1024, noticeBytes: 16 * 1024 } as const;
+
 /** 兼容 OneBot 的 CQ 字符串格式；转义文本不能伪装成真正的 @ 消息段。 */
 export function parseCqMessage(message: string): Segment[] {
   const decode = (text: string): string => text.replace(/&#91;/g, '[').replace(/&#93;/g, ']').replace(/&#44;/g, ',').replace(/&amp;/g, '&');
@@ -52,7 +54,7 @@ const MessageSchema = z.object({
   user_id: z.number().int().positive().safe(),
   message_id: z.number().int().safe(),
   raw_message: z.string().default(''),
-  message: z.union([z.array(z.object({ type: z.string(), data: z.record(z.unknown()) })), z.string().transform(parseCqMessage)]),
+  message: z.union([z.array(z.object({ type: z.string(), data: z.record(z.string(), z.unknown()) })), z.string().transform(parseCqMessage)]),
   sender: z.object({
     user_id: z.number().int().positive().safe().optional(),
     nickname: z.string().default(''),
@@ -64,7 +66,26 @@ const MessageSchema = z.object({
 });
 
 export function parseMessageEvent(input: unknown): MessageEvent | undefined {
-  const result = MessageSchema.safeParse(input);
+  if (!input || typeof input !== 'object' || Array.isArray(input)) return;
+  const candidate = input as Record<string, unknown>;
+  let message = candidate.message;
+  // Check collection bounds before schema validation visits every element.
+  if (Array.isArray(message) && message.length > MESSAGE_LIMITS.segments) return;
+  if (typeof message === 'string' && Buffer.byteLength(message) > MESSAGE_LIMITS.textBytes) return;
+  try { if (Buffer.byteLength(JSON.stringify(input)) > MESSAGE_LIMITS.eventBytes) return; }
+  catch { return; }
+  if (typeof message === 'string') message = parseCqMessage(message);
+  if (Array.isArray(message)) {
+    if (message.length > MESSAGE_LIMITS.segments) return;
+    let textBytes = 0;
+    for (const segment of message) {
+      if (segment?.type !== 'text') continue;
+      if (typeof segment.data?.text !== 'string') return;
+      textBytes += Buffer.byteLength(segment.data.text);
+      if (textBytes > MESSAGE_LIMITS.textBytes) return;
+    }
+  }
+  const result = MessageSchema.safeParse({ ...candidate, message });
   if (!result.success) return undefined;
   return { ...result.data, sender: { ...result.data.sender, user_id: result.data.sender.user_id ?? result.data.user_id } };
 }
@@ -77,10 +98,13 @@ export interface OneBotResponse<T> {
   wording?: string;
 }
 
+export type OneBotInvocation={action:string;params:Readonly<Record<string,unknown>>;signal?:AbortSignal};
+export type OneBotInterceptor=(call:OneBotInvocation,execute:()=>Promise<unknown>)=>Promise<unknown>;
 export class OneBotHttp {
   constructor(
     private readonly baseUrl: string,
     private readonly token: string,
+    private readonly intercept?:OneBotInterceptor,
   ) {}
 
   get hasLocalMedia(): boolean {
@@ -91,13 +115,18 @@ export class OneBotHttp {
   }
 
   async call<T = unknown>(action: string, params: Record<string, unknown> = {}, signal?: AbortSignal): Promise<T> {
+    const body=JSON.stringify(params),snapshot=JSON.parse(body) as Record<string,unknown>,pending:object[]=[snapshot];
+    while(pending.length){const value=pending.pop()!;for(const child of Object.values(value))if(child&&typeof child==='object')pending.push(child);Object.freeze(value);}
+    const execute=()=>this.perform<T>(action,body,signal);return this.intercept?this.intercept({action,params:snapshot,signal},execute) as Promise<T>:execute();
+  }
+  private async perform<T>(action:string,requestBody:string,signal?:AbortSignal):Promise<T>{
     const headers: Record<string, string> = { 'content-type': 'application/json' };
     if (this.token) headers.authorization = `Bearer ${this.token}`;
 
     const response = await fetch(`${this.baseUrl}/${action}`, {
       method: 'POST',
       headers,
-      body: JSON.stringify(params),
+      body:requestBody,
       signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(15_000)]) : AbortSignal.timeout(15_000),
     });
 

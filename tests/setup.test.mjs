@@ -26,9 +26,16 @@ test('相对工作区解析为 ACP 所需的绝对路径', async () => {
   const root = await mkdtemp(join(tmpdir(), 'qq-workspace-'));
   try {
     const url = new URL('../dist/core/config.js', import.meta.url).href;
-    const output = execFileSync(process.execPath, ['--input-type=module', '-e', `const {config}=await import(${JSON.stringify(url)});process.stdout.write(config.dsh.workspace);`], {
-      cwd: root, env: { ...process.env, BOT_WORKSPACE: 'bot-workspace' }, encoding: 'utf8',
+    const output = execFileSync(process.execPath, ['--input-type=module', '-e', `const {config}=await import(${JSON.stringify(url)});process.stdout.write(JSON.stringify(config.dsh));`], {
+      cwd: root, env: { ...process.env, BOT_WORKSPACE: 'bot-workspace', BOT_DSH_BIN: 'tools/dsh.cmd', BOT_DSH_HOME: 'dsh-state' }, encoding: 'utf8',
     });
-    assert.equal(output, join(root, 'bot-workspace'));
+    const paths = JSON.parse(output);
+    assert.equal(paths.workspace, join(root, 'bot-workspace'));
+    assert.equal(paths.bin, join(root, 'tools/dsh.cmd'));
+    assert.equal(paths.home, join(root, 'dsh-state'));
+    const fallback = execFileSync(process.execPath, ['--input-type=module', '-e', `const {config}=await import(${JSON.stringify(url)});process.stdout.write(config.dsh.workspace);`], {
+      cwd: root, env: { ...process.env, BOT_WORKSPACE: '' }, encoding: 'utf8',
+    });
+    assert.equal(fallback, join(root, 'bot-workspace'));
   } finally { await rm(root, { recursive: true, force: true }); }
 });

@@ -10,7 +10,7 @@ export interface ActionServer {
 
 /** 内部接口独立于管理页面，避免把动作执行权限暴露给前端。 */
 export async function startActionServer(
-  execute: (input: unknown, signal: AbortSignal, conversation?: string) => Promise<unknown>,
+  execute: (input: unknown, signal: AbortSignal, conversation?: string,operationId?:string) => Promise<unknown>,
 ): Promise<ActionServer> {
   const token = randomBytes(32).toString('hex');
   const expected = Buffer.from(`Bearer ${token}`);
@@ -30,6 +30,8 @@ export async function startActionServer(
       send(404, { error: '未知动作接口' });
       return;
     }
+    if(active.size>=32){req.resume();send(429,{error:'动作正在处理，请稍后重试。'});return;}
+    const operationId=req.headers['x-bot-operation'];if(operationId!==undefined&&(typeof operationId!=='string'||!/^[a-f0-9]{64}$/.test(operationId))){req.resume();send(400,{error:'动作请求编号无效'});return;}
     const controller = new AbortController();
     active.add(controller);
     const cancel = () => controller.abort();
@@ -50,7 +52,7 @@ export async function startActionServer(
       controller.signal.throwIfAborted();
       const input: unknown = JSON.parse(Buffer.concat(chunks).toString('utf8'));
       const conversation = req.headers['x-bot-conversation'];
-      const data = await execute(input, controller.signal, typeof conversation === 'string' ? conversation : undefined);
+      const data = await execute(input, controller.signal, typeof conversation === 'string' ? conversation : undefined,typeof operationId==='string'?operationId:undefined);
       send(200, { data });
     } catch (error) {
       const code = error instanceof ZodError || error instanceof SyntaxError ? 400 : 409;

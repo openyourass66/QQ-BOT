@@ -3,12 +3,15 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { appendFileSync } from 'node:fs';
 import { mockStickerAnalysis } from '../helpers/sticker-review.mjs';
+import {installFixturePolicy,beginFixtureRequest} from './model-budget.mjs';
+if(process.env.FAKE_OMIT_NATIVE_POLICY!=='1')installFixturePolicy();
 
 let nextSession = 0;
 let nextGroupTurn = 0;
 const sessionServers = new Map();
 const sessionModels = new Map();
-if (process.env.FAKE_MODEL_EVENTS) appendFileSync(process.env.FAKE_MODEL_EVENTS, JSON.stringify({ args: process.argv.slice(2) }) + '\n');
+const lifecycle=(kind,sessionId)=>{if(process.env.FAKE_LIFECYCLE_EVENTS)appendFileSync(process.env.FAKE_LIFECYCLE_EVENTS,JSON.stringify({kind,sessionId})+'\n');};
+if (process.env.FAKE_MODEL_EVENTS) appendFileSync(process.env.FAKE_MODEL_EVENTS, JSON.stringify({ args: process.argv.slice(2),serviceCredentialsPresent:['ONEBOT_TOKEN','BOT_MEDIA_API_KEY','BOT_LEARNING_API_KEY','BOT_ACTION_TOKEN'].some(key=>Boolean(process.env[key])) }) + '\n');
 const respond = (id, result) => process.stdout.write(`${JSON.stringify({ jsonrpc: '2.0', id, result })}\n`);
 const notify = (method, params) => process.stdout.write(`${JSON.stringify({ jsonrpc: '2.0', method, params })}\n`);
 const lines = createInterface({ input: process.stdin });
@@ -16,23 +19,37 @@ lines.on('line', async (line) => {
   const request = JSON.parse(line);
   const { id, method, params } = request;
   if (method === 'initialize') {
-    respond(id, { protocolVersion: 1, agentCapabilities: {}, agentInfo: { name: 'test-agent', version: '1' } });
+    respond(id, { protocolVersion: 1, agentCapabilities: {sessionCapabilities:{...(process.env.FAKE_OMIT_SESSION_POLICY==='1'?{}:{close:{}}),resume:{}}}, agentInfo: { name: 'test-agent', version: '1' } });
   } else if (method === 'session/new') {
     const sessionId = `test-session-${++nextSession}`;
     sessionServers.set(sessionId, params.mcpServers);
+    lifecycle('new',sessionId);
     respond(id, { sessionId });
   } else if (method === 'session/resume') {
     sessionServers.set(params.sessionId, params.mcpServers);
+    lifecycle('resume',params.sessionId);
     respond(id, {});
+  } else if(method==='session/close'){
+    sessionServers.delete(params.sessionId);sessionModels.delete(params.sessionId);lifecycle('close',params.sessionId);respond(id,{});
   } else if (method === 'session/set_config_option') {
     sessionModels.set(params.sessionId, params.value);
     if (process.env.FAKE_MODEL_EVENTS) appendFileSync(process.env.FAKE_MODEL_EVENTS, JSON.stringify(params) + '\n');
     respond(id, { configOptions: [] });
   } else if (method === 'session/prompt') {
+    let finishBudget;try {finishBudget=await beginFixtureRequest(params.sessionId,params.prompt);
     if (process.env.FAKE_MODEL_EVENTS && sessionModels.get(params.sessionId) !== JSON.stringify(['deepseek-official', 'test-project-model'])) {
       process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id, error: { code: -32603, message: 'model not applied before prompt' } }) + '\n'); return;
     }
     let text = params.prompt.map((block) => block.text ?? '').join('');
+    if(text.includes('OPERATION_REPLAY')){
+      const server=sessionServers.get(params.sessionId).find(entry=>entry.name==='qq'),env=Object.fromEntries(server.env.map(({name,value})=>[name,value]));
+      const headers={'content-type':'application/json',authorization:`Bearer ${env.BOT_ACTION_TOKEN}`,'x-bot-conversation':env.BOT_ACTION_CONTEXT,'x-bot-operation':'a'.repeat(64)};
+      const input={action:'social',tool:'qq_reply',args:{text:'逻辑动作只发一次'}},invoke=async(body=input,operation=headers['x-bot-operation'])=>{const response=await fetch(new URL('/actions',env.BOT_ACTION_URL),{method:'POST',headers:{...headers,'x-bot-operation':operation},body:JSON.stringify(body)});return {status:response.status,body:await response.json()};};
+      const joined=await Promise.all(Array.from({length:6},()=>invoke())),changed=await invoke({...input,args:{text:'替换正文'}}),invalid=await invoke(input,'invalid'),forged=await invoke({...input,args:{...input.args,operationId:'c'.repeat(64)}},'c'.repeat(64));
+      const lost={...input,args:{text:'丢失响应'}},firstLost=await invoke(lost,'d'.repeat(64)),secondLost=await invoke(lost,'e'.repeat(64));
+      if(process.env.FAKE_OPERATION_EVENTS)appendFileSync(process.env.FAKE_OPERATION_EVENTS,JSON.stringify({joined,changed,invalid,forged,firstLost,secondLost})+'\n');
+      respond(id,{stopReason:'end_turn'});return;
+    }
     if (process.env.FAKE_GROUP_PROMPTS) {
       appendFileSync(process.env.FAKE_GROUP_PROMPTS, JSON.stringify({ sessionId: params.sessionId, text }) + '\n');
       const current = text.split('对你说：\n').at(-1).split('\n')[0];
@@ -61,7 +78,12 @@ lines.on('line', async (line) => {
       try {
         await client.connect(new StdioClientTransport({command:server.command,args:server.args,env:Object.fromEntries(server.env.map(({name,value})=>[name,value])),stderr:'pipe'}));
         if(text.startsWith('自主想法 #')) {
-          if(text.includes('（qzone）')) {
+          if(text.includes('（qzone-comment）')) {
+            if(text.includes('SECRET_AUTONOMY'))throw new Error('空间互动泄露了私聊上下文');
+            const post=JSON.parse(text.split('材料：')[1].split('\n')[0]);
+            const forbidden=await client.callTool({name:'qq_recent_messages',arguments:{}});if(!forbidden.isError)throw new Error('空间互动越权读取聊天');
+            await invoke('qq_qzone_comment',{post_id:post.id,text:'这只猫看起来很有精神。'});
+          } else if(text.includes('（qzone）')) {
             if(text.includes('SECRET_AUTONOMY'))throw new Error('独立空间上下文泄露了聊天内容');
             const forbidden=await client.callTool({name:'qq_recent_messages',arguments:{}});if(!forbidden.isError)throw new Error('空间任务越权读取聊天');
             await invoke('qq_qzone_post',{text:'猫猫表情总能把一个字的情绪表达得很到位。'});
@@ -70,6 +92,9 @@ lines.on('line', async (line) => {
             const preview=JSON.parse((await invoke('qq_collect_sticker',{message_id})).content[0].text);
             if(preview.status==='needs_analysis')await invoke('qq_collect_sticker',{message_id,analysis_token:preview.analysis_token,analysis:structuredClone(mockStickerAnalysis)});
             await invoke('qq_finish',{reason:'真实看图分析并收藏后安静结束'});
+          } else if(process.env.FAKE_AUTONOMY_NO_INSTRUCTION==='1') {
+            if(!text.includes('【后台主动联系机会】')||!text.includes('不要求有新消息'))throw new Error('后台机会仍要求用户先发消息');
+            await invoke('qq_speak',{text:'刚看到一只猫，突然想起你之前说的表情包。'});
           } else await invoke('qq_reply',{text:'昨天说的猫猫表情找到了吗？'});
         } else {
           const message_id=Number(text.match(/当前消息编号 #(-?\d+)/)[1]);
@@ -78,7 +103,7 @@ lines.on('line', async (line) => {
           await invoke('qq_finish',{reason:'先记下有依据的兴趣和想法'});
         }
       } finally {await client.close();}
-      if(process.env.FAKE_AUTONOMY_EVENTS)appendFileSync(process.env.FAKE_AUTONOMY_EVENTS,JSON.stringify({session:params.sessionId,public:text.includes('【独立空间创作】'),prompt:text})+'\n');
+      if(process.env.FAKE_AUTONOMY_EVENTS)appendFileSync(process.env.FAKE_AUTONOMY_EVENTS,JSON.stringify({session:params.sessionId,public:text.includes('【独立空间创作】'),kind:text.match(/（(chat|collect|qzone|qzone-comment)）/)?.[1],prompt:text})+'\n');
       notify('session/update',{sessionId:params.sessionId,update:{sessionUpdate:'agent_message_chunk',content:{type:'text',text:'工具操作后的文字不应重复发送'}}});
       respond(id,{stopReason:'end_turn'});return;
     }
@@ -134,6 +159,7 @@ lines.on('line', async (line) => {
       update: { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text } },
     });
     respond(id, { stopReason: 'end_turn' });
+    }catch(error){process.stdout.write(JSON.stringify({jsonrpc:'2.0',id,error:{code:-32000,message:error.message}})+'\n');}finally{await finishBudget?.().catch(()=>{});}
   }
 });
 lines.on('close', () => process.exit(0));

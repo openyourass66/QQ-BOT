@@ -1,3 +1,4 @@
+import {readSocialData} from './helpers/social-data.mjs';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
@@ -39,11 +40,11 @@ test('ACP + 真实 QQ MCP：回复不重复、潜水、记忆、表情先理解�
     send(-1,'SOCIAL_REPLY');await until(()=>sent.length===1);
     assert.equal(sent[0].message[0].type,'reply');assert.equal(sent[0].message[0].data.id,'-1');
     send(-2,'SOCIAL_SILENT');
-    const data=async()=>JSON.parse(await readFile(join(dir,'social.json'),'utf8'));
+    const data=async()=>await readSocialData(join(dir,'social.json'));
     await until(async()=> (await data()).turns.length>=2);assert.equal(sent.length,1);
     send(-3,'SOCIAL_MEMORY');await until(()=>sent.length===2);assert.equal(sent[1].message,'记住了');
     send(-4,'SOCIAL_STICKER',20001,[{type:'image',data:{file:image}}]);await until(()=>sent.length===3);await until(async()=>(await data()).turns.length>=4);
-    assert.equal(sent[2].message[0].type,'image');assert.deepEqual(await readFile(fileURLToPath(sent[2].message[0].data.file)),png);
+    assert.equal(sent[2].message[0].type,'image');assert.equal(sent[2].message[0].data.sub_type,1);assert.equal(sent[2].message[0].data.summary,'[动画表情]');assert.deepEqual(await readFile(fileURLToPath(sent[2].message[0].data.file)),png);
     send(-5,'SOCIAL_STICKER_PENDING',20001,[{type:'image',data:{file:otherImage}}]);await until(()=>sent.length===4);await until(async()=>(await data()).turns.length>=5);
     assert.match(sent[3].message,/分析或 QQ 收藏尚未完成/);assert.doesNotMatch(sent[3].message,/收藏成功/);
     socket.send(JSON.stringify({post_type:'notice',notice_type:'group_recall',self_id:10000,group_id:30001,user_id:20001,message_id:-1,time:Math.floor(Date.now()/1000)}));

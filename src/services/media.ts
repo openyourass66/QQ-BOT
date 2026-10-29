@@ -2,12 +2,16 @@ import http from 'node:http';
 import https from 'node:https';
 import { lookup } from 'node:dns/promises';
 import { isIP } from 'node:net';
-import { writeFile, mkdir, stat, realpath, readdir, rename, rm, open } from 'node:fs/promises';
-import { resolve, dirname, relative, isAbsolute } from 'node:path';
+import { realpath, open } from 'node:fs/promises';
+import { resolve, relative, isAbsolute,basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createHash, randomUUID } from 'node:crypto';
-import { spawn } from 'node:child_process';
 import type { SocialSettings } from '../qq/social-settings.js';
+import {reportedServiceUsage,type PrepareServiceRequest,type ServiceRequest,type ServiceLimits} from '../agent/service-request.js';
+import type {ReportedUsage} from '../storage/database-types.js';
+import {readJsonLimited,readBytesLimited} from './read-json.js';
+import {MediaCache} from './media-cache.js';
+import type {MediaCacheStore} from '../storage/media-cache-types.js';
+import {extractVideoFrames} from './video-frames.js';
 
 function publicAddress(address: string): boolean {
   if (isIP(address) === 4) {
@@ -73,39 +77,30 @@ async function readMediaFile(file: string, signal: AbortSignal, max: number): Pr
 
 export class MediaService {
   readonly root: string;
-  private saves: Promise<void> = Promise.resolve();
-  constructor(root: string, private readonly settings: () => SocialSettings) { this.root = resolve(root); }
-  save(buffer: Buffer, extension: string): Promise<string> {
-    const task = this.saves.then(() => this.saveFile(buffer, extension));
-    this.saves = task.then(() => undefined, () => undefined);
-    return task;
+  private cache:MediaCache;
+  private videoBusy=false;
+  constructor(root: string, private readonly settings: () => SocialSettings,private readonly prepareRequest?:PrepareServiceRequest,private options:{index?:MediaCacheStore;onFailure?:(error:Error)=>void;pin?:(file:string)=>Promise<void>}={}) { this.root = resolve(root);this.cache=new MediaCache(this.root,options.index,{onFailure:options.onFailure}); }
+  private async request<T>(input:ServiceRequest,operation:(limits:ServiceLimits,report:(usage:ReportedUsage)=>void)=>Promise<T>):Promise<T>{
+    if(!this.prepareRequest)return operation({maxOutputTokens:8192,maxResponseChars:32000},()=>{});
+    const prepared=await this.prepareRequest(input);try{return await prepared.run(operation);}finally{await prepared.close();}
   }
-  private async saveFile(buffer: Buffer, extension: string): Promise<string> {
-    if (!/^\.[a-z0-9]{1,10}$/i.test(extension)) throw new Error('媒体文件扩展名无效');
-    await mkdir(this.root, { recursive: true });
-    const file = resolve(this.root, createHash('sha256').update(buffer).digest('hex') + extension);
-    if (await stat(file).then(s => s.isFile(), () => false)) return file;
-    let total = 0;
-    for (const name of await readdir(this.root)) total += await stat(resolve(this.root,name)).then(s => s.isFile() ? s.size : 0, () => 0);
-    const limit = Number(process.env.BOT_MEDIA_MAX_BYTES || 536870912);
-    if (!Number.isFinite(limit) || total + buffer.length > limit) throw new Error('媒体库空间额度不足，请清理不再使用的媒体或调整 BOT_MEDIA_MAX_BYTES');
-    const temp = file + '.' + randomUUID() + '.tmp';
-    try { await writeFile(temp, buffer); await rename(temp, file); }
-    finally { await rm(temp, { force: true }).catch(() => undefined); }
-    return file;
+  async save(buffer: Buffer, extension: string): Promise<string> {
+    const file=await this.cache.save(buffer,extension);await this.options.pin?.(file);return file;
   }
+  flush():Promise<void>{return this.cache.flush();}
   async bytes(source: string, signal: AbortSignal, max = 12_000_000): Promise<{ buffer: Buffer; mime: string }> {
     if (/^https?:\/\//i.test(source)) return downloadPublic(source, signal, max);
     const file = await realpath(source.startsWith('file:') ? fileURLToPath(source) : resolve(source));
     // Only files created by this service can be read or sent by a model.
     const roots = [this.root, resolve(process.env.BOT_WORKSPACE || 'bot-workspace', 'output'), ...(process.env.BOT_MEDIA_IMPORT_DIRS ?? '').split('|').filter(Boolean)];
-    let allowed = false;
+    let allowed = false,cached=false;
     for (const root of roots) {
       const actual = await realpath(root).catch(() => resolve(root));
       const rel = relative(actual, file);
-      if (rel && !rel.startsWith('..') && !isAbsolute(rel)) { allowed = true; break; }
+      if (rel && !rel.startsWith('..') && !isAbsolute(rel)) { allowed = true;cached=root===this.root&&rel===basename(file);break; }
     }
     if (!allowed) throw new Error('文件不在机器人媒体库或已配置的媒体导入目录中');
+    if(cached)await this.cache.touch(basename(file));
     return { buffer: await readMediaFile(file, signal, max), mime: 'application/octet-stream' };
   }
   async image(source: string, signal: AbortSignal): Promise<{ type: 'image'; data: string; mimeType: string }> {
@@ -154,7 +149,7 @@ export class MediaService {
     return new URL('/api/v1/services/audio/tts/SpeechSynthesizer', base);
   }
   private async audioError(response: Response, label: string): Promise<Error> {
-    const body = await response.json().catch(() => null) as { code?: unknown; message?: unknown; error?: { code?: unknown; message?: unknown } } | null;
+    const body = await readJsonLimited(response,65536).catch(() => null) as { code?: unknown; message?: unknown; error?: { code?: unknown; message?: unknown } } | null;
     let detail = [body?.code ?? body?.error?.code, body?.message ?? body?.error?.message].filter(v => typeof v === 'string').join('：');
     const key = process.env.BOT_MEDIA_API_KEY;
     if (key) detail = detail.replaceAll(key, '[已隐藏密钥]');
@@ -210,24 +205,29 @@ export class MediaService {
   async vision(images: Array<{ data: string; mimeType: string }>, question: string, signal: AbortSignal): Promise<unknown> {
     const model = this.settings().visionModel;
     if (!model) return { content: [{ type: 'text', text: '以下图片交给当前 Agent 的视觉能力处理；若当前模型不支持图片，请明确说明。' }, ...images.map(i => ({ type: 'image', ...i }))] };
-    const response = await fetch(this.endpoint('chat/completions'), { method: 'POST', headers: { ...this.headers(), 'content-type': 'application/json' }, signal: AbortSignal.any([signal, AbortSignal.timeout(60_000)]), body: JSON.stringify({ model, messages: [{ role: 'user', content: [{ type: 'text', text: question }, ...images.map(i => ({ type: 'image_url', image_url: { url: `data:${i.mimeType};base64,${i.data}` } }))] }] }) });
-    const result = await response.json() as { choices?: Array<{ message: { content: string } }> };
+    return this.request({kind:'vision',model,bytes:Buffer.byteLength(JSON.stringify({model,question}))+images.reduce((size,image)=>size+Buffer.byteLength(image.data)+128,512),signal},async(limits,report)=>{
+    const response = await fetch(this.endpoint('chat/completions'), { method: 'POST', headers: { ...this.headers(), 'content-type': 'application/json' }, signal: AbortSignal.any([signal, AbortSignal.timeout(60_000)]), body: JSON.stringify({ model,max_tokens:limits.maxOutputTokens, messages: [{ role: 'user', content: [{ type: 'text', text: question }, ...images.map(i => ({ type: 'image_url', image_url: { url: `data:${i.mimeType};base64,${i.data}` } }))] }] }) });
+    const result = await readJsonLimited(response,524288) as { choices?: Array<{ message: { content: string } }>;usage?:unknown };report(reportedServiceUsage(result.usage));
     if (!response.ok || typeof result.choices?.[0]?.message?.content !== 'string' || !result.choices[0].message.content.trim()) throw new Error(`视觉服务调用失败或返回空内容 (${response.status})`);
-    return { text: result.choices[0].message.content };
+    if(result.choices[0].message.content.length>limits.maxResponseChars)throw new Error('视觉服务内容超过本轮输出上限');return { text: result.choices[0].message.content };
+    });
   }
   async transcribe(source: string, signal: AbortSignal): Promise<unknown> {
     const model = this.settings().transcriptionModel; if (!model) throw new Error('语音转写模型未配置');
     if (/-tts(?:-|$)/i.test(model)) throw new Error('语音转写模型填成了 TTS 合成模型；请配置服务支持的语音识别（ASR）模型与接口');
     const { buffer } = await this.bytes(source, signal, 25_000_000);
+    return this.request({kind:'transcription',model,bytes:buffer.length+512,signal},async(limits,report)=>{
     const form = new FormData(); form.set('model', model); form.set('file', new Blob([new Uint8Array(buffer)]), 'voice.wav');
     const response = await fetch(this.endpoint('audio/transcriptions'), { method: 'POST', headers: this.headers(), body: form, signal: AbortSignal.any([signal, AbortSignal.timeout(60_000)]) });
     if (!response.ok) throw await this.audioError(response, '语音转写失败');
-    return response.json();
+    const result=await readJsonLimited(response,1048576) as {text?:string;usage?:unknown};report(reportedServiceUsage(result.usage));if(typeof result.text==='string'&&result.text.length>limits.maxResponseChars)throw new Error('语音转写内容超过本轮输出上限');return result;
+    });
   }
   async speech(text: string, signal: AbortSignal): Promise<string> {
     const s = this.settings(); if (!s.speechModel) throw new Error('语音合成模型未配置');
     const qwen = this.qwenSpeechEndpoint(s.speechModel);
     if (qwen && /[\u3400-\u9fff]/u.test(s.speechVoice)) throw new Error('千问合成声音需要填写音色 ID，例如龙安灵希为 longanlingxi，不能填写中文显示名');
+    return this.request({kind:'speech',model:s.speechModel,bytes:Buffer.byteLength(text)+512,signal},async()=>{
     const response = await fetch(qwen ?? this.endpoint('audio/speech'), { method: 'POST', headers: { ...this.headers(), 'content-type': 'application/json', ...(qwen ? { 'X-DashScope-SSE': 'enable' } : {}) }, signal: AbortSignal.any([signal, AbortSignal.timeout(60_000)]), body: JSON.stringify(qwen
       ? { model: s.speechModel, input: { text, voice: s.speechVoice, format: 'mp3', sample_rate: 24000 } }
       : { model: s.speechModel, voice: s.speechVoice, input: text, response_format: 'mp3' }) });
@@ -236,28 +236,25 @@ export class MediaService {
       return this.save(await this.qwenSpeechAudio(response, signal), '.mp3');
     }
     if (/json|text\/|html/i.test(response.headers.get('content-type') ?? '')) throw new Error('语音合成服务返回了文本而非音频，请核对接口协议');
-    const buffer = Buffer.from(await response.arrayBuffer()); if (buffer.length > 25_000_000) throw new Error('合成语音过大');
+    const buffer = await readBytesLimited(response,25_000_000);
     if (!buffer.length) throw new Error('语音合成返回了空音频');
     return this.save(buffer, '.mp3');
+    });
   }
   async video(source: string, question: string, signal: AbortSignal): Promise<unknown> {
     if (!process.env.BOT_FFMPEG_BIN) throw new Error('视频抽帧未配置；请设置 FFmpeg 启动文件');
+    if(this.videoBusy)throw new Error('已有视频正在处理，请稍后再试');
+    this.videoBusy=true;
+    try{
     const { buffer } = await this.bytes(source, signal, 50_000_000);
     const input = await this.save(buffer, '.video');
-    const prefix = createHash('sha256').update(buffer).digest('hex');
-    const output = resolve(this.root, `${prefix}-%02d.jpg`);
     const count = this.settings().videoFrames;
-    await new Promise<void>((done, reject) => {
-      const child = spawn(process.env.BOT_FFMPEG_BIN!, ['-hide_banner', '-loglevel', 'error', '-y', '-i', input, '-vf', 'fps=1/3,scale=640:-2', '-frames:v', String(count), output], { windowsHide: true, stdio: 'ignore', signal: AbortSignal.any([signal, AbortSignal.timeout(45_000)]) });
-      child.once('error', reject); child.once('exit', code => code === 0 ? done() : reject(new Error('视频解码失败')));
-    });
-    const images = [];
-    for (let i = 1; i <= count; i++) { try { images.push(await this.image(resolve(this.root, `${prefix}-${String(i).padStart(2,'0')}.jpg`), signal)); } catch (e) { if ((e as NodeJS.ErrnoException).code === 'ENOENT') break; throw e; } }
-    if (!images.length) throw new Error('未取得视频画面');
-    return this.vision(images, question, signal);
+    const frames=await extractVideoFrames(process.env.BOT_FFMPEG_BIN,input,count,signal);
+    return await this.vision(frames.map(frame=>({type:'image' as const,data:frame.toString('base64'),mimeType:'image/png'})), question, signal);
+    }finally{this.videoBusy=false;}
   }
   capabilities(): Record<string, string> {
     const s = this.settings();
-    return { images: s.visionModel && process.env.BOT_MEDIA_BASE_URL ? '已配置独立视觉服务' : '图片通过 MCP 交给 DSH，需当前模型支持视觉', transcription: s.transcriptionModel && process.env.BOT_MEDIA_BASE_URL ? '已配置' : '未配置', speech: s.speechModel && process.env.BOT_MEDIA_BASE_URL ? '已配置' : '未配置', video: process.env.BOT_FFMPEG_BIN ? '已配置抽帧' : '未配置 FFmpeg', search: process.env.BOT_SEARCH_URL ? '已配置搜索服务' : '使用 DSH 已挂载的搜索/浏览工具；本 QQ 工具未配置搜索服务', qzone: process.env.BOT_QZONE_ADAPTER_URL ? '已配置空间适配服务' : '发布依赖协议端扩展；浏览/评论未配置适配服务' };
+    return { images: s.visionModel && process.env.BOT_MEDIA_BASE_URL ? '已配置独立视觉服务' : '图片通过 MCP 交给 DSH，需当前模型支持视觉', transcription: s.transcriptionModel && process.env.BOT_MEDIA_BASE_URL ? '已配置' : '未配置', speech: s.speechModel && process.env.BOT_MEDIA_BASE_URL ? '已配置' : '未配置', video: process.env.BOT_FFMPEG_BIN ? '已配置抽帧' : '未配置 FFmpeg', search: '使用 DSH / DeepSeek 原生搜索与网页读取，是否可用取决于当前 Profile 和凭据', qzone: '浏览与评论内置连接 NapCat 登录；发布说说使用协议端空间扩展，可在扩展服务检查连接' };
   }
 }

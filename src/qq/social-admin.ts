@@ -1,10 +1,11 @@
 import { z } from 'zod';
-import { SocialStore } from './social-store.js';
+import type {SocialRepository,SocialField} from '../storage/social-repository.js';
 import { MediaService } from '../services/media.js';
 import { socialTools } from './social-tools.js';
 import { legacyTools } from './legacy-tools.js';
 import { getSettings, getSettingsPath, saveSettings } from '../core/settings.js';
 import type { DailyUsageStore } from '../core/usage.js';
+import type {SqliteDailyUsageStore} from '../storage/sqlite-usage-store.js';
 import { stickerSearchText } from './sticker-review.js';
 import { reviseMemory, forgetMemory, memoryMeta, fingerprint } from '../agent/cognition.js';
 import { learningModel } from '../agent/learning-model.js';
@@ -19,7 +20,7 @@ const requestSchema = z.object({
   probability: z.number().int().min(0).max(100).default(10), keywords: z.string().max(1000).default(''), proactive: z.boolean().default(true),
 }).strict().refine(value => value.op === 'profile' || value.text.length <= 2000, { message: '记忆内容最多 2000 字', path: ['text'] });
 
-export async function socialAdmin(input: unknown, store: SocialStore, media: MediaService,
+export async function socialAdmin(input: unknown, store: SocialRepository, media: MediaService,
   live?: { refresh(): Promise<void>; reset(chat: string): Promise<void>; review?(chat:string):Promise<void>; usage?: DailyUsageStore; stickers?: { sync(): Promise<unknown>;collect(id:string):Promise<void>;remove(id:string):Promise<void> } }, offlineUsage?: DailyUsageStore): Promise<unknown> {
   const a = requestSchema.parse(input);
   if(a.op==='review_memory'){if(!live?.review)throw new Error('请启动机器人后整理当前会话');await live.review(a.chat);}
@@ -73,7 +74,7 @@ export async function socialAdmin(input: unknown, store: SocialStore, media: Med
     await store.update(d => { const m = d.memories.find(m => m.id === a.id); if (!m) throw new Error('记忆不存在'); if (a.expectedText !== undefined && m.text !== a.expectedText) throw new Error('记忆已被其他操作修改，请刷新后核对；当前编辑仍保留'); reviseMemory(d,m.id,a.text); });
   }
   if(a.op==='delete'&&a.section==='stickers') {
-    const item=store.snapshot().stickers.find(s=>s.id===a.id);if(!item)throw new Error('表情不存在');
+    const item=store.view('stickers').stickers.find(s=>s.id===a.id);if(!item)throw new Error('表情不存在');
     if(item.qq) {if(!live?.stickers)throw new Error('请启动机器人后从 QQ 收藏中移除表情');await live.stickers.remove(a.id);}
     else await store.update(d=>{d.stickers=d.stickers.filter(s=>s.id!==a.id);});
   }
@@ -85,10 +86,17 @@ export async function socialAdmin(input: unknown, store: SocialStore, media: Med
     else if(a.section==='interests'){if(!d.autonomous.interests.some(i=>i.id===a.id))throw new Error('兴趣不存在');d.autonomous.interests=d.autonomous.interests.filter(i=>i.id!==a.id);}
     else throw new Error('该列表不支持删除');
   });
-  const data = store.snapshot(), s = getSettings();
+  const sectionField:Record<string,SocialField>={thoughts:'autonomous',interests:'autonomous',decisions:'autonomous',lexicon:'cognition',learning:'cognition'};
+  const field=sectionField[a.section]??(!['messages','capabilities'].includes(a.section)?a.section as SocialField:undefined);
+  const data = store.view('contacts','profiles','turns',...(field?[field]:[]),...(a.section==='memories'?['cognition' as const]:[])), s = getSettings();
+  const archive=a.section==='messages'?await store.queryMessages({chat:a.chat||undefined,query:a.query,limit:200}):undefined;
+  if(archive)data.messages=archive.rows.slice().reverse();
   type Row = { id: string; chat: string; name: string; summary: string; status: string; time: string; detail: string; text: string };
   const date = (at: number) => at ? new Date(at).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false }) : '';
   const rows: Row[] = [];
+  const usage = live?.usage ?? offlineUsage;
+  const operationUsage=usage as (DailyUsageStore&Partial<Pick<SqliteDailyUsageStore,'operationSummaries'>>)|undefined;
+  const operations=a.section==='actions'?await operationUsage?.operationSummaries?.(store.view('account').account,a.chat||undefined):undefined;
   const add = (id: string, chat: string, name: string, summary: string, status: string, at: number, detail = summary, text = '') => {
     if (a.op === 'list' && a.chat && chat !== a.chat) return;
     if (a.query && !`${name} ${summary} ${chat} ${['memories','stickers'].includes(a.section) ? detail : ''}`.toLowerCase().includes(a.query.toLowerCase())) return;
@@ -97,10 +105,10 @@ export async function socialAdmin(input: unknown, store: SocialStore, media: Med
   switch (a.section) {
     case 'thoughts':for(const t of [...data.autonomous.thoughts].sort((x,y)=>Number(['pending','running'].includes(y.state))-Number(['pending','running'].includes(x.state))||y.at-x.at)) {
       const status={pending:'等待判断',running:'执行中',done:'完成',dismissed:'已放弃',expired:'已过期',unknown:'结果待核对'}[t.state];
-      add(t.id,t.chat,t.summary,t.reason,status,t.at,`行动：${{chat:'主动聊天',collect:'看图判断收藏',qzone:'独立空间创作'}[t.kind]}\n来源：${t.chat||'公开创作兴趣'}${t.messageId!==undefined?' · 消息 #'+t.messageId:''}\n\n理由：${t.reason}\n适合时间：${date(t.due)}\n有效期至：${date(t.expires)}\n\n结果：${t.result||'尚未判断'}`);
+      add(t.id,t.chat,t.summary,t.reason,status,t.at,`行动：${{chat:'主动聊天',collect:'看图判断收藏',qzone:'独立空间创作','qzone-comment':'自主空间互动'}[t.kind]}\n来源：${t.targetUser?'QQ '+t.targetUser:t.chat||'公开创作兴趣'}${t.messageId!==undefined?' · 消息 #'+t.messageId:''}\n\n理由：${t.reason}\n适合时间：${date(t.due)}\n有效期至：${date(t.expires)}\n\n结果：${t.result||'尚未判断'}`);
     }break;
     case 'interests':for(const i of [...data.autonomous.interests].sort((x,y)=>y.updatedAt-x.updatedAt))add(i.id,i.chat,i.topic,i.reason,`兴趣程度 ${i.strength}/5`,i.updatedAt,`来源：${i.chat||'公开兴趣'}\n兴趣程度：${i.strength}/5\n\n依据：${i.reason}`,i.topic);break;
-    case 'decisions':for(const d of [...data.autonomous.decisions].reverse())add(d.id,d.chat,{chat:'主动聊天判断',collect:'收藏判断',qzone:'空间创作判断'}[d.kind],d.reason,{done:'完成',dismissed:'保持安静',pending:'已推迟',unknown:'结果待核对',expired:'已过期'}[d.outcome]??d.outcome,d.at,`${d.reason}\n关联想法：${d.thoughtId}`);break;
+    case 'decisions':for(const d of [...data.autonomous.decisions].reverse())add(d.id,d.chat,{chat:'主动聊天判断',collect:'收藏判断',qzone:'空间创作判断','qzone-comment':'空间互动判断'}[d.kind],d.reason,{done:'完成',dismissed:'保持安静',pending:'已推迟',unknown:'结果待核对',expired:'已过期'}[d.outcome]??d.outcome,d.at,`${d.reason}\n关联想法：${d.thoughtId}`);break;
     case 'contacts': for (const c of data.contacts) {
       const [kind,id] = c.chat.split(':');
       const blocked = (kind === 'group' ? s.social.blockedGroups : s.social.blockedUsers).includes(id);
@@ -119,7 +127,7 @@ export async function socialAdmin(input: unknown, store: SocialStore, media: Med
     } break;
     case 'lexicon':for(const l of [...data.cognition.lexicon].reverse())add(l.id,l.chat,l.term,l.meaning,{candidate:'待确认',active:'有效',disabled:'已停用'}[l.status],l.at,
       `类型：${l.kind==='term'?'群内用语':'表达参考'}\n${l.meaning}\n\n依据消息：${l.sources.join('、')}\n修订：${l.revision} · ${l.locked?'管理员锁定':'自动候选'}\n历史版本：\n${l.history.map(h=>`${date(h.at)} ${h.reason}\n${h.text}`).join('\n')||'无'}`,l.meaning);break;
-    case 'learning':for(const j of [...data.cognition.jobs].reverse())add(j.id,j.chat,'聊天资料整理',j.summary,{running:'分析中',completed:'完成',failed:'失败',unknown:'结果待核对',discarded:'未应用'}[j.state],j.at,`${j.summary}\n依据消息：${j.sources.join('、')}\n服务返回用量：${j.inputTokens===undefined?'未知':`${j.inputTokens} 输入 / ${j.outputTokens} 输出`}\n此记录统计一次无工具分析，不推算费用。`);break;
+    case 'learning':for(const j of [...data.cognition.jobs].reverse())add(j.id,j.chat,'聊天资料整理',j.summary,{preparing:'准备分析',running:'分析中',completed:'完成',failed:'失败',unknown:'结果待核对',discarded:'未应用'}[j.state],j.at,`${j.summary}\n依据消息：${j.sources.join('、')}\n服务返回用量：${j.inputTokens===undefined?'未知':`${j.inputTokens} 输入 / ${j.outputTokens} 输出`}\n此记录统计一次无工具分析，不推算费用。`);break;
     case 'stickers': for (const t of data.stickers) {
       if(t.qq&&!t.qqPresent)continue;
       if (a.query && !(stickerSearchText(t) + ' ' + (t.analysis?.avoid.join(' ') ?? '').toLocaleLowerCase()).includes(a.query.toLocaleLowerCase())) continue;
@@ -129,33 +137,42 @@ export async function socialAdmin(input: unknown, store: SocialStore, media: Med
     } break;
     case 'tasks': for (const t of [...data.tasks].reverse()) add(t.id,t.chat,t.text,t.error || t.text,{ pending:'等待执行',blocked:'等待条件恢复',running:'执行中',sent:'已发送',failed:'失败',unknown:'结果待核对',cancelled:'已取消' }[t.state],t.due,`${t.text}\n${t.error || ''}\n${t.interval ? `每 ${t.interval/60000} 分钟` : '一次性'}`); break;
     case 'events': for (const e of [...data.events].reverse()) add(e.id,e.chat,e.type,String(e.data.comment ?? e.data.sub_type ?? ''),e.handled ? '已处理' : '已记录',e.at,JSON.stringify(e.data,null,2)); break;
-    case 'actions': for (const t of [...data.actions].reverse()) {
+    case 'actions': {
+      const authoritative=operations?.rows.map(({record,state,at,error})=>({id:record.id,chat:record.chat,tool:record.tool,at,summary:error||record.summary,state:state==='completed'?'success':['created','reserved','submitting'].includes(state)?'running':state}))??[],ids=new Set(authoritative.map(row=>row.id));
+      for (const t of [...authoritative,...[...data.actions].reverse().filter(row=>!ids.has(row.id))].sort((a,b)=>b.at-a.at)) {
       const alias: Record<string,string> = { send_message:'qq_send_message', like:'qq_like', qzone_post:'qq_qzone_post' };
-      const title = [...socialTools,...legacyTools].find(tool => tool.name === (alias[t.tool] ?? t.tool))?.title ?? t.tool;
-      add(t.id,t.chat,title,t.summary,{ running:'执行中',success:'成功',failed:'失败',unknown:'结果待核对' }[t.state],t.at);
-    } break;
+      const titles:Record<string,string>={normal_reply:'会话回复',reminder:'发送提醒',system_notice:'确认与忙碌通知',owner_sticker_collect:'手动收藏表情',owner_sticker_remove:'手动移除收藏'};
+      const title = [...socialTools,...legacyTools].find(tool => tool.name === (alias[t.tool] ?? t.tool))?.title ?? titles[t.tool]??t.tool;
+      add(t.id,t.chat,title,t.summary,({ running:'执行中',success:'成功',failed:'失败',unknown:'结果待核对' } as Record<string,string>)[t.state],t.at);
+    } break;}
     case 'turns': for (const t of [...data.turns].reverse()) add(t.id,t.chat,`${Math.round(t.duration/1000)} 秒`,t.output || t.error,t.error ? '失败' : '完成',t.at,`输入：\n${t.input}\n\n输出：\n${t.output}\n\n工具：${t.tools.join('、')}\n${t.error}\n\n用量：${t.inputTokens === null ? 'DSH 未提供计费用量' : t.inputTokens + ' 输入 / ' + t.outputTokens + ' 输出'}\n上下文：${t.contextSize?`${t.contextUsed}/${t.contextSize}（DSH 上报占用，非计费累计）`:'DSH 未上报'}\n会话代数：${t.generation??1}`); break;
     case 'capabilities': {
       const names: Record<string,string> = { images:'图片理解',transcription:'语音识别',speech:'语音合成',video:'视频理解',search:'联网搜索',qzone:'空间动态' };
       for (const [name,value] of Object.entries(media.capabilities())) add(name,'',names[name] ?? name,value,value.includes('未配置') ? '未配置' : '可检查',0);
       const analysis=learningModel().available();add('learning-model','','后台分析模型',analysis||'可使用无工具分析通道',analysis?'未配置':'可检查',0);
-      add('managed-web','','本项目联网',s.features.browsing.enabled?`${s.web.provider}；DSH 外部工具独立管理`:'本项目联网已关闭',s.features.browsing.enabled?'可检查':'已关闭',0);
       for (const tool of [...socialTools,...legacyTools]) add(tool.name,'',tool.title,tool.description,toolAvailable(tool.name,s)?'已注册':'已关闭或缺少依赖',0);
       break;
     }
   }
   const note=a.section==='stickers'?`${live?.stickers?'已读取 QQ 收藏':'离线缓存，启动机器人后可刷新 QQ 收藏'} · QQ 收藏 ${data.stickers.filter(t=>t.qqPresent).length} 张；本地待同步 ${data.stickers.filter(t=>!t.qq).length} 张。` : rows.length?`显示前 ${Math.min(200,rows.length)} 条；时间为上海时间。`:'暂无记录。启动机器人后接收消息，或刷新联系人。';
   if(a.section==='memories'&&a.op==='edit_memory') {const selected=rows.findIndex(row=>row.id===a.id);if(selected>0)rows.unshift(rows.splice(selected,1)[0]);}
-  const usage = live?.usage ?? offlineUsage;
   const quotas = usage?.summary([
+    {key:'service-requests',label:'模型与能力请求',limit:s.requests.perDay},
+    {key:'service-background',label:'后台服务请求',limit:s.requests.backgroundPerDay},
+    {key:'service-media',label:'独立媒体服务',limit:s.requests.mediaPerDay},
+    {key:'native-web',label:'原生联网',limit:s.requests.nativeWebPerDay},
     {key:'social-actions',label:'QQ 动作',limit:s.social.actionsPerDay},
+    {key:'system-notices',label:'确认与忙碌通知',limit:s.requests.noticesPerDay},
     {key:'proactive',label:'主动消息',limit:s.budgets.proactiveMessagesPerDay},
     {key:'reminders',label:'定时提醒',limit:s.budgets.remindersPerDay},
     {key:'likes',label:'名片点赞',limit:s.budgets.likesPerDay},
     {key:'qzone',label:'空间发布',limit:s.features.qzone.dailyLimit},
+    {key:'qzone-comments',label:'空间评论',limit:s.features.qzone.commentDailyLimit},
     {key:'autonomous-decisions',label:'后台判断',limit:s.social.autonomousDecisionsPerDay},
     {key:'learning',label:'后台学习',limit:s.learning.dailyCalls},
     ...data.contacts.filter(c=>c.chat.startsWith('group:')).map(c=>({key:c.chat,label:c.name+' 主动消息与提醒',limit:s.chat.group.proactive.perGroupPerDay})),
   ]);
-  return { op: a.op, section: a.section, rows: rows.slice(0,200), total: rows.length, profiles: data.profiles, socialSettings: s.social, settingsPath:getSettingsPath(), quotas:quotas?{...quotas,live:!!live}:null, note, usage: { turns: data.turns.length, tokensKnown: data.turns.filter(t => t.inputTokens !== null).length } };
+  const requestUsage=usage as (DailyUsageStore&Partial<Pick<SqliteDailyUsageStore,'requestStatistics'>>)|undefined;
+  const modelUsage=await requestUsage?.requestStatistics?.();
+  return { op: a.op, section: a.section, rows: rows.slice(0,200), total: archive?.total??rows.length, profiles: data.profiles, socialSettings: s.social, settingsPath:getSettingsPath(), quotas:quotas?{...quotas,live:!!live}:null, modelUsage:modelUsage??null, note, usage: { turns: data.turns.length, tokensKnown: data.turns.filter(t => t.inputTokens !== null).length } };
 }

@@ -26,9 +26,9 @@ partial class App
     static List<SettingsLink> settingsLinks = new List<SettingsLink>();
     static Dictionary<string, FieldView> fieldViews = new Dictionary<string, FieldView>();
     static string selectedCategory = "对话与参与";
-    static readonly string[] categoryNames = { "对话与参与", "联系范围", "功能开关", "主动与提醒", "额度与节奏", "身份与审批", "记录保留" };
+    static readonly string[] categoryNames = { "对话与参与", "功能开关", "主动与提醒", "额度与节奏", "联系范围", "身份与审批", "记录保留" };
     static readonly string[] categoryDescriptions = {
-        "决定什么时候回应，以及如何自然地参与聊天。", "管理允许与屏蔽名单；动作确认统一在身份与审批设置。", "决定允许使用哪些能力；模型与服务在连接与运行配置。", "管理后台活动、联系间隔与安静时段；每日额度集中在额度与节奏。", "集中管理每日额度与回复节奏。", "管理机器人名称、管理员，以及 QQ 动作和工作区操作的确认规则。", "控制消息记录的保留时间与条数；文件位置在连接与运行管理。"
+        "决定什么时候回应，以及如何自然地参与聊天。", "决定允许使用哪些能力；模型与服务在连接与运行配置。", "管理后台活动、联系间隔与安静时段；每日额度集中在额度与节奏。", "集中管理每日额度与回复节奏。", "管理允许与屏蔽名单；动作确认统一在身份与审批设置。", "管理机器人名称、管理员，以及 QQ 动作和工作区操作的确认规则。", "控制消息记录的保留时间与条数；文件位置在连接与运行管理。"
     };
     static readonly FieldSpec[] fieldSpecs = {
         new FieldSpec("learning.memory", "功能开关", "记忆与群内学习", "自动整理群友记忆", "仅分析明确开启的会话；提案经来源与版本校验后保存。"),
@@ -43,18 +43,26 @@ partial class App
         new FieldSpec("learning.memoryChars", "对话与参与", "记忆与用语召回", "每轮记忆字数", "按完整条目筛选，不在事实中间截断。", "字", 0, 6000, 100),
         new FieldSpec("learning.lexiconCount", "对话与参与", "记忆与用语召回", "每轮群内用语条数", "只使用当前群已确认且相关的词条。", "条", 0, 10),
         new FieldSpec("learning.lexiconChars", "对话与参与", "记忆与用语召回", "每轮用语字数", "表达参考不会改写人设。", "字", 0, 2000, 100),
-        new FieldSpec("features.browsing.enabled", "功能开关", "联网核实", "本项目联网", "控制 QQ 搜索与静态网页读取；DSH 外部联网独立管理。"),
-        new FieldSpec("web.provider", "功能开关", "联网核实", "搜索提供方", "Tavily 密钥在连接与运行填写；Bing 为实验性入口。"),
-        new FieldSpec("web.fallback", "功能开关", "联网核实", "备用搜索提供方", "首选失败时最多尝试一个明确配置的备用。"),
-        new FieldSpec("web.searchesPerTurn", "额度与节奏", "联网与工具预算", "每轮搜索次数", "缓存命中也占一次；0 表示禁止搜索。", "次", 0, 10),
-        new FieldSpec("features.browsing.maxNavigations", "额度与节奏", "联网与工具预算", "每轮网页读取次数", "正文分页同样占一次；外部浏览器独立管理。", "次", 1, 10),
-        new FieldSpec("web.cacheMinutes", "记录保留", "网页缓存", "搜索缓存有效时间", "按会话和提供方隔离，支持明确刷新。", "分钟", 0, 60),
-        new FieldSpec("web.pageChars", "对话与参与", "联网正文", "单页返回字数", "超长正文分页读取，保留真实来源。", "字", 1000, 16000, 1000),
         new FieldSpec("context.backgroundChars", "对话与参与", "上下文预算", "附加群聊字数上限", "仅限制附加背景，保留当前问题。", "字", 500, 12000, 500),
         new FieldSpec("context.warningPercent", "额度与节奏", "上下文管理", "上下文提醒比例", "依赖 DSH 上报；上下文占用不等于计费用量。", "%", 30, 95, 5),
+        new FieldSpec("context.activeSessions", "额度与节奏", "上下文管理", "活跃模型会话上限", "达到上限时释放较早的空闲会话；历史映射保留，下次聊天可恢复。", "个", 4, 512),
+        new FieldSpec("context.idleMinutes", "额度与节奏", "上下文管理", "空闲会话释放时间", "等待模型进程确认释放后才腾出名额；处理中的会话保持有效。", "分钟", 1, 1440),
         new FieldSpec("context.rollover", "额度与节奏", "上下文管理", "高占用时更换会话", "默认沿用 DSH 压缩；开启后在下一轮交接近期记录。"),
         new FieldSpec("context.rolloverPercent", "额度与节奏", "上下文管理", "会话更换比例", "新会话及映射保存成功后才替换旧会话。", "%", 50, 99),
-        new FieldSpec("context.toolsPerTurn", "额度与节奏", "联网与工具预算", "每轮 QQ 工具调用上限", "QQ 工具共享；不代表 DSH 原生工具全局限制。", "次", 1, 200),
+        new FieldSpec("context.toolsPerTurn", "额度与节奏", "工具预算", "每轮工具调用上限", "QQ 工具与原生搜索、网页读取共享；达到上限后停止本轮工具。", "次", 1, 200),
+        new FieldSpec("requests.perDay", "额度与节奏", "服务请求额度", "每日服务请求总量", "模型生成、压缩、独立媒体、后台学习和原生联网共享；失败或结果未知仍计次。", "次/天", 0, 10000),
+        new FieldSpec("requests.perUserPerDay", "额度与节奏", "服务请求额度", "每位用户每日请求量", "限制由这位用户触发的服务请求；同时受总量和会话额度限制。", "次/天", 0, 10000),
+        new FieldSpec("requests.perChatPerDay", "额度与节奏", "服务请求额度", "每个会话每日请求量", "群聊与私聊各自累计；同时受每日总量限制。", "次/天", 0, 10000),
+        new FieldSpec("requests.backgroundPerDay", "额度与节奏", "服务请求额度", "每日后台服务请求量", "主动行动和后台学习共享，避免无人交互时持续请求。", "次/天", 0, 1000),
+        new FieldSpec("requests.mediaPerDay", "额度与节奏", "服务请求额度", "每日独立媒体请求量", "独立看图、语音识别和语音合成共享；图片随当前对话模型发送时不重复计次。", "次/天", 0, 1000),
+        new FieldSpec("requests.nativeWebPerDay", "额度与节奏", "服务请求额度", "每日原生联网调用量", "搜索与网页读取共享；同时受服务总量和每轮工具上限限制。", "次/天", 0, 1000),
+        new FieldSpec("requests.noticesPerDay", "额度与节奏", "QQ 通知额度", "每日确认与忙碌通知量", "授权请求、授权结果和忙碌提示共享；同时占用 QQ 动作总量。", "次/天", 0, 1000),
+        new FieldSpec("requests.perMinute", "额度与节奏", "请求节奏与大小", "每分钟服务请求量", "按最近一分钟统计，限制突发请求。", "次", 1, 1000),
+        new FieldSpec("requests.perTurn", "额度与节奏", "请求节奏与大小", "每轮服务请求量", "包含模型续答、重试及压缩；工具调用另受共享工具上限限制。", "次", 1, 100),
+        new FieldSpec("requests.concurrent", "额度与节奏", "请求节奏与大小", "同时执行的服务请求量", "所有会话、后台任务和媒体服务共享。", "个", 1, 16),
+        new FieldSpec("requests.maxOutputTokens", "额度与节奏", "请求节奏与大小", "单次最大输出 Token", "提交给模型的输出上限；计费只记录服务实际上报值。降低后若压缩被阻止，请重新连接模型。", "Token", 128, 32768, 128),
+        new FieldSpec("requests.maxRequestKiB", "额度与节奏", "请求节奏与大小", "单次请求材料大小", "包括上下文、工具定义及图片等材料，超过上限时停止提交。", "KiB", 64, 32768, 64),
+        new FieldSpec("requests.maxResponseChars", "额度与节奏", "请求节奏与大小", "单次返回内容字数", "限制文本、推理内容及工具参数总量；超过上限中止本轮。", "字", 1000, 128000, 1000),
         new FieldSpec("context.filterTools", "功能开关", "能力清单", "按可用条件提供 QQ 工具", "配置变化在下一轮更换会话；执行时重新校验。"),
         new FieldSpec("chat.privateAutoReply", "对话与参与", "参与方式", "自动回复私聊", "收到好友私聊后，允许小鲸自然回应。"),
         new FieldSpec("social.responseMode", "对话与参与", "参与方式", "群聊参与方式", "直接找小鲸的消息仍会优先回应。"),
@@ -79,15 +87,18 @@ partial class App
         new FieldSpec("social.filesEnabled", "功能开关", "日常能力", "文件收发", "允许制作文本、接收文件和发送媒体库文件。"),
         new FieldSpec("social.requestsEnabled", "功能开关", "日常能力", "好友与群申请", "允许理解并处理真实收到的申请和邀请。"),
         new FieldSpec("features.qzone.enabled", "功能开关", "日常能力", "QQ 空间发布", "依赖协议端的空间接口支持；发布确认规则在身份与审批管理。"),
+        new FieldSpec("features.qzone.browseEnabled", "功能开关", "QQ 空间互动", "空间浏览", "读取自己或指定好友的说说；直接复用 NapCat 登录，可在扩展服务检查连接。"),
+        new FieldSpec("features.qzone.commentsEnabled", "功能开关", "QQ 空间互动", "空间评论与回复", "需先开启空间浏览，只能评论当前会话实际读到的动态；好友空间受联系范围限制。"),
+        new FieldSpec("features.qzone.commentRequireConfirm", "身份与审批", "QQ 动作确认", "空间评论前确认", "确认时显示动态作者、动态内容及评论正文；敏感或全部确认模式仍要求审批。"),
         new FieldSpec("features.qzone.requireConfirm", "身份与审批", "QQ 动作确认", "空间发布前确认", "即使选择自主执行，开启此项后，空间发布仍需确认实际正文与图片。"),
         new FieldSpec("social.visionModel", "媒体服务", "模型与声音", "独立视觉模型", "留空沿用对话模型；填写时使用本页上方的媒体服务。"),
         new FieldSpec("social.transcriptionModel", "媒体服务", "模型与声音", "语音转写模型", "使用本页上方的媒体服务；留空表示未配置语音识别。"),
         new FieldSpec("social.speechModel", "媒体服务", "模型与声音", "语音合成模型", "使用本页上方的媒体服务；留空表示未配置语音合成。"),
         new FieldSpec("social.speechVoice", "媒体服务", "模型与声音", "合成声音", "填写语音合成服务支持的声音名称。"),
         new FieldSpec("social.videoFrames", "媒体服务", "模型与声音", "视频抽帧数量", "需要本页配置的 FFmpeg 和可用视觉能力。", "帧", 1, 12),
-        new FieldSpec("social.remindersEnabled", "主动与提醒", "定时提醒", "定时提醒", "允许设置、查询和取消持久化提醒。"),
+        new FieldSpec("social.remindersEnabled", "主动与提醒", "定时提醒", "定时提醒", "周期错过整段时跳过积压，一次提醒迟到超过24小时停止补发；结果未知不自动重发。"),
         new FieldSpec("social.proactiveEnabled", "主动与提醒", "后台活动", "后台自主活动", "后台聊天、挑选表情和空间创作的总开关；定时提醒独立控制。"),
-        new FieldSpec("social.proactiveIntervalMinutes", "主动与提醒", "后台活动", "后台检查间隔", "按此间隔检查后台聊天、收藏与空间候选；没有内容时保持安静。", "分钟", 5, 1440, 5),
+        new FieldSpec("social.proactiveIntervalMinutes", "主动与提醒", "后台活动", "聊天静置时间", "会话安静多久后开始考虑主动联系；收藏、到期想法和空间任务独立调度，不受此等待时间拖延。", "分钟", 5, 1440, 5),
         new FieldSpec("social.autonomousEnabled", "主动与提醒", "兴趣与想法", "持续兴趣与想法", "结合实际互动积累兴趣和未完话题；关闭后暂停自主判断。"),
         new FieldSpec("social.personalInterests", "主动与提醒", "兴趣与想法", "全局创作兴趣", "空间独立创作可使用这些公开主题；多个主题用逗号分隔。聊天中的兴趣保留在原会话。"),
         new FieldSpec("social.autonomousDecisionsPerDay", "额度与节奏", "后台任务额度", "每日后台判断上限", "候选想法才会唤醒模型；没有内容时可以安静结束。", "次/天", 0, 200),
@@ -98,6 +109,9 @@ partial class App
         new FieldSpec("social.autoQzoneEnabled", "主动与提醒", "自主空间分享", "自主空间创作", "使用独立会话和公开兴趣创作，需开启 QQ 空间发布、后台自主活动和持续兴趣与想法。"),
         new FieldSpec("social.autoQzonePerDay", "额度与节奏", "后台任务额度", "每日自主空间上限", "同时受空间总额度约束；没有内容时可以一天不发。", "条/天", 0, 10),
         new FieldSpec("social.qzoneIntervalHours", "主动与提醒", "自主空间分享", "空间创作判断间隔", "每次判断后间隔至少这么久，避免反复生成相似内容。", "小时", 1, 168),
+        new FieldSpec("social.autoQzoneCommentEnabled", "主动与提醒", "自主空间互动", "自主浏览与评论好友空间", "定时查看允许好友近期的新说说，有具体想法时自行评论；仍受空间浏览、评论开关、额度和确认规则约束。"),
+        new FieldSpec("social.autoQzoneCommentUsers", "主动与提醒", "自主空间互动", "自主评论的好友 QQ", "多个 QQ 用逗号分隔；留空表示所有允许联系的好友。跳过禁止后台活动的好友，不引用私聊或群聊经历。"),
+        new FieldSpec("social.qzoneCommentIntervalMinutes", "主动与提醒", "自主空间互动", "好友空间检查间隔", "每次轮换一位好友，只判断近 24 小时的新动态；已评论或结果待核对的动态不会自主重复评论。", "分钟", 5, 1440, 5),
         new FieldSpec("chat.group.proactive.enabled", "主动与提醒", "群聊与安静时段", "允许群主动消息与提醒", "群内后台聊天、跨群发送和群提醒共同使用此权限。"),
         new FieldSpec("social.quietStartHour", "主动与提醒", "群聊与安静时段", "安静时段开始", "按上海时间暂停后台聊天、收藏与空间创作；约定提醒不受影响。", "时", 0, 23),
         new FieldSpec("social.quietEndHour", "主动与提醒", "群聊与安静时段", "安静时段结束", "开始与结束相同表示不设置安静时段。", "时", 0, 23),
@@ -107,17 +121,17 @@ partial class App
         new FieldSpec("chat.group.proactive.perGroupPerDay", "额度与节奏", "每日额度", "每群主动消息与提醒", "群内主动消息和提醒共用此额度，各自再受对应全局额度约束。", "条/天", 0, 20),
         new FieldSpec("budgets.likesPerDay", "额度与节奏", "每日额度", "名片点赞", "按实际点赞次数扣除。", "次/天", 0, 200, 5),
         new FieldSpec("features.qzone.dailyLimit", "额度与节奏", "每日额度", "空间发布总额", "对话中的发布与后台自主发布共用；后台另受自主空间上限约束。", "次/天", 0, 10),
+        new FieldSpec("features.qzone.commentDailyLimit", "额度与节奏", "每日额度", "空间评论总额", "评论与回复共用；发送失败或结果未知保留次数，上海零点重置。", "次/天", 0, 50),
         new FieldSpec("social.messagesPerMinute", "额度与节奏", "回复节奏", "会话操作频率", "限制同一会话一分钟内的动作次数。", "次/分", 1, 100),
         new FieldSpec("chat.delay.minMs", "额度与节奏", "回复节奏", "最短回复延迟", "最短延迟不能大于最长延迟。", "毫秒", 0, 10000, 100),
         new FieldSpec("chat.delay.maxMs", "额度与节奏", "回复节奏", "最长回复延迟", "在范围内选择自然的发送间隔。", "毫秒", 0, 20000, 100),
         new FieldSpec("chat.delay.chunkSize", "额度与节奏", "回复节奏", "长消息分段", "超过这个长度时分条发送。", "字", 100, 4000, 100),
         new FieldSpec("identity.name", "身份与审批", "小鲸的身份", "机器人名称", "群友在句首叫这个名字，也能唤起小鲸。"),
         new FieldSpec("approval.adminQq", "身份与审批", "审批接收人", "管理员 QQ", "接收 QQ 动作和工作区操作的审批；0 表示未设置。", "", 0, 9007199254740991),
-        new FieldSpec("approval.allowExec", "身份与审批", "工作区审批", "自动执行命令", "独立于 QQ 动作的自主开关，控制 DSH 命令执行。"),
+        new FieldSpec("approval.allowExec", "身份与审批", "工作区审批", "旧版命令执行设置", "当前受限运行模式关闭本地命令和文件工具；保留旧值用于兼容，不能用它开放权限。"),
         new FieldSpec("approval.timeoutMs", "身份与审批", "审批接收人", "审批等待时间", "QQ 动作和工作区操作共用；超时后取消本次审批。", "毫秒", 5000, 600000, 5000),
         new FieldSpec("social.retentionDays", "记录保留", "消息记录", "消息保留时间", "过期消息会在后续保存时淘汰。", "天", 1, 365),
-        new FieldSpec("social.messagesPerChat", "记录保留", "消息记录", "每会话消息上限", "保留最近的消息，不影响独立存储的长期记忆。", "条", 80, 20000, 100),
-        new FieldSpec("features.browsing.maxScreenshots", "兼容保留", "浏览器", "截图次数上限", "未接入，保留已有配置。", "次", 0, 5)
+        new FieldSpec("social.messagesPerChat", "记录保留", "消息记录", "每会话消息上限", "保留最近的消息，不影响独立存储的长期记忆。", "条", 80, 20000, 100)
     };
     static Brush Ink(string key) { return (Brush)Application.Current.Resources[key]; }
     static Brush Color(string value) { return (Brush)new BrushConverter().ConvertFromString(value); }
@@ -129,7 +143,7 @@ partial class App
     }
     static Dictionary<string,object> FlattenSettings(Dictionary<string,object> data, string prefix = "") {
         var result = new Dictionary<string,object>();
-        foreach (var pair in data) { var nested=pair.Value as Dictionary<string,object>; if(nested!=null) foreach(var child in FlattenSettings(nested,prefix+pair.Key+".")) result[child.Key]=child.Value; else result[prefix+pair.Key]=pair.Value; }
+        foreach (var pair in data) { if(prefix.Length==0&&pair.Key=="installation")continue;var nested=pair.Value as Dictionary<string,object>; if(nested!=null) foreach(var child in FlattenSettings(nested,prefix+pair.Key+".")) result[child.Key]=child.Value; else result[prefix+pair.Key]=pair.Value; }
         return result;
     }
     static void BuildSettings(Dictionary<string,object> data, StackPanel panel) {
@@ -154,8 +168,8 @@ partial class App
         Find<ListBox>("SettingsNav").ItemsSource=categoryNames.Select((name,i)=>new SettingsCategory { Name=name, Description=categoryDescriptions[i], Count=specs.Count(s=>s.Category==name).ToString() }).ToList();
         Find<ListBox>("SettingsNav").SelectedItem=((IEnumerable<SettingsCategory>)Find<ListBox>("SettingsNav").ItemsSource).First(c=>c.Name==selectedCategory);
         AddSettingsLink(panel,"功能开关","记忆内容与收藏","记忆 人设 收藏 表情","长期记忆在人设与记忆中编辑，收藏表情在 QQ 活动中管理。","管理长期记忆",()=>OpenFriendMemory(null));
-        AddSettingsLink(panel,"功能开关","空间与扩展服务","空间 搜索 适配","空间接口、搜索适配服务在扩展服务中配置；对应能力是否可用仍取决于协议与服务支持。","查看扩展服务",()=>NavigateRuntime(4));
-        AddSettingsLink(panel,"功能开关","浏览器工具","浏览器 导航 截图","浏览器预留项尚未接入，不提供编辑；外部浏览器与搜索工具由 DSH Profile 管理。","查看 DSH 配置",()=>NavigateRuntime(1));
+        AddSettingsLink(panel,"功能开关","空间连接与后台分析","空间 连接 NapCat 后台 分析","空间直接复用 NapCat 登录；扩展服务中可检查空间连接，也可配置后台分析模型。","检查空间连接",()=>NavigateRuntime(4));
+        AddSettingsLink(panel,"功能开关","联网搜索","联网 搜索 网页 DeepSeek DSH","联网搜索与网页读取由 DSH / DeepSeek 原生工具提供，使用当前 Profile 与凭据。","查看模型与运行环境",()=>NavigateRuntime(1));
         AddSettingsLink(panel,"联系范围","动作确认规则","确认 审批 权限 管理员","允许联系哪些对象在本页管理；QQ 动作是否需要确认由身份与审批管理。","设置动作确认",()=>NavigateSetting("social.autonomy"));
         AddSettingsLink(panel,"主动与提醒","后台任务额度","额度 判断 收藏 空间 每天 上限","主动聊天、提醒和后台任务的每日额度统一在额度与节奏设置。","设置每日额度",()=>NavigateSetting("social.autonomousDecisionsPerDay"));
         AddSettingsLink(panel,"额度与节奏","后台活动开关","后台 主动 收藏 空间 开关","本页设置每日上限；是否启用后台聊天、收藏和空间创作在主动与提醒管理。","设置后台活动",()=>NavigateSetting("social.proactiveEnabled"));
@@ -201,6 +215,7 @@ partial class App
             if(list) { row.ColumnDefinitions[1].Width=new GridLength(0);Grid.SetColumnSpan(copy,2);outer.Children.Add(row);text.TextWrapping=TextWrapping.Wrap;text.AcceptsReturn=true;text.MinHeight=52;text.VerticalContentAlignment=VerticalAlignment.Top;text.Margin=new Thickness(0,8,0,3);outer.Children.Add(text); }
         }
         System.Windows.Automation.AutomationProperties.SetName(input,spec.Title);System.Windows.Automation.AutomationProperties.SetAutomationId(input,"Setting-"+spec.Path);fields[spec.Path]=input;
+        if(spec.Path=="approval.allowExec")input.IsEnabled=false;
         if(!list) {
             if(compact&&numeric){row.ColumnDefinitions[1].Width=new GridLength(0);Grid.SetColumnSpan(copy,2);outer.Children.Add(row);holder.Margin=new Thickness(0,9,0,2);outer.Children.Add(holder);}
             else {Grid.SetColumn(holder,1);row.Children.Add(holder);outer.Children.Add(row);}
@@ -264,27 +279,31 @@ partial class App
         if(fields.ContainsKey("social.responseMode")) {var choice=((ComboBox)fields["social.responseMode"]).SelectedItem as Choice;string mode=choice==null?"":choice.Value;enabled("chat.group.requireMention",mode=="legacy");enabled("social.responseProbability",mode=="probability");enabled("social.keywords",mode=="keywords"||mode=="probability");}
         if(fields.ContainsKey("social.proactiveEnabled")) {bool on=((CheckBox)fields["social.proactiveEnabled"]).IsChecked==true;foreach(string key in new[]{"social.proactiveIntervalMinutes","social.quietStartHour","social.quietEndHour"})enabled(key,on);}
         if(fields.ContainsKey("social.autoQzoneEnabled"))enabled("social.qzoneIntervalHours",((CheckBox)fields["social.autoQzoneEnabled"]).IsChecked==true);
-        enabled("features.browsing.maxScreenshots",false);
+        enabled("social.qzoneCommentIntervalMinutes",SettingOn("social.autoQzoneCommentEnabled"));
+        enabled("social.autoQzoneCommentUsers",SettingOn("social.autoQzoneCommentEnabled"));
         enabled("context.rolloverPercent",SettingOn("context.rollover"));
-        foreach(string key in new[]{"web.provider","web.fallback","web.searchesPerTurn","features.browsing.maxNavigations"})enabled(key,SettingOn("features.browsing.enabled"));
+        enabled("features.qzone.commentsEnabled",SettingOn("features.qzone.browseEnabled"));
+        SettingStatus("features.qzone.browseEnabled",SettingOn("features.qzone.browseEnabled")?"使用 NapCat 当前 QQ 账号，只读取该账号有权访问的自己或好友说说。":"空间浏览已关闭；发布自己的说说使用独立开关。");
+        SettingStatus("features.qzone.commentsEnabled",!SettingOn("features.qzone.browseEnabled")?"请先开启空间浏览。":!SettingOn("features.qzone.commentsEnabled")?"评论与回复已关闭。":SettingNumber("features.qzone.commentDailyLimit")==0?"每日评论上限为 0，不会发送评论。":SettingOn("features.qzone.commentRequireConfirm")&&SettingNumber("approval.adminQq")==0?"评论前需确认，请先设置管理员 QQ。":"评论已开启，受独立额度、联系范围和确认规则约束。");
         SettingStatus("learning.memory",SettingOn("learning.memory")?"需要明确会话、分析模型和学习额度；在 QQ 活动查看学习记录。":"自动整理已关闭；手动记忆和相关性召回仍可使用。");
         int hour=TimeZoneInfo.ConvertTimeBySystemTimeZoneId(DateTime.UtcNow,"China Standard Time").Hour;long start=SettingNumber("social.quietStartHour"),end=SettingNumber("social.quietEndHour");bool quiet=start>=0&&end>=0&&start!=end&&(start<end?hour>=start&&hour<end:hour>=start||hour<end);
         string background=!SettingOn("social.proactiveEnabled")?"等待开启后台自主活动":!SettingOn("social.autonomousEnabled")?"等待开启持续兴趣与想法":SettingNumber("social.autonomousDecisionsPerDay")==0?"每日后台判断上限为 0，后台不会唤醒模型":SettingNumber("social.actionsPerDay")==0?"QQ 动作总额为 0，后台动作暂停":quiet?"当前为上海时间安静时段，后台暂停":"基础条件已满足，等待候选话题、联系间隔与可用额度";
         SettingStatus("social.proactiveEnabled",background);
         SettingStatus("social.autoCollectStickers",!SettingOn("social.autoCollectStickers")?"后台收藏已关闭":!SettingOn("social.stickersEnabled")?"等待开启 QQ 收藏表情":SettingNumber("social.autoCollectPerDay")==0?"每日后台新增收藏为 0":background);
         SettingStatus("social.autoQzoneEnabled",!SettingOn("social.autoQzoneEnabled")?"自主空间创作已关闭":!SettingOn("features.qzone.enabled")?"等待开启 QQ 空间发布":SettingNumber("social.autoQzonePerDay")==0||SettingNumber("features.qzone.dailyLimit")==0?"自主空间或空间总额度为 0":SettingOn("features.qzone.requireConfirm")&&SettingNumber("approval.adminQq")==0?"发布前需确认，请先设置管理员 QQ":background);
+        SettingStatus("social.autoQzoneCommentEnabled",!SettingOn("social.autoQzoneCommentEnabled")?"自主空间互动已关闭，仍可按对话要求浏览和评论。":!SettingOn("features.qzone.browseEnabled")||!SettingOn("features.qzone.commentsEnabled")?"请先在功能开关开启空间浏览和评论。":SettingNumber("features.qzone.commentDailyLimit")==0?"空间评论额度为 0。":SettingOn("features.qzone.commentRequireConfirm")&&SettingNumber("approval.adminQq")==0?"评论需确认，请先设置管理员 QQ。":background);
         SettingStatus("social.remindersEnabled",SettingOn("social.remindersEnabled")?"使用独立提醒额度；群提醒还需要群聊主动发言。受阻时等待恢复，结果未知时不自动重发。":"提醒暂停执行，已有任务保留");
         SettingStatus("social.autonomy","空间发布按实际正文合并确认；命令执行和文件修改使用独立的工作区审批。");
         SettingStatus("social.autoCollectPerDay",SettingOn("social.autoCollectStickers")?"后台收藏的独立上限，同时受 QQ 动作总额约束。":"后台收藏已关闭；可先设置额度，开关在主动与提醒管理。");
         SettingStatus("social.autoQzonePerDay",SettingOn("social.autoQzoneEnabled")?"后台发布的独立上限，同时受空间发布总额约束。":"自主空间创作已关闭；可先设置额度，开关在主动与提醒管理。");
-        SettingStatus("features.browsing.enabled","已接入本项目搜索与静态正文读取；DSH 外部联网独立管理，截图参数仅兼容保留。");
-        if(Find<TextBlock>("SettingsContext")!=null)Find<TextBlock>("SettingsContext").Text="全局配置："+(settingsPath.Length>0?settingsPath:"当前动态配置文件")+"\n会话专属参与设置优先于这里的全局值；.env 同名项仅补齐缺失默认值。";
+        if(Find<TextBlock>("SettingsContext")!=null){Find<TextBlock>("SettingsContext").Text="全局默认 · 会话专属的参与设置优先";Find<TextBlock>("SettingsContext").ToolTip="配置文件："+(settingsPath.Length>0?settingsPath:"当前动态配置文件");}
     }
     static void FilterSettings() {
         if(Find<TextBox>("SettingsSearch")==null||settingsCards.Count==0)return;
         string query=Find<TextBox>("SettingsSearch").Text.Trim();int count=0,links=0;
         foreach(var card in settingsCards) {bool show=false;foreach(var view in card.Rows){bool match=query.Length==0?card.Category==selectedCategory:(view.Spec.Title+view.Spec.Help+view.Spec.Path+card.Category+view.Spec.Card+(view.Spec.Path=="social.mediaEnabled"?"媒体 视觉 转写 合成 声音 抽帧 FFmpeg "+string.Join(" ",mediaKeys):"")).IndexOf(query,StringComparison.OrdinalIgnoreCase)>=0;view.Row.Visibility=match?Visibility.Visible:Visibility.Collapsed;if(match){show=true;count++;}}card.Surface.Visibility=show?Visibility.Visible:Visibility.Collapsed;}
         foreach(var link in settingsLinks) {bool match=query.Length==0?link.Category==selectedCategory:link.Search.IndexOf(query,StringComparison.OrdinalIgnoreCase)>=0;link.Surface.Visibility=match?Visibility.Visible:Visibility.Collapsed;if(match)links++;}
+        Find<Border>("SettingsQuotaPanel").Visibility=settingsCards.Any(card=>card.Category=="额度与节奏"&&card.Surface.Visibility==Visibility.Visible)?Visibility.Visible:Visibility.Collapsed;
         Find<TextBlock>("SettingsTitle").Text=query.Length==0?selectedCategory:"搜索结果";
         Find<TextBlock>("SettingsSubtitle").Text=query.Length==0?categoryDescriptions[Array.IndexOf(categoryNames,selectedCategory)]:"找到 "+count+" 项设置和 "+links+" 个相关入口，清空搜索可返回分类。";
         Find<StackPanel>("SettingsEmpty").Visibility=count+links==0?Visibility.Visible:Visibility.Collapsed;
@@ -311,12 +330,16 @@ partial class App
     }
     static void SaveRobotSettings() {try {var paths=dirtySettingPaths.Where(path=>!IsMediaSetting(path)).ToArray();if(paths.Length==0){Feedback("机器人设置没有未保存的修改；媒体参数请在媒体服务中保存。");return;}if(ValidateSettingsForm())Send("settings",new{draft=CollectDraft(paths),baseline=settings,paths=paths,settingsPath=settingsPath});}catch(Exception error){Feedback(error.Message);}}
     static void SelectSetting(string path,bool invalid=true) {
-        if(IsMediaSetting(path))NavigateRuntime(2);else {Find<TabControl>("Tabs").SelectedIndex=2;Find<TextBox>("SettingsSearch").Clear();Find<ListBox>("SettingsNav").SelectedItem=((IEnumerable<SettingsCategory>)Find<ListBox>("SettingsNav").ItemsSource).First(c=>c.Name==fieldViews[path].Spec.Category);}
+        if(IsMediaSetting(path))NavigateRuntime(2);else {SelectedPage=MainPage.Settings;Find<TextBox>("SettingsSearch").Clear();Find<ListBox>("SettingsNav").SelectedItem=((IEnumerable<SettingsCategory>)Find<ListBox>("SettingsNav").ItemsSource).First(c=>c.Name==fieldViews[path].Spec.Category);}
         fieldViews[path].Row.BringIntoView();fields[path].Focus();if(invalid)Feedback("设置需要调整，请检查行内提示。");
     }
     static void VerifySettingsInteraction() {
         if(Find<ListBox>("SettingsNav").Items.Count!=7)throw new Exception("设置分类不完整");
+        if(!IsSqliteNotice("(node:123) ExperimentalWarning: SQLite is an experimental feature and might change at any time")||IsSqliteNotice("Error: SQLite database is corrupt"))throw new Exception("SQLite 提示与实际错误未正确区分");
+        if(logs.Any(line=>line.Contains("控制进程异常")))throw new Exception("启动时控制进程报告异常");
         string before=json.Serialize(Collect(settings,""));
+        var requestPaths=new[]{"perDay","perUserPerDay","perChatPerDay","backgroundPerDay","perMinute","perTurn","concurrent","maxOutputTokens","maxRequestKiB","maxResponseChars","mediaPerDay","nativeWebPerDay","noticesPerDay"};
+        foreach(var requestPath in requestPaths)if(!fieldViews.ContainsKey("requests."+requestPath)||fieldViews["requests."+requestPath].Spec.Category!="额度与节奏")throw new Exception("服务预算设置缺失或分类错误："+requestPath);
         var mode=(ComboBox)fields["social.responseMode"];object originalMode=mode.SelectedValue;
         var number=(TextBox)fields["social.responseProbability"];string originalNumber=number.Text;
         mode.SelectedValue="probability";
@@ -343,8 +366,10 @@ partial class App
         if(((IEnumerable)((Dictionary<string,object>)Collect(settings,"")["social"])["personalInterests"]).Cast<object>().Count()!=2)throw new Exception("全局创作兴趣未按列表保存");interests.Text=oldInterests;
         var name=(TextBox)fields["identity.name"];string originalName=name.Text;name.Text="测试中的名称";Find<ListBox>("SettingsNav").SelectedIndex=6;Find<ListBox>("SettingsNav").SelectedIndex=5;if(name.Text!="测试中的名称")throw new Exception("切换分类丢失了未保存输入");name.Text=originalName;
         if(json.Serialize(Collect(settings,""))!=before)throw new Exception("切换分类或搜索丢失了设置值");
-        for(int i=0;i<7;i++){Find<ListBox>("SettingsNav").SelectedIndex=i;Capture(System.IO.Path.Combine(root,"settings-"+i+".png"),2);}
+        for(int i=0;i<7;i++){Find<ListBox>("SettingsNav").SelectedIndex=i;Capture(System.IO.Path.Combine(root,"settings-"+i+".png"),MainPage.Settings);}
         Find<ListBox>("SettingsNav").SelectedIndex=0;
+        if(Find<Border>("SettingsQuotaPanel").Visibility!=Visibility.Collapsed)throw new Exception("额度统计仍出现在无关设置分类");
+        NavigateSetting("social.actionsPerDay");if(Find<Border>("SettingsQuotaPanel").Visibility!=Visibility.Visible)throw new Exception("额度分类没有显示当前用量");Find<ListBox>("SettingsNav").SelectedIndex=0;
         VerifyAuditInteraction();
         VerifySettingsConsistencyInteraction();
     }
@@ -375,9 +400,11 @@ partial class App
             if(((TextBox)fields["social.videoFrames"]).Text!="invalid"||!dirtySettingPaths.Contains("social.videoFrames"))throw new Exception("保存机器人设置清除了媒体草稿");
             if(settingsCards.Any(card=>card.Rows.Any(view=>IsMediaSetting(view.Spec.Path))))throw new Exception("媒体模型仍出现在机器人设置中");
             foreach(string key in mediaKeys)if(!object.ReferenceEquals(mediaInputs[key],fields["social."+key])||!Find<StackPanel>("RuntimeFields").IsAncestorOf(fieldViews["social."+key].Row))throw new Exception("媒体模型不是单一编辑入口");
-            if(!fields["features.browsing.enabled"].IsEnabled||fields["features.browsing.maxScreenshots"].IsEnabled)throw new Exception("联网与兼容截图设置的可用状态不正确");
-            ((CheckBox)fields["features.browsing.enabled"]).IsChecked=false;
-            if(fields["web.provider"].IsEnabled||fields["features.browsing.maxNavigations"].IsEnabled)throw new Exception("关闭联网后关联设置仍可编辑");
+            if(fields.Keys.Any(key=>key.StartsWith("web.")||key.StartsWith("features.browsing.")))throw new Exception("已移除的搜索适配设置仍出现在表单中");
+            ((CheckBox)fields["features.qzone.browseEnabled"]).IsChecked=false;
+            if(fields["features.qzone.commentsEnabled"].IsEnabled)throw new Exception("关闭空间浏览后评论开关仍可编辑");
+            ((CheckBox)fields["features.qzone.browseEnabled"]).IsChecked=true;
+            if(!fields["features.qzone.commentsEnabled"].IsEnabled)throw new Exception("开启空间浏览后无法设置评论");
         } finally {
             savedRuntimeValues["BOT_MEDIA_BASE_URL"]=originalService;ApplySavedSettings(original,paths);socialProfiles=profiles;
             foreach(var view in fieldViews.Values)view.Error.Visibility=Visibility.Collapsed;
@@ -385,10 +412,10 @@ partial class App
         if(json.Serialize(Collect(settings,""))!=originalDraft)throw new Exception("一致性检查改变了原设置");
     }
     static void VerifyAuditInteraction() {
-        var originalLogs=logs.ToArray();bool originalPaused=paused;int originalPage=Find<TabControl>("Tabs").SelectedIndex;
+        var originalLogs=logs.ToArray();bool originalPaused=paused;MainPage originalPage=SelectedPage;
         string originalSearch=Find<TextBox>("LogSearch").Text;int originalFilter=Find<ComboBox>("LogFilter").SelectedIndex;
         try {
-            Find<TabControl>("Tabs").SelectedIndex=1;Find<TextBox>("LogSearch").Clear();Find<ComboBox>("LogFilter").SelectedIndex=0;
+            SelectedPage=MainPage.Logs;Find<TextBox>("LogSearch").Clear();Find<ComboBox>("LogFilter").SelectedIndex=0;
             logs.Clear();for(int i=0;i<300;i++)logs.Enqueue("[bridge] 审查日志 "+i);paused=false;RefreshLogs();window.UpdateLayout();
             var editor=Find<TextBox>("Logs");editor.ScrollToVerticalOffset(100);window.UpdateLayout();double offset=editor.VerticalOffset;
             if(offset<=0)throw new Exception("日志滚动测试没有产生可滚动内容");
@@ -396,7 +423,7 @@ partial class App
             if(Math.Abs(editor.VerticalOffset-offset)>1)throw new Exception("暂停滚动时日志仍跳回顶部或底部");
         } finally {
             logs.Clear();foreach(string line in originalLogs)logs.Enqueue(line);paused=originalPaused;
-            Find<TextBox>("LogSearch").Text=originalSearch;Find<ComboBox>("LogFilter").SelectedIndex=originalFilter;RefreshLogs();Find<TabControl>("Tabs").SelectedIndex=originalPage;
+            Find<TextBox>("LogSearch").Text=originalSearch;Find<ComboBox>("LogFilter").SelectedIndex=originalFilter;RefreshLogs();SelectedPage=originalPage;
         }
         string hint=Find<TextBlock>("RuntimeHint").Text;bool pending=connectionRestartPending;
         connectionRestartPending=true;Event("{\"type\":\"control\",\"action\":\"restartBridge\",\"ok\":false}");

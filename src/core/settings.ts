@@ -4,7 +4,8 @@ import { basename, dirname, resolve } from 'node:path';
 import { z } from 'zod';
 import { config } from './config.js';
 import { SocialSettingsSchema } from '../qq/social-settings.js';
-import { LearningSettingsSchema, WebSettingsSchema, ContextSettingsSchema } from '../agent/intelligence-settings.js';
+import { LearningSettingsSchema, ContextSettingsSchema } from '../agent/intelligence-settings.js';
+import {RequestSettingsSchema} from '../agent/request-settings.js';
 
 const GroupSchema = z
   .object({
@@ -18,21 +19,22 @@ const GroupSchema = z
         enabled: z.boolean().default(false),
         perGroupPerDay: z.number().int().min(0).max(20).default(1),
       })
-      .default({}),
+      .prefault({}),
   })
-  .default({});
+  .prefault({});
 
 const SettingsSchema = z
   .object({
+    installation: z.object({ version: z.literal(1), scopeConfigured: z.boolean() }).optional(),
     learning: LearningSettingsSchema,
-    web: WebSettingsSchema,
     context: ContextSettingsSchema,
+    requests:RequestSettingsSchema,
     social: SocialSettingsSchema,
     identity: z
       .object({
         name: z.string().min(1).max(32).default('小深'),
       })
-      .default({}),
+      .prefault({}),
     chat: z
       .object({
         privateAutoReply: z.boolean().default(true),
@@ -43,16 +45,16 @@ const SettingsSchema = z
             maxMs: z.number().int().min(0).max(20000).default(config.bot.maxDelayMs),
             chunkSize: z.number().int().min(100).max(4000).default(config.bot.chunkSize),
           })
-          .default({}),
+          .prefault({}),
       })
-      .default({}),
+      .prefault({}),
     approval: z
       .object({
         adminQq: z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).default(config.bot.adminQq),
         allowExec: z.boolean().default(config.bot.allowExec),
         timeoutMs: z.number().int().min(5000).max(600000).default(90000),
       })
-      .default({}),
+      .prefault({}),
     features: z
       .object({
         qzone: z
@@ -60,26 +62,23 @@ const SettingsSchema = z
             enabled: z.boolean().default(false),
             dailyLimit: z.number().int().min(0).max(10).default(1),
             requireConfirm: z.boolean().default(true),
+            browseEnabled: z.boolean().default(false),
+            commentsEnabled: z.boolean().default(false),
+            commentDailyLimit: z.number().int().min(0).max(50).default(5),
+            commentRequireConfirm: z.boolean().default(true),
           })
-          .default({}),
-        browsing: z
-          .object({
-            enabled: z.boolean().default(true),
-            maxNavigations: z.number().int().min(1).max(10).default(3),
-            maxScreenshots: z.number().int().min(0).max(5).default(2),
-          })
-          .default({}),
+          .prefault({}),
       })
-      .default({}),
+      .prefault({}),
     budgets: z
       .object({
         proactiveMessagesPerDay: z.number().int().min(0).max(100).default(5),
         remindersPerDay: z.number().int().min(0).max(100).default(5),
         likesPerDay: z.number().int().min(0).max(200).default(20),
       })
-      .default({}),
+      .prefault({}),
   })
-  .default({})
+  .prefault({})
   .refine(value=>value.context.warningPercent<value.context.rolloverPercent,{
     message:'会话更换比例应大于上下文提醒比例',path:['context','rolloverPercent'],
   })
@@ -91,6 +90,18 @@ const SettingsSchema = z
 export type BotSettings = z.infer<typeof SettingsSchema>;
 
 export const DEFAULT_SETTINGS: BotSettings = SettingsSchema.parse({});
+
+/** 仅用于尚无配置文件的新实例；已有文件继续沿用原来的缺省语义。 */
+export function createInitialSettings(): BotSettings {
+  return SettingsSchema.parse({
+    installation: { version: 1, scopeConfigured: false },
+    approval: { allowExec: false },
+    social: {
+      allowAll: false, autonomy: 'sensitive', autonomousEnabled: false,
+      autoCollectStickers: false, autoQzoneEnabled: false,
+    },
+  });
+}
 
 const path = resolve(process.env.BOT_SETTINGS_FILE || 'bot.config.json');
 export const getSettingsPath = (): string => path;
@@ -121,7 +132,7 @@ export async function loadSettings(): Promise<BotSettings> {
     current = SettingsSchema.parse(JSON.parse(raw));
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
-    current = clone(DEFAULT_SETTINGS);
+    current = createInitialSettings();
     await persist(current);
   }
   return clone(current);
@@ -129,7 +140,7 @@ export async function loadSettings(): Promise<BotSettings> {
 
 export async function readSettingsFile(file: string): Promise<BotSettings> {
   try { return validateSettings(JSON.parse(await readFile(resolve(file), 'utf8'))); }
-  catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; return clone(DEFAULT_SETTINGS); }
+  catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; return createInitialSettings(); }
 }
 
 async function persist(next: BotSettings, file = path): Promise<void> {

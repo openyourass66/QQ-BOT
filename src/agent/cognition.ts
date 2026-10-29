@@ -3,7 +3,8 @@ import { z } from 'zod';
 import { MemoryMetaSchema } from './cognition-state.js';
 import type { BotSettings } from '../core/settings.js';
 import { allowedChat } from '../qq/social-settings.js';
-import type { SocialData, SocialStore, StoredMessage } from '../qq/social-store.js';
+import type { SocialData, StoredMessage } from '../qq/social-store.js';
+import type {SocialRepository} from '../storage/social-repository.js';
 import type { DailyUsageStore } from '../core/usage.js';
 
 const evidence = z.object({messageId:z.number().int().safe(),quote:z.string().trim().min(2).max(500)}).strict();
@@ -16,6 +17,8 @@ export const LearningProposalSchema = z.object({
 export type LearningProposal = z.infer<typeof LearningProposalSchema>;
 export type LearningBatch = {chat:string;messages:StoredMessage[];memories:SocialData['memories'];revision:string};
 export type Analyze = (batch:LearningBatch,signal:AbortSignal)=>Promise<LearningProposal|{proposal:LearningProposal;usage?:{inputTokens:number;outputTokens:number}} >;
+export type PreparedAnalysis={run:()=>ReturnType<Analyze>;close:()=>Promise<void>};
+export type PrepareAnalysis=(batch:LearningBatch,signal:AbortSignal)=>Promise<PreparedAnalysis>;
 export const normalize = (value:string):string => value.normalize('NFKC').toLocaleLowerCase().replace(/[\s\p{P}\p{S}]/gu,'');
 export const fingerprint = (value:string):string => createHash('sha256').update(normalize(value)).digest('hex');
 const unsafe = (text:string):boolean => /(?:api[_ -]?key|access[_ -]?token|authorization|password|密码|密钥|口令|cookie)\s*[:=：]|(?:sk-|Bearer\s+)[a-z0-9_-]{10,}|-----BEGIN .*PRIVATE KEY/i.test(text);
@@ -36,7 +39,7 @@ function visibleSources(data:SocialData,chat:string,ids:number[],settings:BotSet
 }
 export function memoryMeta(data:SocialData,id:string) {return data.cognition.memories[id]??MemoryMetaSchema.parse({});}
 export function cognitionRevision(data:SocialData,chat:string):string {
-  return fingerprint(JSON.stringify({memories:data.memories.filter(m=>m.chat===chat).map(m=>[m,data.cognition.memories[m.id]]),lexicon:data.cognition.lexicon.filter(l=>l.chat===chat),suppressed:data.cognition.suppressed.filter(s=>s.chat===chat)}));
+  return createHash('sha256').update(JSON.stringify({memories:data.memories.filter(m=>m.chat===chat).map(m=>[m,data.cognition.memories[m.id]]),lexicon:data.cognition.lexicon.filter(l=>l.chat===chat),suppressed:data.cognition.suppressed.filter(s=>s.chat===chat)})).digest('hex');
 }
 export function recall(data:SocialData,settings:BotSettings,chat:string,user:string,query:string,now=Date.now()):{memories:string;lexicon:string} {
   if(!allowedChat(settings.social,chat,user))return {memories:'',lexicon:''};
@@ -69,15 +72,19 @@ export function forgetMemory(data:SocialData,id:string,now=Date.now()):void {
 /** Analysis returns proposals only. The single store writer validates a fresh snapshot before committing. */
 export class Cognition {
   private running?:Promise<void>;
-  constructor(readonly store:SocialStore,private settings:()=>BotSettings,private usage:DailyUsageStore,private analyze:Analyze,
-    private available:()=>string=()=>'',private now:()=>number=Date.now) {}
+  constructor(readonly store:SocialRepository,private settings:()=>BotSettings,private usage:DailyUsageStore,private analyze:Analyze,
+    private available:()=>string=()=>'',private now:()=>number=Date.now,private prepare?:PrepareAnalysis) {}
   availability():string {return this.available();}
-  review(chat:string,signal:AbortSignal):Promise<void> {
+  async review(chat:string,signal:AbortSignal):Promise<void> {
     if(this.running)throw new Error('已有资料整理正在执行，请稍后再试');
-    const data=this.store.snapshot(),s=this.settings();
+    // 先占用整理槽，再异步读取，避免同时请求越过单任务检查。
+    const task=this.reviewNow(chat,signal);this.running=task.finally(()=>{this.running=undefined;});return this.running;
+  }
+  private async reviewNow(chat:string,signal:AbortSignal):Promise<void> {
+    const data=this.store.view('memories','cognition'),s=this.settings();data.messages=await this.store.messages(chat,2000);
     const messages=data.messages.filter(m=>m.chat===chat&&!m.self&&!m.recalled&&!s.social.blockedUsers.includes(String(m.user))&&m.segments.every(v=>['text','at','reply','face'].includes(v.type))&&!unsafe(m.text)&&!quotedOrOptOut(m.text)).slice(-80);
     if(!messages.length)throw new Error('当前会话没有可整理的有效文字消息');
-    this.running=this.run({chat,messages,memories:data.memories.filter(m=>m.chat===chat&&!s.social.blockedUsers.includes(m.user)),revision:cognitionRevision(data,chat)},signal).finally(()=>{this.running=undefined;});return this.running;
+    if(!await this.run({chat,messages,memories:data.memories.filter(m=>m.chat===chat&&!s.social.blockedUsers.includes(m.user)),revision:cognitionRevision(data,chat)},signal,true))throw new Error('当前会话已有资料整理任务，请稍后再试');
   }
   tick(signal:AbortSignal,busy:()=>boolean):Promise<void> {
     if(this.running||signal.aborted||busy())return Promise.resolve();
@@ -86,36 +93,43 @@ export class Cognition {
   async flush():Promise<void> {await this.running;}
   private async scan(signal:AbortSignal,busy:()=>boolean):Promise<void> {
     const s=this.settings(),cfg=s.learning;if((!cfg.memory&&!cfg.lexicon)||!cfg.dailyCalls||this.usage.used('learning')>=cfg.dailyCalls||this.available())return;
-    const data=this.store.snapshot(),now=this.now();
+    const data=this.store.view('memories','cognition'),now=this.now();
     for(const chat of cfg.chats) {
       if(busy()||signal.aborted)return;
       if(!allowedChat(s.social,chat)||!cfg.memory&&!chat.startsWith('group:'))continue;
       const scope=data.cognition.scopes[chat]??{cursor:0,cursorIds:[],lastAttempt:0};
       if(now-scope.lastAttempt<cfg.intervalMinutes*60000)continue;
-      const all=data.messages.filter(m=>m.chat===chat&&!m.self&&!m.recalled&&!s.social.blockedUsers.includes(String(m.user)));
+      const all=(await this.store.queryMessages({chat,incomingOnly:true,excludeUsers:s.social.blockedUsers,after:scope.cursor,ascending:true,limit:20000})).rows;
       if(!all.length||now-all.at(-1)!.at<cfg.idleMinutes*60000)continue;
       const messages=all.filter(m=>(m.at>scope.cursor||m.at===scope.cursor&&!scope.cursorIds.includes(m.id))&&m.segments.every(v=>['text','at','reply','face'].includes(v.type))&&!unsafe(m.text)&&!quotedOrOptOut(m.text)).slice(0,Math.max(80,cfg.minMessages));
       if(messages.length<cfg.minMessages)continue;
-      await this.run({chat,messages,memories:data.memories.filter(m=>m.chat===chat&&!s.social.blockedUsers.includes(m.user)),revision:cognitionRevision(data,chat)},signal);break;
+      if(await this.run({chat,messages,memories:data.memories.filter(m=>m.chat===chat&&!s.social.blockedUsers.includes(m.user)),revision:cognitionRevision(data,chat)},signal))break;
     }
   }
-  async run(batch:LearningBatch,signal:AbortSignal):Promise<void> {
+  async run(batch:LearningBatch,signal:AbortSignal,manual=false):Promise<boolean> {
+    batch=structuredClone(batch);
     const current=this.settings();if(!current.learning.chats.includes(batch.chat)||!allowedChat(current.social,batch.chat))throw new Error('当前会话未开启学习');
     if(!current.learning.memory&&!current.learning.lexicon)throw new Error('后台学习已关闭');
     if(this.available())throw new Error(this.available());
     signal.throwIfAborted();
-    await this.usage.consume(()=>[{key:'learning',amount:1,limit:this.settings().learning.dailyCalls,label:'后台学习'}]);
-    const id=randomUUID(),at=this.now();
-    await this.store.update(d=>{
+    const id=randomUUID(),at=this.now(),digest=createHash('sha256').update(JSON.stringify({chat:batch.chat,revision:batch.revision,messages:batch.messages})).digest('hex');
+    const claimed=await this.store.claimLearning({id,chat:batch.chat,at,batch:digest,sources:batch.messages.map(m=>m.id),manual});if(!claimed?.claim)return false;
+    let prepared:PreparedAnalysis|undefined,started=false;
+    try{
+    prepared=await this.prepare?.(batch,signal);
+    if(!prepared)await this.usage.consume(()=>[{key:'learning',amount:1,limit:this.settings().learning.dailyCalls,label:'后台学习'}]);
+    started=await this.store.updateLearningClaim(id,claimed.claim.id,'preparing',d=>{
+      signal.throwIfAborted();const s=this.settings();if(!s.learning.chats.includes(batch.chat)||!allowedChat(s.social,batch.chat)||!s.learning.memory&&!s.learning.lexicon||batch.revision!==cognitionRevision(d,batch.chat))throw new Error('设置或记忆已变化，本次分析未提交');
       const scope=d.cognition.scopes[batch.chat]??{cursor:0,cursorIds:[],lastAttempt:0};
       const next=Math.max(scope.cursor,...batch.messages.map(m=>m.at));
       scope.cursorIds=[...new Set([...(scope.cursor===next?scope.cursorIds:[]),...batch.messages.filter(m=>m.at===next).map(m=>m.id)])].slice(-20000);
       scope.cursor=next;scope.lastAttempt=at;d.cognition.scopes[batch.chat]=scope;
-      d.cognition.jobs.push({id,chat:batch.chat,at,state:'running',summary:'分析中',sources:batch.messages.map(m=>m.id)});d.cognition.jobs=d.cognition.jobs.slice(-200);
+      const job=d.cognition.jobs.find(job=>job.id===id)!;job.state='running';job.summary='分析中';
     });
+    if(!started)return false;
     try {
-      const analyzed=await this.analyze(batch,signal),proposal=LearningProposalSchema.parse('proposal' in analyzed?analyzed.proposal:analyzed);signal.throwIfAborted();
-      await this.store.update(d=>{
+      const analyzed=await(prepared?prepared.run():this.analyze(batch,signal)),proposal=LearningProposalSchema.parse('proposal' in analyzed?analyzed.proposal:analyzed);signal.throwIfAborted();
+      await this.store.updateLearningClaim(id,claimed.claim.id,'running',d=>{
         const job=d.cognition.jobs.find(j=>j.id===id)!;
         if('proposal' in analyzed&&analyzed.usage){job.inputTokens=analyzed.usage.inputTokens;job.outputTokens=analyzed.usage.outputTokens;}
         const s=this.settings();
@@ -163,10 +177,12 @@ export class Cognition {
           lexicon++;
         }
         job.state='completed';job.summary=`新增记忆 ${added} 条；用语候选 ${lexicon} 条（需在管理端确认）`;
-      });
+      },batch.messages.map(m=>({chat:batch.chat,id:m.id})));
     } catch(error) {
-      await this.store.update(d=>{const j=d.cognition.jobs.find(j=>j.id===id);if(j){j.state=signal.aborted?'unknown':'failed';j.summary=signal.aborted?'分析已中止，未写入提案':'分析失败或返回格式无效，未写入提案';}});
+      await this.store.updateLearningClaim(id,claimed.claim.id,'running',d=>{const j=d.cognition.jobs.find(j=>j.id===id);if(j){j.state=signal.aborted?'unknown':'failed';j.summary=signal.aborted?'分析已中止，未写入提案':'分析失败或返回格式无效，未写入提案';}});
       if(signal.aborted)throw error;
     }
+    return true;
+    }finally{try{if(!started)await this.store.updateLearningClaim(id,claimed.claim.id,'preparing',d=>{d.cognition.jobs=d.cognition.jobs.filter(job=>job.id!==id);});}finally{await prepared?.close();}}
   }
 }

@@ -2,9 +2,9 @@ import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { z } from 'zod';
 
-const StoreSchema = z.object({
+export const SessionStoreSchema = z.object({
   version: z.literal(1),
-  sessions: z.record(z.object({ sessionId: z.string().min(1), updatedAt: z.number().finite(), policy:z.string().optional(), generation:z.number().int().positive().optional() })),
+  sessions: z.record(z.string(), z.object({ sessionId: z.string().min(1), updatedAt: z.number().finite(), policy:z.string().optional(), generation:z.number().int().positive().optional() })),
 });
 
 type StoreShape = {
@@ -17,8 +17,8 @@ type StoreShape = {
  * 接回原来的上下文，而不是从零开始。
  */
 export class SessionStore {
-  private data: StoreShape = { version: 1, sessions: {} };
-  private readonly path: string;
+  protected data: StoreShape = { version: 1, sessions: {} };
+  protected readonly path: string;
   private saving?: Promise<void>;
   private revision = 0;
   private persistedRevision = 0;
@@ -30,7 +30,7 @@ export class SessionStore {
   async load(): Promise<void> {
     try {
       const raw = await readFile(this.path, 'utf8');
-      this.data = StoreSchema.parse(JSON.parse(raw));
+      this.data = SessionStoreSchema.parse(JSON.parse(raw));
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
     }
@@ -43,12 +43,12 @@ export class SessionStore {
   metadata(key:string) {return structuredClone(this.data.sessions[key]);}
   set(key: string, sessionId: string, policy?:string,generation?:number): void {
     this.data.sessions[key] = { sessionId, updatedAt: Date.now(),...(policy===undefined?{}:{policy}),...(generation===undefined?{}:{generation}) };
-    this.changed();
+    this.changed(key);
   }
 
   delete(key: string): void {
     delete this.data.sessions[key];
-    this.changed();
+    this.changed(key);
   }
 
   entries(): Array<[string, string]> {
@@ -63,7 +63,7 @@ export class SessionStore {
     }));
   }
 
-  private changed(): void {
+  protected changed(_key:string): void {
     this.revision += 1;
     void this.flush().catch((error) => console.error('[store] 保存失败:', error));
   }

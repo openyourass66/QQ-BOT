@@ -1,3 +1,4 @@
+import {copyRuntimeHost} from './helpers/runtime.mjs';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, mkdir, writeFile, readFile, rm, cp } from 'node:fs/promises';
@@ -62,7 +63,7 @@ test('首次桌面读取自动初始化默认配置与人设，再次读取保�
     assert.match(await readFile(join(root, '.env'), 'utf8'), /BOT_ONEBOT_MODE=auto/);
     const persona = join(root, 'bot-workspace/AGENTS.md'); assert.match(await readFile(persona, 'utf8'), /默认聊天约定/);
     await writeFile(persona, 'Personal persona'); await writeFile(join(root, '.env'), 'BOT_WORKSPACE=bot-workspace\nBOT_DSH_BIN=custom.cmd\n');
-    response = await worker(); assert.equal(response.ok, true); assert.equal(response.result.needsSetup, false);
+    response = await worker(); assert.equal(response.ok, true); assert.equal(response.result.needsSetup, true);
     assert.equal(await readFile(persona, 'utf8'), 'Personal persona'); assert.match(await readFile(join(root, '.env'), 'utf8'), /BOT_DSH_BIN=custom.cmd/);
   } finally { await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }); }
 });
@@ -72,7 +73,8 @@ test('显式连接已有 QQ 服务时不会误启动本机 NapCat，即使外部
   let child;
   try {
     for (const dir of ['desktop','scripts','dist']) await mkdir(join(root, dir));
-    await cp(resolve('desktop/host.mjs'), join(root, 'desktop/host.mjs'));
+    await copyRuntimeHost(root);
+    for (const file of ['app-paths.mjs', 'setup.mjs', 'component-paths.mjs']) await cp(resolve('scripts', file), join(root, 'scripts', file));
     await writeFile(join(root, 'desktop/diagnostics.mjs'), "export async function diagnose(){return {ok:true,rows:[]}};export async function environment(){return {BOT_ONEBOT_MODE:'external'}};export async function onebotOnline(){return false}");
     await writeFile(join(root, 'scripts/napcat-node.mjs'), "console.log('unexpected-napcat-start');setInterval(()=>{},1000)");
     await writeFile(join(root, 'dist/bridge.js'), "console.log('external-bridge-start');process.on('message',m=>{if(m==='shutdown')process.exit()});setInterval(()=>{},1000)");

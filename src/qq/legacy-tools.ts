@@ -13,4 +13,4 @@ export const legacyTools = [
   { name: 'qq_recall', title: '撤回自己的消息', description: '撤回当前会话中本账号真实发送的消息。', schema: { message_id: z.number().int().safe() } },
   { name: 'qq_self_info', title: '查询自己的资料', description: '查看登录昵称与账号、群中名片，核对修改结果。', schema: { group_id: user.optional() } },
 ] satisfies Array<{ name: string; title: string; description: string; schema: z.ZodRawShape }>;
-export const LegacyCallSchema = z.object({ action: z.literal('legacy'), tool: z.string(), args: z.record(z.unknown()).default({}) }).strict();
+export const LegacyCallSchema = z.object({ action: z.literal('legacy'), tool: z.string(), args: z.record(z.string(), z.unknown()).prefault({}) }).strict();

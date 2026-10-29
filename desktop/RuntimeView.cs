@@ -10,12 +10,16 @@ using Forms = System.Windows.Forms;
 partial class App
 {
     static readonly string[] runtimeCategories = { "QQ 连接", "对话模型", "媒体服务", "运行与队列", "扩展服务", "存储与高级" };
+    static int RuntimePage {
+        get { return Math.Max(0, Array.IndexOf(runtimeCategories, Find<ListBox>("RuntimeNav").SelectedItem as string)); }
+        set { Find<ListBox>("RuntimeNav").SelectedItem = runtimeCategories[value]; }
+    }
     static readonly string[] runtimeDescriptions = {
         "连接机器人账号与 OneBot 服务，令牌需与 NapCat 中的设置一致。",
         "为本项目选择模型、管理 API Key，并测试实际连接。",
         "集中配置媒体服务、模型名称与声音；留空视觉模型时沿用对话模型。",
         "设置模型等待时间、并发数和消息队列容量；回复节奏在机器人设置管理。",
-        "配置搜索和空间适配服务；对应功能开关在机器人设置管理。",
+        "配置后台分析，检查空间登录；联网搜索由 DSH / DeepSeek 原生工具提供。",
         "管理工作区之外的数据文件位置和高级环境文件；行为参数在机器人设置管理。"
     };
     static readonly string[] mediaKeys = { "visionModel", "transcriptionModel", "speechModel", "speechVoice", "videoFrames" };
@@ -39,10 +43,7 @@ partial class App
         {"BOT_MEDIA_BASE_URL","填写兼容 API 的基础地址，如 https://api.example.com/v1/；语音和独立视觉模型共用此服务。"},
         {"BOT_MEDIA_API_KEY","媒体服务的 API 密钥，输入内容会隐藏。"},
         {"BOT_FFMPEG_BIN","仅视频抽帧需要；选择 FFmpeg 可执行文件。"},
-        {"BOT_SEARCH_URL","选择自定义适配服务时使用；DSH 外部搜索独立管理。"},
-        {"BOT_TAVILY_API_KEY","选择 Tavily 时使用，密钥只发送到 Tavily 官方接口。"},
         {"BOT_LEARNING_API_KEY","分析不挂载工具。项目 Key 模式可留空复用；Profile 或账号模式需独立密钥。"},
-        {"BOT_QZONE_ADAPTER_URL","仅浏览和评论空间需要；发布说说使用协议端接口，开关与确认在机器人设置管理。"},
         {"TURN_TIMEOUT_MS","1000–600000 毫秒，超时后取消本轮并在下次重建会话。"},
         {"MAX_CONCURRENT_TURNS","1–32 个会话；并发越高，对模型服务的负载越大。"},
         {"QUEUE_PER_CONVERSATION","1–100 条，包含正在处理的消息。"},
@@ -63,6 +64,10 @@ partial class App
     static Button chatModelTest, chatModelList;
     static bool chatModelBusy;
     static bool runtimeBusy, connectionRestartPending;
+    static Button qzoneCheckButton;
+    static TextBlock qzoneCheckResult;
+    static bool qzoneCheckBusy;
+    static int connectionRevision,qzoneCheckRevision;
     static void UpdateConnectionEditing() {
         bool envDirty=dirtySections.Contains("env"),formDirty=dirtySections.Contains("runtime")||dirtySections.Contains("models");
         Find<TextBox>("Env").IsReadOnly=formDirty;
@@ -81,20 +86,20 @@ partial class App
     }
     static bool IsMediaSetting(string path) { return mediaKeys.Any(key=>path=="social."+key); }
     static int RuntimeCategory(string group) {
-        return group.StartsWith("OneBot")||group.StartsWith("账号")?0:group.StartsWith("模型")?1:group.StartsWith("媒体")||group.StartsWith("图片")?2:group.StartsWith("消息")?3:group.StartsWith("搜索")||group.StartsWith("空间")||group.StartsWith("后台分析")?4:5;
+        return group.StartsWith("OneBot")||group.StartsWith("账号")?0:group.StartsWith("模型")?1:group.StartsWith("媒体")||group.StartsWith("图片")?2:group.StartsWith("消息")?3:group.StartsWith("空间")||group.StartsWith("后台分析")?4:5;
     }
     static void InitRuntimeView() {
-        var nav=Find<ListBox>("RuntimeNav");nav.ItemsSource=runtimeCategories;
+        var nav=Find<ListBox>("RuntimeNav");nav.ItemsSource=new[]{runtimeCategories[0],runtimeCategories[1],runtimeCategories[2],runtimeCategories[4],runtimeCategories[3],runtimeCategories[5]};
         nav.SelectionChanged+=(s,e)=>{FilterRuntime();Find<ScrollViewer>("RuntimeScroll").ScrollToTop();};nav.SelectedIndex=0;
     }
     static void FilterRuntime() {
-        int category=Math.Max(0,Find<ListBox>("RuntimeNav").SelectedIndex);
+        int category=RuntimePage;
         foreach(var card in runtimeCards)card.Key.Visibility=card.Value==category?Visibility.Visible:Visibility.Collapsed;
         Find<TextBlock>("RuntimeTitle").Text=runtimeCategories[category];Find<TextBlock>("RuntimeSubtitle").Text=runtimeDescriptions[category];
         Find<Expander>("AdvancedEnv").Visibility=category==5?Visibility.Visible:Visibility.Collapsed;
         FilterQuickSetup();
     }
-    static void NavigateRuntime(int category) {quickSetupMode=false;Find<TabControl>("Tabs").SelectedIndex=3;Find<ListBox>("RuntimeNav").SelectedIndex=category;FilterRuntime();Find<ScrollViewer>("RuntimeScroll").ScrollToTop();}
+    static void NavigateRuntime(int category) {quickSetupMode=false;SelectedPage=MainPage.Runtime;RuntimePage=category;FilterRuntime();Find<ScrollViewer>("RuntimeScroll").ScrollToTop();}
     static Border RuntimeCard(string title,string help,Panel body,int category) {
         var content=new StackPanel();content.Children.Add(new TextBlock {Text=title,FontSize=14,FontWeight=FontWeights.SemiBold});
         if(help.Length>0)content.Children.Add(new TextBlock {Text=help,FontSize=11,Foreground=Ink("Muted"),TextWrapping=TextWrapping.Wrap,LineHeight=18,Margin=new Thickness(0,7,0,0)});
@@ -141,6 +146,7 @@ partial class App
                 }
                 holder.Children.Add(input);editor.Children.Add(holder);
                 var error=new TextBlock {Foreground=Ink("Danger"),FontSize=10,Margin=new Thickness(0,5,0,0),TextWrapping=TextWrapping.Wrap,Visibility=Visibility.Collapsed};runtimeErrors[key]=error;editor.Children.Add(error);
+                if(field.ContainsKey("credentialUnavailable")&&(bool)field["credentialUnavailable"]){error.Text="此凭据无法在当前 Windows 用户下解密，请重新输入后保存。";error.Visibility=Visibility.Visible;}
                 Grid.SetColumn(editor,1);row.Children.Add(editor);content.Children.Add(row);runtimeRows[row]=key;
             }
             if(group.Key=="模型选择")BuildChatModelActions(content);
@@ -149,7 +155,31 @@ partial class App
         }
         var shortcuts=new StackPanel();shortcuts.Children.Add(new TextBlock{Text="管理员 QQ、触发前缀、回复节奏和命令确认统一在机器人设置编辑。高级环境文件中的同名项仅补齐缺失默认值。",FontSize=11,TextWrapping=TextWrapping.Wrap,Foreground=Ink("Muted"),LineHeight=18});
         var openSettings=new Button{Content="前往机器人设置",Style=(Style)window.FindResource("Quiet"),HorizontalAlignment=HorizontalAlignment.Left,Margin=new Thickness(0,10,0,10)};openSettings.Click+=(s,e)=>NavigateSetting("approval.adminQq");shortcuts.Children.Add(openSettings);panel.Children.Add(RuntimeCard("行为设置入口","",shortcuts,5));
-        BuildMediaEditors(panel);runtimeCardOrder=panel.Children.Cast<UIElement>().ToList();RefreshMediaEditors();RefreshChatModelEditor();FilterRuntime();
+        BuildQzoneConnection(panel);BuildMediaEditors(panel);runtimeCardOrder=panel.Children.Cast<UIElement>().ToList();RefreshMediaEditors();RefreshChatModelEditor();FilterRuntime();
+    }
+    static void BuildQzoneConnection(StackPanel panel) {
+        var body=new StackPanel();
+        qzoneCheckButton=new Button {Content="检查空间连接",Style=(Style)window.FindResource("Quiet"),HorizontalAlignment=HorizontalAlignment.Left,Margin=new Thickness(0,0,0,12)};
+        System.Windows.Automation.AutomationProperties.SetAutomationId(qzoneCheckButton,"Qzone-Check");qzoneCheckButton.Click+=(s,e)=>RequestQzoneCheck();body.Children.Add(qzoneCheckButton);
+        qzoneCheckResult=new TextBlock {Text="先让 NapCat 登录机器人 QQ，再检查空间连接。检查只读取自己的说说，不会发表评论。",FontSize=11,Foreground=Ink("Muted"),TextWrapping=TextWrapping.Wrap,LineHeight=18,Margin=new Thickness(0,0,0,12)};body.Children.Add(qzoneCheckResult);
+        var openSwitch=new Button {Content="设置空间浏览与评论",Style=(Style)window.FindResource("Quiet"),HorizontalAlignment=HorizontalAlignment.Left,Margin=new Thickness(0,0,0,12)};openSwitch.Click+=(s,e)=>NavigateSetting("features.qzone.browseEnabled");body.Children.Add(openSwitch);
+        var card=RuntimeCard("QQ 空间连接","直接使用已连接 NapCat 的 QQ 登录，支持读取自己或指定好友的说说、发表评论和回复评论，无需填写额外服务地址或密钥。",body,4);
+        var first=panel.Children.Cast<FrameworkElement>().FirstOrDefault(item=>runtimeCards.ContainsKey(item)&&runtimeCards[item]==4);
+        if(first==null)panel.Children.Add(card);else panel.Children.Insert(panel.Children.IndexOf(first),card);
+    }
+    static void RequestQzoneCheck() {
+        if(qzoneCheckBusy)return;
+        if(dirtySections.Contains("env")){Feedback("请先保存高级环境文件，再检查空间连接。");return;}
+        if(!ValidateRuntimeField("ONEBOT_HTTP_URL")){NavigateRuntime(0);runtimeInputs["ONEBOT_HTTP_URL"].Focus();return;}
+        qzoneCheckBusy=true;qzoneCheckRevision=connectionRevision;qzoneCheckButton.IsEnabled=false;qzoneCheckButton.Content="正在检查…";
+        qzoneCheckResult.Text="正在验证当前 QQ 连接、空间登录和自己的说说读取…";qzoneCheckResult.Foreground=Ink("Muted");
+        Send("qzone-check",new {runtime=new Dictionary<string,string>{{"ONEBOT_HTTP_URL",RuntimeValue("ONEBOT_HTTP_URL")},{"ONEBOT_TOKEN",RuntimeValue("ONEBOT_TOKEN")}}});
+    }
+    static void RenderQzoneCheck(string message,bool error) {
+        qzoneCheckBusy=false;if(qzoneCheckButton==null||qzoneCheckResult==null)return;
+        qzoneCheckButton.IsEnabled=true;qzoneCheckButton.Content="检查空间连接";
+        qzoneCheckResult.Text=connectionRevision==qzoneCheckRevision?message:"连接配置已修改，请重新检查空间连接。";
+        qzoneCheckResult.Foreground=Ink(error?"Danger":"Text");Feedback(qzoneCheckResult.Text);
     }
     static void BuildChatModelActions(StackPanel content) {
         chatModelSummary=new TextBlock {FontSize=11,Foreground=Ink("Muted"),TextWrapping=TextWrapping.Wrap,Margin=new Thickness(0,0,0,12)};content.Children.Add(chatModelSummary);
@@ -206,7 +236,7 @@ partial class App
         }
         panel.Children.Add(RuntimeCard("模型与声音","媒体模型、声音和抽帧参数仅在这里编辑；媒体总开关在机器人设置的功能开关中管理。",body,2));
     }
-    static void RuntimeChanged() {MarkDirty("runtime");if(!loading){InvalidateQuickCheck();Find<TextBlock>("RuntimeHint").Text="有尚未保存的连接配置；仅修改对话模型时会保留 QQ 登录。";if(chatModelResult!=null&&!chatModelBusy){chatModelResult.Text="配置有修改，可测试当前输入后保存。";chatModelResult.Foreground=Ink("Muted");}}RefreshMediaEditors();RefreshChatModelEditor();if(quickSetupMode)FilterRuntime();}
+    static void RuntimeChanged() {MarkDirty("runtime");if(!loading){connectionRevision++;if(qzoneCheckResult!=null&&!qzoneCheckBusy)qzoneCheckResult.Text="连接配置有修改，可检查当前输入；检查不会保存配置或发表评论。";InvalidateQuickCheck();Find<TextBlock>("RuntimeHint").Text="有尚未保存的连接配置；仅修改对话模型时会保留 QQ 登录。";if(chatModelResult!=null&&!chatModelBusy){chatModelResult.Text="配置有修改，可测试当前输入后保存。";chatModelResult.Foreground=Ink("Muted");}}RefreshMediaEditors();RefreshChatModelEditor();if(quickSetupMode)FilterRuntime();}
     static void RefreshMediaEditors() {
         if(mediaInputs.Count!=mediaKeys.Length)return;
         bool enabled=SavedMediaEnabled();
@@ -244,10 +274,10 @@ partial class App
         runtimeErrors[key].Text=error;runtimeErrors[key].Visibility=error.Length==0?Visibility.Collapsed:Visibility.Visible;return error.Length==0;
     }
     static bool ValidateConnectionForm() {
-        foreach(string key in runtimeInputs.Keys)if(!ValidateRuntimeField(key)) {Find<ListBox>("RuntimeNav").SelectedIndex=RuntimeCategoryForKey(key);runtimeInputs[key].BringIntoView();runtimeInputs[key].Focus();Feedback("连接配置需要调整，请检查行内提示。");return false;}
-        foreach(string key in mediaKeys)if(!ValidateMediaField(key)) {Find<ListBox>("RuntimeNav").SelectedIndex=2;mediaInputs[key].BringIntoView();mediaInputs[key].Focus();Feedback("媒体模型配置需要调整，请检查行内提示。");return false;}
+        foreach(string key in runtimeInputs.Keys)if(!ValidateRuntimeField(key)) {RuntimePage=RuntimeCategoryForKey(key);runtimeInputs[key].BringIntoView();runtimeInputs[key].Focus();Feedback("连接配置需要调整，请检查行内提示。");return false;}
+        foreach(string key in mediaKeys)if(!ValidateMediaField(key)) {RuntimePage=2;mediaInputs[key].BringIntoView();mediaInputs[key].Focus();Feedback("媒体模型配置需要调整，请检查行内提示。");return false;}
         if(SavedMediaEnabled()&&new[]{"visionModel","transcriptionModel","speechModel"}.Any(key=>((TextBox)fields["social."+key]).Text.Trim().Length>0)&&RuntimeValue("BOT_MEDIA_BASE_URL").Trim().Length==0) {
-            runtimeErrors["BOT_MEDIA_BASE_URL"].Text="使用独立媒体模型前，请先填写媒体服务地址。";runtimeErrors["BOT_MEDIA_BASE_URL"].Visibility=Visibility.Visible;Find<ListBox>("RuntimeNav").SelectedIndex=2;runtimeInputs["BOT_MEDIA_BASE_URL"].BringIntoView();runtimeInputs["BOT_MEDIA_BASE_URL"].Focus();Feedback("请先配置媒体服务地址，再使用独立媒体模型。");return false;
+            runtimeErrors["BOT_MEDIA_BASE_URL"].Text="使用独立媒体模型前，请先填写媒体服务地址。";runtimeErrors["BOT_MEDIA_BASE_URL"].Visibility=Visibility.Visible;RuntimePage=2;runtimeInputs["BOT_MEDIA_BASE_URL"].BringIntoView();runtimeInputs["BOT_MEDIA_BASE_URL"].Focus();Feedback("请先配置媒体服务地址，再使用独立媒体模型。");return false;
         }
         return true;
     }
@@ -255,14 +285,16 @@ partial class App
     static void SaveConnection(bool restart) {
         if(restart&&quickSetupMode&&!quickReady){Feedback("请先检查当前配置，再保存并启动。");return;}
         if(chatModelBusy)return;
-        if(dirtySections.Contains("env")) {Find<ListBox>("RuntimeNav").SelectedIndex=5;Find<Expander>("AdvancedEnv").IsExpanded=true;Feedback("请先保存高级环境文件，再保存连接与媒体表单。");return;}
+        if(quickScope!=null&&dirtySettingPaths.Any(scopePaths.Contains)){Feedback("请先保存机器人设置中的主人或联系范围草稿，再重新选择使用范围。");return;}
+        if(dirtySections.Contains("env")) {RuntimePage=5;Find<Expander>("AdvancedEnv").IsExpanded=true;Feedback("请先保存高级环境文件，再保存连接与媒体表单。");return;}
         if(RuntimeValue("BOT_SETTINGS_FILE")!=savedRuntimeValues["BOT_SETTINGS_FILE"]&&dirtySettingPaths.Any(path=>!IsMediaSetting(path))) {Feedback("请先保存机器人设置中的其他修改，再切换动态配置文件；媒体模型修改会保存到目标文件。");return;}
         foreach(string key in mediaKeys) {var text=fields["social."+key] as TextBox;if(text!=null)text.Text=text.Text.Trim();}
         if(!ValidateConnectionForm())return;
         var media=new Dictionary<string,object>();foreach(string key in mediaKeys) {Control input=fields["social."+key];media[key]=input is CheckBox?(object)(((CheckBox)input).IsChecked==true):key=="videoFrames"?(object)long.Parse(((TextBox)input).Text,CultureInfo.InvariantCulture):((TextBox)input).Text;}
-        Send("connection",new {runtime=runtimeInputs.ToDictionary(pair=>pair.Key,pair=>RuntimeValue(pair.Key)),media=media,mediaPaths=dirtySettingPaths.Where(IsMediaSetting).Select(path=>path.Substring(7)).ToArray(),baseline=settings,sourceSettingsPath=settingsPath,restart=restart});
+        Send("connection",new {runtime=runtimeInputs.ToDictionary(pair=>pair.Key,pair=>RuntimeValue(pair.Key)),media=media,mediaPaths=dirtySettingPaths.Where(IsMediaSetting).Select(path=>path.Substring(7)).ToArray(),baseline=settings,sourceSettingsPath=settingsPath,restart=restart,scope=quickScope});
     }
     static void VerifyRuntimeInteraction() {
+        if(runtimeInputs.ContainsKey("BOT_QZONE_ADAPTER_URL")||runtimeInputs.ContainsKey("BOT_QZONE_ADAPTER_TOKEN")||qzoneCheckButton==null)throw new Exception("空间连接仍要求外部适配配置或缺少检查入口");
         if(Find<ListBox>("RuntimeNav").Items.Count!=6)throw new Exception("连接配置分类不完整");
         if(new[]{"ADMIN_QQ","GROUP_PREFIX","GROUP_COOLDOWN_MS","GROUP_CONTEXT_LINES","REPLY_CHUNK_SIZE","MIN_DELAY_MS","MAX_DELAY_MS","ALLOW_EXEC"}.Any(runtimeInputs.ContainsKey))throw new Exception("行为设置的环境默认值仍可重复编辑");
         var mode=(ComboBox)runtimeInputs["BOT_CHAT_MODE"];var model=(ComboBox)runtimeInputs["BOT_CHAT_MODEL"];var keyInput=(PasswordBox)runtimeInputs["QQ_BOT_DEEPSEEK_API_KEY"];
@@ -276,18 +308,18 @@ partial class App
         RenderChatModel(new Dictionary<string,object>{{"operation","list"},{"models",new[]{"custom-fixture-model","other-model"}},{"message","获取到两个测试模型。"}});
         if(model.Text!="custom-fixture-model"||model.Items.Count!=2)throw new Exception("模型列表覆盖了当前输入");
         SetChatModelBusy(true);if(chatModelTest.IsEnabled||keyInput.IsEnabled||Find<Button>("SaveRuntime").IsEnabled)throw new Exception("测试期间允许重复操作");SetChatModelBusy(false);
-        Find<ListBox>("RuntimeNav").SelectedIndex=1;Capture(System.IO.Path.Combine(root,"model-project.png"),3);
+        RuntimePage=1;Capture(System.IO.Path.Combine(root,"model-project.png"),MainPage.Runtime);
         mode.SelectedValue="account";if(keyInput.IsEnabled||chatModelTest.IsEnabled||!model.IsEnabled)throw new Exception("账号模式没有隔离 API Key 控件");
         mode.SelectedValue=originalMode;model.Text=originalModel;keyInput.Password=originalKey;ValidateRuntimeField("BOT_CHAT_MODEL");ValidateRuntimeField("QQ_BOT_DEEPSEEK_API_KEY");
         var profile=(TextBox)runtimeInputs["BOT_DSH_PROFILE"];string originalProfile=profile.Text;
-        profile.Text="bad profile";if(ValidateConnectionForm()||runtimeErrors["BOT_DSH_PROFILE"].Visibility!=Visibility.Visible||Find<ListBox>("RuntimeNav").SelectedIndex!=1)throw new Exception("Profile 校验没有定位到对话模型");
+        profile.Text="bad profile";if(ValidateConnectionForm()||runtimeErrors["BOT_DSH_PROFILE"].Visibility!=Visibility.Visible||RuntimePage!=1)throw new Exception("Profile 校验没有定位到对话模型");
         if(!Find<TextBox>("Env").IsReadOnly||Find<Button>("SaveEnv").IsEnabled)throw new Exception("连接表单和高级文本可以同时编辑");
         profile.Text=originalProfile;ValidateRuntimeField("BOT_DSH_PROFILE");
         var vision=(TextBox)fields["social.visionModel"];string originalVision=vision.Text;var media=(TextBox)mediaInputs["visionModel"];
         if(!object.ReferenceEquals(media,vision)||mediaInputs.ContainsKey("mediaEnabled"))throw new Exception("媒体配置存在重复编辑器或重复功能开关");
         media.Text="vision-check";if(!dirtySections.Contains("models")||dirtySections.Contains("settings"))throw new Exception("媒体参数被归入机器人设置保存范围");vision.Text=originalVision;
         var frames=(TextBox)mediaInputs["videoFrames"];string originalFrames=frames.Text;frames.Text="0";
-        if(ValidateConnectionForm()||mediaErrors["videoFrames"].Visibility!=Visibility.Visible||Find<ListBox>("RuntimeNav").SelectedIndex!=2)throw new Exception("媒体模型没有显示行内校验提示");frames.Text=originalFrames;ValidateMediaField("videoFrames");
+        if(ValidateConnectionForm()||mediaErrors["videoFrames"].Visibility!=Visibility.Visible||RuntimePage!=2)throw new Exception("媒体模型没有显示行内校验提示");frames.Text=originalFrames;ValidateMediaField("videoFrames");
         var saved=json.Deserialize<Dictionary<string,object>>(json.Serialize(settings));var disabled=json.Deserialize<Dictionary<string,object>>(json.Serialize(settings));((Dictionary<string,object>)disabled["social"])["mediaEnabled"]=false;
         ApplySavedSettings(disabled,new[]{"social.mediaEnabled"});if(!media.IsEnabled||!mediaSummary.Text.Contains("已关闭"))throw new Exception("关闭媒体能力后无法预先配置服务或缺少状态提示");ApplySavedSettings(saved,new[]{"social.mediaEnabled"});
         dirtySections.Remove("runtime");dirtySections.Remove("models");UpdateConnectionEditing();
@@ -295,11 +327,11 @@ partial class App
         if(Find<StackPanel>("RuntimeFields").IsEnabled||Find<Button>("SaveRuntime").IsEnabled)throw new Exception("高级文本编辑未保护连接表单");
         Find<TextBox>("Env").Text=originalEnv;dirtySections.Remove("env");UpdateConnectionEditing();
         Find<TextBlock>("RuntimeHint").Text="仅保存本页连接与媒体参数；机器人设置另行保存。";
-        for(int i=0;i<runtimeCategories.Length;i++){Find<ListBox>("RuntimeNav").SelectedIndex=i;Capture(System.IO.Path.Combine(root,"runtime-"+i+".png"),3);}
+        for(int i=0;i<runtimeCategories.Length;i++){NavigateRuntime(i);Capture(System.IO.Path.Combine(root,"runtime-"+i+".png"),MainPage.Runtime);}
         double originalWidth=window.Width,originalHeight=window.Height;window.Width=1000;window.Height=700;window.UpdateLayout();
-        Find<ListBox>("SettingsNav").SelectedIndex=5;Capture(System.IO.Path.Combine(root,"settings-compact.png"),2);
+        Find<ListBox>("SettingsNav").SelectedIndex=5;Capture(System.IO.Path.Combine(root,"settings-compact.png"),MainPage.Settings);
         if(Find<ListBox>("SettingsNav").ActualHeight>90||Find<ScrollViewer>("SettingsScroll").ActualWidth<700)throw new Exception("顶部设置导航没有释放内容宽度");
-        Find<ListBox>("RuntimeNav").SelectedIndex=1;Capture(System.IO.Path.Combine(root,"model-compact.png"),3);
-        window.Width=originalWidth;window.Height=originalHeight;Find<ListBox>("RuntimeNav").SelectedIndex=0;Find<ListBox>("SettingsNav").SelectedIndex=0;
+        RuntimePage=1;Capture(System.IO.Path.Combine(root,"model-compact.png"),MainPage.Runtime);
+        window.Width=originalWidth;window.Height=originalHeight;RuntimePage=0;Find<ListBox>("SettingsNav").SelectedIndex=0;
     }
 }
