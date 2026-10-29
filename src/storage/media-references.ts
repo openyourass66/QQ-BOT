@@ -27,7 +27,7 @@ export function executeMediaReferences(request:MediaReferenceRequest,c:Context):
   if(request.action==='media-refs-query'){
     if(!Array.isArray(request.names)||request.names.length>MEDIA_REFERENCE_LIMITS.query||request.names.some(name=>typeof name!=='string'||!ownedMediaName(name)))throw invalid('媒体引用查询范围无效');
     const names=[...new Set(request.names.map(name=>name.toLowerCase()))];if(!names.length)return {...status(),names:[]};
-    return {...status(),names:db.prepare(`SELECT DISTINCT r.name FROM media_references r LEFT JOIN external_operations o ON o.id=r.operation_id WHERE r.name IN (${names.map(()=>'?').join(',')}) AND (r.operation_id IS NULL OR o.state NOT IN ('completed','failed'))`).all(...names).map(row=>String(row.name))};
+    return {...status(),names:db.prepare(`SELECT DISTINCT r.name FROM media_references r LEFT JOIN external_operations o ON o.id=r.operation_id WHERE r.name IN (${names.map(()=>'?').join(',')}) AND (r.operation_id IS NULL OR o.id IS NULL OR o.state NOT IN ('completed','failed'))`).all(...names).map(row=>String(row.name))};
   }
   return transaction(()=>{
     if(request.action==='media-refs-pin'){

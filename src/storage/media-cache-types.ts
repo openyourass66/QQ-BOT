@@ -1,6 +1,7 @@
 export type MediaCacheEntry={name:string;size:number;mtime:number;owned:boolean};
 export type StoredMediaCacheEntry=MediaCacheEntry&{lastUsed:number;state:'complete'|'reserved'|'stale';owner:string;seen:string;fileTag:string};
 export type MediaCacheStatistics={files:number;bytes:number};
+export type MediaCacheCursor={lastUsed:number;name:string};
 export type MediaCacheRequest=
   |{action:'media-cache-recover'}
   |{action:'media-cache-scan-start';root:string;owner:string}
@@ -9,6 +10,7 @@ export type MediaCacheRequest=
   |{action:'media-cache-scan-abort';owner:string}
   |{action:'media-cache-read';name:string}
   |{action:'media-cache-statistics'}
+  |{action:'media-cache-candidates';cutoff:number;limit:number;after?:MediaCacheCursor}
   |{action:'media-cache-reserve';name:string;size:number;limit:number;owner:string}
   |{action:'media-cache-stage';name:string;owner:string;fileTag:string}
   |{action:'media-cache-complete';name:string;owner:string;mtime:number;at:number}

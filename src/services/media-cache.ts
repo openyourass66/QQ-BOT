@@ -5,7 +5,7 @@ import {MemoryMediaCacheStore} from '../storage/memory-media-cache.js';
 import {ownedMediaName,safeMediaName,type MediaCacheEntry,type MediaCacheStore,type MediaCacheStatistics,type StoredMediaCacheEntry} from '../storage/media-cache-types.js';
 
 const fileSystem={opendir,lstat,open,link,unlink,mkdir,realpath};
-type Options={fs?:Partial<typeof fileSystem>;now?:()=>number;limit?:()=>number;onFailure?:(error:Error)=>void};
+type Options={fs?:Partial<typeof fileSystem>;now?:()=>number;limit?:()=>number;onFailure?:(error:Error)=>void;signal?:AbortSignal;preserveTemporary?:boolean;check?:()=>void};
 export const MEDIA_WRITE_LIMITS={pending:8,bytes:128*1024*1024,file:50_000_000};
 const absent=(error:unknown)=>(error as NodeJS.ErrnoException).code==='ENOENT';
 
@@ -36,19 +36,22 @@ export class MediaCache {
   }
   reconcile():Promise<MediaCacheStatistics>{this.loaded=false;this.epoch++;return this.enqueue(async()=>{await this.ensure();return this.store.call({action:'media-cache-statistics'});});}
   async statistics():Promise<MediaCacheStatistics>{await this.ensure();return this.store.call({action:'media-cache-statistics'});}
+  touch(name:string):Promise<void>{return this.enqueue(async()=>{if(!ownedMediaName(name))return;await this.ensure();await this.store.call({action:'media-cache-touch',name,at:(this.options.now??Date.now)()});});}
   async flush():Promise<void>{for(;;){const current=this.chain;await current;if(current===this.chain)return;}}
   private async ensure(){
     if(this.loaded)return;
     await (this.loading??=(async()=>{while(!this.loaded){const epoch=this.epoch;await this.scan();this.loaded=epoch===this.epoch;}})().finally(()=>{this.loading=undefined;}));
   }
   private async scan(){
+    this.options.check?.();
+    this.options.signal?.throwIfAborted();
     const owner=randomUUID();
     await this.fs.mkdir(this.root,{recursive:true});const actual=await this.fs.realpath(this.root),root=process.platform==='win32'?actual.toLowerCase():actual;
     const {stale}=await this.store.call<{stale:Array<{name:string;owner:string;fileTag:string}>}>({action:'media-cache-scan-start',root,owner});
     try{
-      for(const row of stale){if(!ownedMediaName(row.name)||!/^[a-f0-9-]{36}$/i.test(row.owner)||!row.fileTag)continue;const temp=this.path(`${row.name}.${row.owner}.tmp`),info=await this.fs.lstat(temp,{bigint:true}).catch(error=>{if(!absent(error))throw error;return undefined;});if(info?.isFile()&&!info.isSymbolicLink()&&`${info.dev}:${info.ino}`===row.fileTag)await this.fs.unlink(temp);}
+      for(const row of stale){this.options.signal?.throwIfAborted();if(this.options.preserveTemporary||!ownedMediaName(row.name)||!/^[a-f0-9-]{36}$/i.test(row.owner)||!row.fileTag)continue;const temp=this.path(`${row.name}.${row.owner}.tmp`),info=await this.fs.lstat(temp,{bigint:true}).catch(error=>{if(!absent(error))throw error;return undefined;});if(info?.isFile()&&!info.isSymbolicLink()&&`${info.dev}:${info.ino}`===row.fileTag)await this.fs.unlink(temp);}
       const directory=await this.fs.opendir(this.root);let entries:MediaCacheEntry[]=[];
-      try{for await(const entry of directory){if(!entry.isFile())continue;const path=this.path(entry.name),info=await this.fs.lstat(path).catch(error=>{if(!absent(error))throw error;return undefined;});if(!info?.isFile()||info.isSymbolicLink())continue;
+      try{for await(const entry of directory){this.options.check?.();this.options.signal?.throwIfAborted();if(!entry.isFile())continue;const path=this.path(entry.name),info=await this.fs.lstat(path).catch(error=>{if(!absent(error))throw error;return undefined;});if(!info?.isFile()||info.isSymbolicLink())continue;
         entries.push({name:entry.name,size:info.size,mtime:info.mtimeMs,owned:ownedMediaName(entry.name)&&info.nlink===1});if(entries.length===128){await this.store.call({action:'media-cache-scan-batch',owner,entries});entries=[];}
       }}finally{await directory.close().catch(()=>{});}
       if(entries.length)await this.store.call({action:'media-cache-scan-batch',owner,entries});await this.store.call({action:'media-cache-scan-complete',owner});

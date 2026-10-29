@@ -9,8 +9,14 @@ export function executeMediaCache(request:MediaCacheRequest,c:Context):unknown{
   const {db,meta,setMeta,transaction}=c,stats=()=>({files:Number(meta('media_cache_files')??0),bytes:Number(meta('media_cache_bytes')??0)});
   if(request.action==='media-cache-read'){if(!safeMediaName(request.name))throw mediaCacheError('INVALID','媒体文件名无效');const row=db.prepare('SELECT * FROM media_cache_files WHERE name=?').get(request.name);return row?entry(row):null;}
   if(request.action==='media-cache-statistics')return stats();
+  if(request.action==='media-cache-candidates'){
+    if(!Number.isFinite(request.cutoff)||!Number.isSafeInteger(request.limit)||request.limit<1||request.limit>64||request.after&&(!Number.isFinite(request.after.lastUsed)||!safeMediaName(request.after.name)))throw mediaCacheError('INVALID','媒体清理查询范围无效');
+    if(!meta('media_cache_ready')||meta('media_cache_scan'))throw mediaCacheError('BUSY','媒体索引尚未完成，请先核对');
+    const args=request.after?[request.cutoff,request.cutoff,request.after.lastUsed,request.after.name,request.limit]:[request.cutoff,request.cutoff,request.limit];
+    return db.prepare("SELECT * FROM media_cache_files WHERE state='complete' AND owned=1 AND last_used<=? AND mtime<=?"+(request.after?' AND (last_used,name)>(?,?)':'')+' ORDER BY last_used,name LIMIT ?').all(...args).map(entry);
+  }
   return transaction(()=>{
-    if(request.action==='media-cache-recover'){db.exec("UPDATE media_cache_files SET state='stale' WHERE state='reserved';");setMeta('media_cache_scan',null);setMeta('media_cache_ready',false);return {ok:true};}
+    if(request.action==='media-cache-recover'){db.exec("UPDATE media_cache_files SET state='stale' WHERE state='reserved';");setMeta('media_cache_scan',null);setMeta('media_cache_ready',false);return {ok:true,unsettled:Number(db.prepare("SELECT COUNT(*) AS n FROM media_cache_files WHERE state='stale'").get()!.n)};}
     if(request.action==='media-cache-scan-start'){
       if(!validOwner(request.owner)||typeof request.root!=='string'||!request.root||request.root.length>32768)throw mediaCacheError('INVALID','媒体索引位置或持有者无效');
       if(meta('media_cache_scan')||db.prepare("SELECT 1 FROM media_cache_files WHERE state='reserved' LIMIT 1").get())throw mediaCacheError('BUSY','媒体保存或索引正在处理，请稍后再试');

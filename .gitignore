@@ -61,6 +61,7 @@
 # 日志与系统文件
 /.credentials/
 /desktop/runtime-guard.exe
+/desktop/media-cleaner.exe
 *.log
 *.log.*
 .DS_Store

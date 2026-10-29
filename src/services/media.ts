@@ -3,7 +3,7 @@ import https from 'node:https';
 import { lookup } from 'node:dns/promises';
 import { isIP } from 'node:net';
 import { realpath, open } from 'node:fs/promises';
-import { resolve, relative, isAbsolute } from 'node:path';
+import { resolve, relative, isAbsolute,basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { SocialSettings } from '../qq/social-settings.js';
 import {reportedServiceUsage,type PrepareServiceRequest,type ServiceRequest,type ServiceLimits} from '../agent/service-request.js';
@@ -93,13 +93,14 @@ export class MediaService {
     const file = await realpath(source.startsWith('file:') ? fileURLToPath(source) : resolve(source));
     // Only files created by this service can be read or sent by a model.
     const roots = [this.root, resolve(process.env.BOT_WORKSPACE || 'bot-workspace', 'output'), ...(process.env.BOT_MEDIA_IMPORT_DIRS ?? '').split('|').filter(Boolean)];
-    let allowed = false;
+    let allowed = false,cached=false;
     for (const root of roots) {
       const actual = await realpath(root).catch(() => resolve(root));
       const rel = relative(actual, file);
-      if (rel && !rel.startsWith('..') && !isAbsolute(rel)) { allowed = true; break; }
+      if (rel && !rel.startsWith('..') && !isAbsolute(rel)) { allowed = true;cached=root===this.root&&rel===basename(file);break; }
     }
     if (!allowed) throw new Error('文件不在机器人媒体库或已配置的媒体导入目录中');
+    if(cached)await this.cache.touch(basename(file));
     return { buffer: await readMediaFile(file, signal, max), mime: 'application/octet-stream' };
   }
   async image(source: string, signal: AbortSignal): Promise<{ type: 'image'; data: string; mimeType: string }> {

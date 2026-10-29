@@ -190,7 +190,7 @@ try{
   port.on('message',({id,request}:{id:number;request:DatabaseRequest})=>{
     const started=performance.now();
     try{
-      const reads=['metadata','query-messages','lookup-messages','latest-incoming','integrity','fingerprint','query-plan','export-social','usage-summary','usage-request-stats','due-tasks','due-thoughts','usage-op-read','usage-op-list','media-cache-read','media-cache-statistics','media-refs-query','media-refs-status'];
+      const reads=['metadata','query-messages','lookup-messages','latest-incoming','integrity','fingerprint','query-plan','export-social','usage-summary','usage-request-stats','due-tasks','due-thoughts','usage-op-read','usage-op-list','media-cache-read','media-cache-statistics','media-cache-candidates','media-refs-query','media-refs-status'];
       const result=reads.includes(request.action)?readSnapshot(()=>execute(request)):execute(request);if(Buffer.byteLength(JSON.stringify(result))>DATABASE_LIMITS.responseBytes)throw error('DATABASE_RESPONSE_TOO_LARGE','查询结果过大，请缩小查询范围或分页读取。');
       port.postMessage({id,ok:true,result,elapsedMs:performance.now()-started});if(request.action==='close')port.close();
     }catch(failure){const e=failure as Error&{code?:string;errcode?:number};port.postMessage({id,ok:false,error:{code:e.code?.startsWith('DATABASE_')?e.code:e.errcode===13?'ENOSPC':'DATABASE_OPERATION_FAILED',message:e.code?.startsWith('DATABASE_')?e.message:'数据库操作失败，请保留数据并查看诊断。'}});}

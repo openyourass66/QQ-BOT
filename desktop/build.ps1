@@ -13,6 +13,9 @@ if ($LASTEXITCODE -ne 0) { throw '桌面端编译失败' }
 $guardOutput = Join-Path $PSScriptRoot 'runtime-guard.exe'
 & (Join-Path $framework 'csc.exe') /nologo /codepage:65001 /target:exe /platform:x64 /optimize+ "/out:$guardOutput" ('/reference:' + (Join-Path $framework 'System.Web.Extensions.dll')) (Join-Path $PSScriptRoot 'ProcessGuard.cs')
 if ($LASTEXITCODE -ne 0) { throw '进程保护组件编译失败' }
+$cleanerOutput = Join-Path $PSScriptRoot 'media-cleaner.exe'
+& (Join-Path $framework 'csc.exe') /nologo /codepage:65001 /target:exe /platform:x64 /optimize+ "/out:$cleanerOutput" ('/reference:' + (Join-Path $framework 'System.Web.Extensions.dll')) (Join-Path $PSScriptRoot 'MediaCleanup.cs')
+if ($LASTEXITCODE -ne 0) { throw '媒体维护组件编译失败' }
 # A low-integrity workspace must not lower the desktop app or its Node children.
 & icacls.exe $output /setintegritylevel Medium | Out-Null
 if ($LASTEXITCODE -ne 0) { throw '无法设置桌面程序的普通用户完整性级别，请检查生成文件权限' }
