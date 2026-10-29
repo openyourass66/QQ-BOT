@@ -1,0 +1,80 @@
+{
+  "date": "2026-10-29",
+  "timezone": "Asia/Shanghai",
+  "candidate": "WhaleWorkbench-0.2.0-win-x64-rc5",
+  "channel": "internal-validation",
+  "sourceRevision": "a756d38171beadf85b9d237cf159d5045f9e55a3",
+  "archive": {
+    "path": "release/WhaleWorkbench-0.2.0-win-x64-rc5.zip",
+    "bytes": 50703125,
+    "sha256": "19d30013cdd27156b12f5681905c273230843a44110615037153a032f435d442",
+    "entries": 8090,
+    "standardPathSeparators": true,
+    "requiredFilesPresent": true,
+    "bundledNodeHashMatchesCatalog": true,
+    "personalDataAbsent": true,
+    "publisherSignatureVerified": false
+  },
+  "runtime": {
+    "node": "24.22.1",
+    "zod": "4.6.7",
+    "modulesChecked": 124,
+    "relativeImportsChecked": 265,
+    "packageImportsChecked": 31,
+    "developmentToolsRequiredForUser": false
+  },
+  "automatedChecks": {
+    "hostNode": "22.20.0",
+    "isolatedRegression": {"passed": 474, "failed": 0, "skipped": 0},
+    "realSyntheticFfmpegTestEnabled": true,
+    "releaseNodeStorageAndCleanup": {"passed": 46, "failed": 0, "skipped": 0},
+    "releaseNodePackaging": {"passed": 6, "failed": 0, "skipped": 0},
+    "typecheck": "passed",
+    "desktopBuild": "passed"
+  },
+  "nativeWindowCheck": {
+    "directlyTestedCandidate": "rc4",
+    "bundledRuntimeAndProductionDependencies": true,
+    "developerNodeRemovedFromTestPath": true,
+    "independentDataDirectoryWithSpaces": true,
+    "windowChecks": "passed-first-run",
+    "programmaticTrayRestoreAndExit": "passed-first-run",
+    "physicalTrayClick": "not-verified"
+  },
+  "realPrivateChatCheck": {
+    "directlyTestedCandidate": "rc4",
+    "data": "existing-isolated-test-instance",
+    "accountAndCredentialsIncludedInReport": false,
+    "limitedPrivateScope": true,
+    "backgroundActionsDisabled": true,
+    "businessDataPathsAndWorkspaceIsolated": true,
+    "initialLoginState": "official-login-or-verification-required",
+    "userCompletedOfficialLogin": true,
+    "userConfirmedReply": true,
+    "observedIncoming": 1,
+    "observedOutgoing": 1,
+    "successfulTurns": 1,
+    "failedTurns": 0,
+    "completedQqOperations": 1,
+    "unknownQqOperations": 0,
+    "completedModelRequestsInObservationWindow": 3,
+    "paidModelUsed": true,
+    "otherCapabilities": "not-covered-by-this-chat-check"
+  },
+  "rc4ToRc5Equivalence": {
+    "identicalFilesCheckedBySha256": 8087,
+    "changedFiles": ["release-manifest.json", "使用说明.html"],
+    "changes": "source metadata and archive path format",
+    "freshRealChatRepeatedOnRc5": false
+  },
+  "remaining": [
+    "complete first-use and failure flows for new users",
+    "clean Windows 10 and Windows 11 installation",
+    "other declared QQ, media, space and native-network combinations",
+    "ordinary-user maintenance interface, consistent backup and restore",
+    "installer, trusted signed manifests, upgrade and paired rollback",
+    "full mixed-load and fault reports",
+    "72-hour mixed-load run followed by 7-day real-use observation",
+    "five new-user trials and G01-G06 release evidence"
+  ]
+}
