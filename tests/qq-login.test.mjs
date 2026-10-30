@@ -118,3 +118,37 @@ test('QQ 管理拒绝非回环配置、越界响应和非官方二维码，不�
   const path=join(qq.runtime,'config/webui.json'),config=JSON.parse(await readFile(path,'utf8'));config.host='0.0.0.0';await writeFile(path,JSON.stringify(config));await assert.rejects(qq.status(),/配置已改变/);
   await assert.rejects(qq.request('/Debug/terminal'),/不支持/);
 }));
+
+test('手工部署的本机 QQ 无需受管组件即可扫码、刷新和查看登录，保持原配置',()=>fixture(async options=>{
+  await rm(join(options.dataRoot,'components/active.json'));
+  const directory=join(options.dataRoot,'napcat/node-runtime/config');await mkdir(directory,{recursive:true});
+  const file=join(directory,'webui.json'),original=JSON.stringify({host:'::',port:6099,token:'legacy-token'});await writeFile(file,original);
+  let phase='waiting_qrcode',refreshes=0,calls=0;
+  const qq=new ManagedQQ({...options,encodeQr:async()=> 'data:image/png;base64,fixture',fetcher:async(input,request)=>{
+    calls++;const url=new URL(input);assert.equal(url.hostname,'127.0.0.1');assert.equal(url.port,'6099');assert.equal(request.redirect,'error');
+    let data;
+    if(url.pathname.endsWith('/auth/login'))data={Credential:'fixture-session'};
+    else if(url.pathname.endsWith('/CheckLoginStatus'))data={isLogin:phase==='ready',coreReady:phase==='ready',loginPhase:phase,qrcodeurl:'https://qq.com/fixture-only'};
+    else if(url.pathname.endsWith('/RefreshQRcode')){refreshes++;data={};}
+    else if(url.pathname.endsWith('/GetQQLoginInfo'))data={uin:'10001'};
+    else assert.fail('Unexpected route: '+url.pathname);
+    return new Response(JSON.stringify({code:0,data}));
+  }});
+  assert.equal(await qq.existingConfiguration(),true);
+  let result=await qq.status();assert.equal(result.managed,false);assert.match(result.qrImage,/^data:image\/png/);assert.equal((await qq.status({refresh:true})).phase,'waiting_qrcode');assert.equal(refreshes,1);
+  phase='ready';result=await qq.status();assert.equal(result.account,'10001');assert.equal(result.networkReady,false);assert.match(result.message,/现有 OneBot/);
+  const before=calls;result=await qq.status({mode:'external',refresh:true});assert.equal(result.phase,'external');assert.equal(calls,before);
+  assert.equal(await readFile(file,'utf8'),original);assert.deepEqual(await readdir(directory),['webui.json']);
+}));
+
+test('手工 QQ 未启动时提供现有配置启动入口，拒绝远程管理地址与无效端口',()=>fixture(async options=>{
+  const directory=join(options.dataRoot,'napcat/node-runtime/config');await mkdir(directory,{recursive:true});
+  const file=join(directory,'webui.json'),config={host:'localhost',port:6099,token:'fixture-token'};await writeFile(file,JSON.stringify(config));
+  let calls=0;const qq=new ManagedQQ({...options,fetcher:async()=>{calls++;throw new Error('fixture-sensitive-error');}});
+  const result=await qq.status();assert.equal(result.phase,'stopped');assert.equal(result.managed,false);assert.doesNotMatch(result.message,/fixture-sensitive/);
+  const before=calls;
+  for(const invalid of [{host:'example.com'},{port:0},{port:65536},{port:'6099'},{enable2FA:true},{token:''}]){
+    await writeFile(file,JSON.stringify({...config,...invalid}));await assert.rejects(qq.status(),/配置已改变/);
+  }
+  assert.equal(calls,before);
+}));

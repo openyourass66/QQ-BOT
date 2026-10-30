@@ -21,6 +21,7 @@ test('意外退出按 1/2/4/8/16 秒退避，十分钟最多恢复五次，停�
 test('配置、凭据、损坏数据和实例冲突直接待处理；稳定后重新计算失败次数',()=>{
   for(const error of [new SyntaxError('fixture'),{code:'BOT_RESOURCE_LOCKED'},{code:'ENOSPC'},{code:'ENOENT'},{message:'HTTP 401'},{message:'受限工具策略未加载'}])assert.equal(classifyRuntimeFailure(error).recoverable,false);
   assert.equal(classifyRuntimeFailure({code:'MODEL_EXITED'}).recoverable,true);
+  const changed=classifyRuntimeFailure({code:'DATABASE_SOURCE_CHANGED'});assert.equal(changed.recoverable,false);assert.equal(changed.code,'DATABASE_SOURCE_CHANGED');assert.match(changed.message,/旧版 JSON/);assert.match(changed.message,/存储与高级/);
   let now=10;const supervisor=new ProcessSupervisor({recover:()=>{},now:()=>now,random:()=>.5,schedule:()=>1,cancel:()=>{}});
   supervisor.starting('bridge');supervisor.exited('bridge');supervisor.starting('bridge');supervisor.status('bridge',{ready:true});now+=60001;supervisor.exited('bridge');assert.equal(supervisor.snapshot().bridge.restarts,1);
   supervisor.close();

@@ -16,15 +16,16 @@ partial class App
     static TextBlock qqPlaceholder;
     static Button qqPrepare,qqRefresh,qqFill;
     static DispatcherTimer qqTimer;
-    static bool qqBusy;
+    static bool qqBusy,qqManaged=true;
     static string qqPhase="setup_required";
     static Dictionary<string,string> qqBaseline=new Dictionary<string,string>();
     static void OpenQQLogin(bool preview=false) {
+        if(!runtimeInputs.ContainsKey("BOT_NAPCAT_DIR")||!runtimeInputs.ContainsKey("BOT_ONEBOT_MODE")){Feedback("正在读取连接配置，请稍候再打开 QQ 登录。");return;}
         if(qqDialog!=null){qqDialog.Activate();return;}
         qqDialog=new Window {Title="连接 QQ",Owner=window,Width=550,Height=Math.Min(670,SystemParameters.WorkArea.Height-30),MinWidth=480,MinHeight=500,WindowStartupLocation=WindowStartupLocation.CenterOwner,Resources=window.Resources,Background=window.Background,Foreground=window.Foreground,FontFamily=window.FontFamily,FontSize=13};
         var panel=new StackPanel();
         panel.Children.Add(new TextBlock {Text="登录你的机器人 QQ",FontSize=21,FontWeight=FontWeights.SemiBold,Margin=new Thickness(0,0,0,12)});
-        panel.Children.Add(new TextBlock {Text="为已准备的 QQ 组件创建本机端口与随机令牌。使用手机 QQ 扫码并确认；已有手工配置请沿用高级连接。",TextWrapping=TextWrapping.Wrap,LineHeight=21,Margin=new Thickness(0,0,0,16)});
+        panel.Children.Add(new TextBlock {Text="使用手机 QQ 扫码并确认。已有本机 NapCat 沿用原配置；首次准备的受管组件可自动创建安全连接。",TextWrapping=TextWrapping.Wrap,LineHeight=21,Margin=new Thickness(0,0,0,16)});
         var qr=new Grid {Width=256,Height=256,Background=Brushes.White,HorizontalAlignment=HorizontalAlignment.Center,Margin=new Thickness(0,0,0,16)};
         qqImage=new Image {Width=256,Height=256,Stretch=Stretch.Uniform};qr.Children.Add(qqImage);
         qqPlaceholder=new TextBlock {Text="等待创建登录连接",TextAlignment=TextAlignment.Center,VerticalAlignment=VerticalAlignment.Center,Foreground=Ink("Muted"),TextWrapping=TextWrapping.Wrap,Margin=new Thickness(20)};qr.Children.Add(qqPlaceholder);panel.Children.Add(qr);
@@ -38,26 +39,29 @@ partial class App
         panel.Children.Add(new TextBlock {Text="关闭本窗口后 QQ 继续运行。连接草稿需保存后生效；停止 QQ 请使用工作台的停止按钮。",Foreground=Ink("Muted"),TextWrapping=TextWrapping.Wrap,LineHeight=20,Margin=new Thickness(0,8,0,0)});
         qqDialog.Content=new Border {Padding=new Thickness(24),Background=window.Background,Child=new ScrollViewer {Content=panel,VerticalScrollBarVisibility=ScrollBarVisibility.Auto}};
         qqDialog.Closed+=(s,e)=>{if(qqTimer!=null)qqTimer.Stop();qqImage.Source=null;qqDialog=null;};
-        qqBusy=false;qqPhase="setup_required";UpdateQQActions();
+        qqBusy=false;qqManaged=true;qqPhase="setup_required";UpdateQQActions();
         if(preview){qqDialog.Show();return;}
         qqTimer=new DispatcherTimer {Interval=TimeSpan.FromSeconds(3)};qqTimer.Tick+=(s,e)=>{if(!qqBusy&&qqDialog!=null)RequestQQLogin("status");};qqTimer.Start();
         RequestQQLogin("status");qqDialog.ShowDialog();
     }
     static void UpdateQQActions() {
         if(qqDialog==null)return;
-        qqPrepare.IsEnabled=!qqBusy&&(qqPhase=="setup_required"||qqPhase=="needs_attention");
-        qqRefresh.IsEnabled=!qqBusy&&qqPhase!="setup_required"&&qqPhase!="ready"&&qqPhase!="starting";
-        qqFill.IsEnabled=!qqBusy&&qqPhase!="setup_required";
+        qqPrepare.Content=qqManaged?"自动配置并启动 QQ":"启动现有 QQ";
+        qqPrepare.IsEnabled=!qqBusy&&(qqPhase=="setup_required"||qqPhase=="needs_attention"||qqPhase=="stopped");
+        qqRefresh.IsEnabled=!qqBusy&&qqPhase!="setup_required"&&qqPhase!="ready"&&qqPhase!="starting"&&qqPhase!="stopped"&&qqPhase!="external";
+        qqFill.Visibility=qqManaged?Visibility.Visible:Visibility.Collapsed;
+        qqFill.IsEnabled=!qqBusy&&qqManaged&&qqPhase!="setup_required";
     }
     static void RequestQQLogin(string operation) {
         if(qqBusy)return;
         if(operation!="status")qqBaseline=runtimeInputs.ToDictionary(pair=>pair.Key,pair=>RuntimeValue(pair.Key));
         qqBusy=true;UpdateQQActions();
-        if(operation=="prepare")qqStatus.Text="正在创建安全连接并启动 QQ，请稍候…";
+        if(operation=="prepare")qqStatus.Text=qqManaged?"正在创建安全连接并启动 QQ，请稍候…":"正在沿用已有配置启动 QQ，请稍候…";
         Send("qq-login",new {operation=operation,shell=RuntimeValue("BOT_NAPCAT_DIR"),mode=RuntimeValue("BOT_ONEBOT_MODE")});
     }
     static void RenderQQLogin(Dictionary<string,object> message) {
         qqBusy=false;if(qqDialog==null)return;
+        if(message.ContainsKey("managed"))qqManaged=(bool)message["managed"];
         if(message.ContainsKey("suggestions")) {
             var suggestions=(Dictionary<string,object>)message["suggestions"];
             bool unchanged=suggestions.Keys.All(key=>runtimeInputs.ContainsKey(key)&&qqBaseline.ContainsKey(key)&&RuntimeValue(key)==qqBaseline[key]);
@@ -71,7 +75,7 @@ partial class App
             qqPhase=(string)message["phase"];if(message.ContainsKey("message"))qqStatus.Text=(string)message["message"];
             qqAccount.Text=message.ContainsKey("account")?"当前 QQ："+message["account"]:"";
             qqImage.Source=null;qqPlaceholder.Visibility=Visibility.Visible;
-            qqPlaceholder.Text=qqPhase=="ready"?"QQ 已登录":qqPhase=="qrcode_scanned"?"请在手机上确认":qqPhase=="needs_attention"?"需要处理登录状态":qqPhase=="setup_required"?"等待创建登录连接":"正在连接 QQ…";
+            qqPlaceholder.Text=qqPhase=="ready"?"QQ 已登录":qqPhase=="qrcode_scanned"?"请在手机上确认":qqPhase=="needs_attention"?"需要处理登录状态":qqPhase=="external"?"请在外部服务登录":qqPhase=="stopped"?"等待启动现有 QQ":qqPhase=="setup_required"?"等待创建登录连接":"正在连接 QQ…";
             if(message.ContainsKey("qrImage")) {
                 string data=message["qrImage"] as string;
                 if(data!=null&&data.StartsWith("data:image/png;base64,")&&data.Length<131072) {
@@ -100,5 +104,9 @@ partial class App
         qqDialog.Width=480;qqDialog.Height=500;QQLoginError("QQ 需要额外验证，请按官方流程处理后重试。");qqDialog.UpdateLayout();
         if(!qqPrepare.IsEnabled||qqImage.Source!=null)throw new Exception("QQ error recovery is incorrect");
         CaptureContent((FrameworkElement)qqDialog.Content,Path.Combine(root,"qq-login-attention.png"));qqDialog.Close();
+        OpenQQLogin(true);RenderQQLogin(new Dictionary<string,object>{{"phase","stopped"},{"managed",false},{"message","点击启动现有 QQ，沿用原配置。"}});
+        if(!qqPrepare.IsEnabled||qqRefresh.IsEnabled||qqFill.Visibility!=Visibility.Collapsed||Convert.ToString(qqPrepare.Content)!="启动现有 QQ")throw new Exception("Existing QQ actions are incorrect");
+        RenderQQLogin(new Dictionary<string,object>{{"phase","external"},{"managed",false},{"message","请在外部服务登录。"}});
+        if(qqPrepare.IsEnabled||qqRefresh.IsEnabled||qqFill.IsEnabled)throw new Exception("External QQ actions are incorrect");qqDialog.Close();
     }
 }

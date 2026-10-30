@@ -44,6 +44,9 @@ partial class App
         Find<Button>("DetectEnvironment").Click+=(s,e)=>RequestOnboarding("detect");
         Find<Button>("PrepareComponents").Click+=(s,e)=>OpenComponents();
         Find<Button>("ConnectManagedQQ").Click+=(s,e)=>OpenQQLogin();
+        Find<Button>("OverviewQQLogin").Click+=(s,e)=>OpenQQLogin();
+        Find<Button>("RuntimeQQLogin").Click+=(s,e)=>OpenQQLogin();
+        Find<Button>("OverviewQQLogin").IsEnabled=Find<Button>("RuntimeQQLogin").IsEnabled=false;
         Find<Button>("CheckSetup").Click+=(s,e)=>RequestOnboarding("check");
         Find<Button>("SetupScope").Click+=(s,e)=>OpenScopeSetup();
         Find<Button>("SetupGuide").Click+=(s,e)=>{
