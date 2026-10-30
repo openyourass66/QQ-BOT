@@ -16,6 +16,8 @@
 # 私有加密备份和恢复暂存文件
 *.wwbackup
 *.wwbackup.partial-*
+*.wwdiagnostic.json
+*.wwdiagnostic.json.partial-*
 .restore-journal.json*
 .whale-restore-*
 .whale-before-*
