@@ -2,6 +2,7 @@ import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {ProcessSupervisor} from '../scripts/supervisor.mjs';
 import {classifyRuntimeFailure} from '../dist/core/runtime-failure.js';
+import {assertApplicationRuntime} from '../dist/core/node-runtime.js';
 import {consumeLines} from '../scripts/bounded-lines.mjs';
 import {PassThrough} from 'node:stream';
 import {once} from 'node:events';
@@ -31,4 +32,13 @@ test('子进程无换行输出始终有界，超长行只记录一次且下一�
   const stream=new PassThrough(),lines=[];consumeLines(stream,line=>lines.push(line),16);const ended=once(stream,'end');
   for(let index=0;index<100;index++)stream.write(Buffer.alloc(1000,65));stream.end('\n恢复正常\n');await ended;
   assert.equal(lines.length,2);assert.match(lines[0],/已省略/);assert.equal(lines[1],'恢复正常');
+});
+
+test('不支持的应用运行库直接进入待处理，不创建自动恢复任务',()=>{
+  let error;try{assertApplicationRuntime('22.13.0');}catch(failure){error=failure;}
+  const failure=classifyRuntimeFailure(error);assert.equal(failure.code,'BOT_NODE_UNSUPPORTED');assert.equal(failure.recoverable,false);assert.match(failure.message,/22\.20/);
+  const supervisor=new ProcessSupervisor({recover:()=>assert.fail('不能尝试恢复不支持的运行库'),schedule:()=>assert.fail('不能创建恢复计时器')});
+  supervisor.starting('bridge');supervisor.exited('bridge',failure);
+  const state=supervisor.snapshot().bridge;assert.equal(state.phase,'needs_attention');assert.equal(state.restarts,0);assert.equal(state.retryAt,0);assert.equal(state.failure.code,'BOT_NODE_UNSUPPORTED');
+  supervisor.close();
 });

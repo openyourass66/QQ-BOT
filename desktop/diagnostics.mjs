@@ -8,6 +8,7 @@ import WebSocket from 'ws';
 import { installedComponent } from '../scripts/component-paths.mjs';
 import { resolveCredentialEnv } from '../scripts/credentials.mjs';
 import { sameRuntimePath } from '../scripts/app-paths.mjs';
+import { assertApplicationRuntime, APPLICATION_RUNTIME_REQUIREMENT } from '../dist/core/node-runtime.js';
 
 export async function probeSocket(env) {
   let url;
@@ -56,8 +57,9 @@ export async function diagnose(root, { dataRoot = root, externalOnebot = false, 
   const managed = await installedComponent('napcat', dataRoot, root);
   const managedSelected = Boolean(managed && await sameRuntimePath(resolve(dataRoot,env.BOT_NAPCAT_DIR || 'napcat/shell'),join(managed.directory,'napcat')));
   if (process.platform === 'win32' && env.QQBOT_LOW_INTEGRITY !== undefined) add('桌面进程完整性级别', env.QQBOT_LOW_INTEGRITY !== '1', env.QQBOT_LOW_INTEGRITY === '1' ? '请退出后运行 npm run desktop:build，重新生成普通用户级别的 EXE。' : '普通用户级别，可访问用户配置与系统托盘');
-  const [major, minor] = process.versions.node.split('.').map(Number);
-  add('Node.js 运行环境', major === 22 && minor >= 13 || major >= 24, `${process.version}；需要 22.13–22.x 或 24 及以上。`);
+  let supportedRuntime = true;
+  try { assertApplicationRuntime(); } catch { supportedRuntime = false; }
+  add('Node.js 运行环境', supportedRuntime, `${process.version}；需要 ${APPLICATION_RUNTIME_REQUIREMENT}。`);
   add('机器人构建文件', await exists(join(root, 'dist/bridge.js')), '缺失时在项目目录运行 npm run build。');
   add('DSH 启动入口', Boolean(await resolveExecutable(dataRoot, env.BOT_DSH_BIN, env)), '点击自动检测，或选择已安装 DSH 的 dsh.cmd / 可执行文件；未安装时查看安装指引。', true, 'BOT_DSH_BIN');
   const workspace = resolve(dataRoot, env.BOT_WORKSPACE || 'bot-workspace');
