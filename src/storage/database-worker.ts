@@ -5,7 +5,7 @@ import {createHash,randomUUID} from 'node:crypto';
 import {openSync,writeSync,fsyncSync,closeSync,linkSync,unlinkSync} from 'node:fs';
 import {isAbsolute} from 'node:path';
 import {rawDataFromRows} from './entity-layout.js';
-import {entityTables,DATABASE_LIMITS,type DatabaseRequest,type UsageDatabaseRequest,type EntityRow,type EntityChange} from './database-types.js';
+import {entityTables,DATABASE_LIMITS,DATABASE_SCHEMA_VERSION,type DatabaseRequest,type UsageDatabaseRequest,type EntityRow,type EntityChange} from './database-types.js';
 import {createUsageSchema,executeUsage} from './usage-database.js';
 import {createRequestSchema} from './request-ledger.js';
 import {createOperationSchema} from './operation-ledger.js';
@@ -168,7 +168,7 @@ function execute(request:DatabaseRequest):unknown {
 try{
   db=new DatabaseSync(workerData.path);db.exec('PRAGMA busy_timeout=3000; PRAGMA foreign_keys=ON; PRAGMA trusted_schema=OFF;');
   const version=Number(Object.values(db.prepare('PRAGMA user_version').get()!)[0]),app=Number(Object.values(db.prepare('PRAGMA application_id').get()!)[0]);
-  if(version>9)throw error('DATABASE_SCHEMA_NEWER','数据库版本较新，请使用兼容的程序版本。');
+  if(version>DATABASE_SCHEMA_VERSION)throw error('DATABASE_SCHEMA_NEWER','数据库版本较新，请使用兼容的程序版本。');
   if(version===0){
     if(Number(db.prepare("SELECT COUNT(*) AS n FROM sqlite_schema WHERE type='table'").get()!.n))throw error('DATABASE_INVALID','数据文件不是受支持的数据库。');
     transaction(()=>{

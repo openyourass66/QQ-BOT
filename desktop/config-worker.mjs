@@ -13,6 +13,7 @@ import { knowledge } from './knowledge.mjs';
 import { mediaKeys, settingsFileFor, validateMediaService, mergeSettingsDraft } from './settings-config.mjs';
 import { dataPaths, mutableDataResources } from '../dist/core/data-paths.js';
 import { acquireDataResources } from '../dist/core/resource-lock.js';
+import {assertNoPendingRestore,maintenancePending} from '../scripts/app-paths.mjs';
 const programRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 if ((existsSync('.env.example') || process.env.BOT_DATA_DIR) && existsSync(join(programRoot, '.env.example')) && existsSync(join(programRoot, 'templates/bot-persona.md'))) await setup(programRoot, process.cwd());
 try { Object.assign(process.env, parseEnv(await readFile('.env', 'utf8'))); } catch (e) { if (e.code !== 'ENOENT') throw e; }
@@ -26,6 +27,9 @@ process.once('message', async ({ action, data }) => {
   let configurationLease;
   let settingsLease;
   try {
+    if(action!=='load'){
+      assertNoPendingRestore(process.cwd());
+    }
     if(['connection','env','runtime'].includes(action))configurationLease=await acquireDataResources([{path:resolve('.env'),label:'连接配置'}]);
     let result;
     if (action === 'load') {
@@ -33,7 +37,7 @@ process.once('message', async ({ action, data }) => {
       const persona = await read(personaPath);
       const library = await knowledge(dirname(personaPath)).catch(error => ({ workspace: dirname(personaPath), global: persona, globalRevision: null, libraryRevision: null, presets: [], files: [], error: /^管理操作失败：/.test(error.message) ? error.message : '无法读取人设与记忆，请检查文件权限后刷新。' }));
       const values = parseEnv(env);
-      const loaded = await settings.loadSettings();
+      const loaded = maintenancePending(process.cwd()) ? await settings.readSettingsFile(settings.getSettingsPath()) : await settings.loadSettings();
       result = { settings: loaded, settingsPath: settings.getSettingsPath(), env, runtimeFields: await describeEnv(env), persona, personaPath, knowledge: library, needsSetup: !values.BOT_DSH_BIN || values.BOT_DSH_BIN === 'dsh.cmd' || loaded.installation?.scopeConfigured === false };
     }
     else if (action === 'qq-prepare') {

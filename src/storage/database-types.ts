@@ -6,6 +6,8 @@ import type {LearningClaim} from '../agent/cognition-state.js';
 import type {MediaCacheRequest} from './media-cache-types.js';
 import type {MediaReferenceRequest} from './media-reference-types.js';
 
+export const DATABASE_SCHEMA_VERSION=9;
+
 export const entityTables=['contacts','memories','stickers','tasks','events','actions','turns','profiles','interests','thoughts','decisions','autonomous_contacts','sticker_uses','posts','space_comments','memory_meta','lexicon','suppressed','learning_scopes','learning_jobs','state'] as const;
 export type EntityTable=typeof entityTables[number];
 export type EntityRow={table:EntityTable;key:string;ordinal:number;value:unknown};

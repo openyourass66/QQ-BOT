@@ -3,12 +3,13 @@ import { randomBytes } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { enterRuntime, prepareRuntime, sameRuntimePath } from './app-paths.mjs';
+import { enterRuntime, prepareRuntime, sameRuntimePath,assertNoPendingRestore } from './app-paths.mjs';
 import { installedComponent } from './component-paths.mjs';
 import { installQQProfileIsolation } from './qq-profile.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const layout = await prepareRuntime({ root });
+assertNoPendingRestore(layout.dataRoot);
 enterRuntime(layout);
 if (process.platform !== 'win32') throw new Error('此 NapCat Node 启动器仅支持 Windows');
 const managed = await installedComponent('napcat',layout.dataRoot,root);
