@@ -25,6 +25,7 @@ export async function exportDiagnostics({root,dataRoot,file,signal,onProgress=()
   for(let path=file;;path=dirname(path)){if((await info(path))?.isSymbolicLink())throw new Error('诊断输出不能使用链接路径。');if(dirname(path)===path)break;}
   file=await canonicalRuntimePath(file);const compare=path=>process.platform==='win32'?path.toLowerCase():path;
   if(inside(compare(dataRoot),compare(file)))throw new Error('请将可分享诊断保存到实例数据目录之外。');
+  if(inside(compare(await canonicalRuntimePath(root)),compare(file)))throw new Error('请将诊断保存到程序目录之外。');
   if(await info(file))throw new Error('诊断目标已存在，请选择新的文件名。');
   let env={},configuration='missing';try{const raw=await limited(join(dataRoot,'.env'),2*1024*1024);if(raw!==undefined){env=parseEnv(raw);configuration='readable';}}catch{configuration='unavailable';}
   const paths=dataPaths(env,dataRoot),lease=await acquireDataResources(mutableDataResources(paths,true),signal),temporary=file+'.partial-'+randomUUID();

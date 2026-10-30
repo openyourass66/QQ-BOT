@@ -7,8 +7,9 @@ import { loadEnvFile } from 'node:process';
 import { randomUUID } from 'node:crypto';
 import { setup } from './setup.mjs';
 
-export function maintenancePending(dataRoot){try{lstatSync(join(dataRoot,'.restore-journal.json'));return true;}catch(error){if(error.code==='ENOENT'||error.code==='ENOTDIR')return false;throw error;}}
-export function assertNoPendingRestore(dataRoot){if(maintenancePending(dataRoot))throw Object.assign(new Error('上次数据恢复尚未收尾，请在“存储与高级 → 数据备份与恢复”处理上次中断。'),{code:'MAINTENANCE_RECOVERY_REQUIRED'});}
+export function pendingMaintenanceKind(dataRoot){for(const [file,kind] of [['.restore-journal.json','restore'],['.upgrade-journal.json','upgrade']])try{lstatSync(join(dataRoot,file));return kind;}catch(error){if(!['ENOENT','ENOTDIR'].includes(error.code))throw error;}return undefined;}
+export function maintenancePending(dataRoot){return Boolean(pendingMaintenanceKind(dataRoot));}
+export function assertNoPendingRestore(dataRoot){const kind=pendingMaintenanceKind(dataRoot);if(kind)throw Object.assign(new Error(kind==='upgrade'?'上次安装升级尚未收尾，请打开安装升级工具处理上次中断。':'上次数据恢复尚未收尾，请在“存储与高级 → 数据备份与恢复”处理上次中断。'),{code:kind==='upgrade'?'UPGRADE_RECOVERY_REQUIRED':'MAINTENANCE_RECOVERY_REQUIRED'});}
 
 export const programRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 

@@ -49,6 +49,8 @@ MCP 工具通过内部动作接口交由桥接执行；权限、会话范围、�
 
 `tests/maintenance.test.mjs` 使用实际 SQLite、真实文件和可强退子进程验证加密往返、真实四库重新打开、错误密码、篡改/截断、恶意路径、损坏数据、取消、提交前后退出及恢复记录路径校验；`tests/maintenance-runtime.test.mjs` 验证管理互斥、运行时拒绝、取消通道和密码不进入事件或日志。原生窗口检查另覆盖维护窗口、紧凑布局以及始终可见的取消/中断处理入口。测试不操作真实用户备份或数据。
 
+发行维护核心为 `scripts/installer-core.mjs`，受管工具只接受明确的安装、修复、回退、恢复和卸载操作。`tests/installer.test.mjs` 覆盖隔离目录、数据锁、恢复点、版本切换与真正结束宿主；`tests/release-integrity.test.mjs` 和原生签名检查验证来源、通道、摘要及拒绝篡改；`tests/release-inputs.test.mjs` 验证不复制被忽略的私人文件。`tests/setup-smoke.mjs --package <完整候选目录> --output <报告目录>` 使用临时签名、实际包内 Node 和原生窗口演练完整流程，注册表与快捷方式重定向到专用测试位置，不改写真实用户入口。`--smoke` 为本机合成检查，不记为干净系统、新用户或正式发布者验收。
+
 ```powershell
 npm ci
 npm run setup

@@ -5,6 +5,7 @@ export function classifyRuntimeFailure(input: unknown): RuntimeFailure {
   const error=input as {code?:unknown;name?:unknown;message?:unknown}|undefined;
   const code=String(error?.code??''),message=String(error?.message??'');
   if(code==='MAINTENANCE_RECOVERY_REQUIRED')return {code,recoverable:false,message:'上次数据恢复尚未收尾，请在“存储与高级 → 数据备份与恢复”处理上次中断。'};
+  if(code==='UPGRADE_RECOVERY_REQUIRED')return {code,recoverable:false,message:'上次安装升级尚未收尾，请在安装升级工具处理上次中断。'};
   if(code==='BOT_NODE_UNSUPPORTED')return {code,recoverable:false,message:`应用需要 ${APPLICATION_RUNTIME_REQUIREMENT}，请升级运行环境后手动重试；QQ 组件使用独立运行库。`};
   if(code==='ACCOUNT_CHANGED')return {code,recoverable:false,message:'QQ 登录账号已变化，请停止机器人并为新账号选择独立数据目录。'};
   if(['BOT_RESOURCE_LOCKED','DATABASE_REVISION_CONFLICT'].includes(code))return {code:'INSTANCE_CONFLICT',recoverable:false,message:'数据已被另一个实例使用，请关闭重复实例后重试。'};

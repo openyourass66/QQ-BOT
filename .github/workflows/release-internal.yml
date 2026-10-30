@@ -1,0 +1,56 @@
+name: 内部签名候选构建
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  candidate:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: '24.22.1'
+          package-manager-cache: false
+      - name: 安装锁定依赖与检查类型
+        run: |
+          npm ci
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          npm run typecheck
+      - name: 全量隔离回归
+        run: npm run test:isolated -- --test-concurrency=1
+      - name: 编译桌面与安装工具
+        run: npm run desktop:build
+      - name: 构建只用于内部验证的签名包
+        shell: pwsh
+        run: |
+          $taskKeyDirectory=Join-Path $env:RUNNER_TEMP ('whale-release-key-'+[guid]::NewGuid().ToString('N'))
+          try {
+            node scripts/dev/internal-signing-key.mjs --directory $taskKeyDirectory
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            node scripts/package.mjs --output release/WhaleWorkbench-internal --zip --signing-key (Join-Path $taskKeyDirectory 'internal-signing.pem') --key-id internal-validation --trust-file (Join-Path $taskKeyDirectory 'internal-trust.json')
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          } finally {
+            $taskPrivateKey=Join-Path $taskKeyDirectory 'internal-signing.pem'
+            if (Test-Path -LiteralPath $taskPrivateKey) { Remove-Item -LiteralPath $taskPrivateKey -Force }
+          }
+      - name: 包内原生窗口与维护检查
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File tests/desktop-smoke.ps1 -ReleaseDirectory release/WhaleWorkbench-internal -SeparateData -SkipTrayCheck
+      - name: 原生安装、升级、回退、修复和卸载
+        run: node tests/setup-smoke.mjs --package release/WhaleWorkbench-internal --output release/validation/native-installer
+      - name: 上传内部候选与本次验证资料
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: WhaleWorkbench-internal-${{ github.sha }}
+          path: |
+            release/WhaleWorkbench-internal.zip
+            release/WhaleWorkbench-internal.zip.sha256
+            release/validation/
+          if-no-files-found: error
+          retention-days: 14

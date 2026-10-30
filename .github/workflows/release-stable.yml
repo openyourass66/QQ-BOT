@@ -1,0 +1,72 @@
+name: 正式签名发行构建
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  stable:
+    runs-on: windows-latest
+    environment: release
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: '24.22.1'
+          package-manager-cache: false
+      - name: 核对真实验收门槛
+        run: node scripts/check-release-gates.mjs
+      - name: 安装锁定依赖、类型和全量回归
+        run: |
+          npm ci
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          npm run typecheck
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          npm run test:isolated -- --test-concurrency=1
+      - name: 编译原生程序
+        run: npm run desktop:build
+      - name: 签署程序和完整发行清单
+        shell: pwsh
+        env:
+          MANIFEST_PRIVATE_KEY: ${{ secrets.RELEASE_MANIFEST_PRIVATE_KEY_PEM }}
+          MANIFEST_KEY_ID: ${{ secrets.RELEASE_MANIFEST_KEY_ID }}
+          CODESIGN_PFX: ${{ secrets.RELEASE_CODESIGN_PFX_BASE64 }}
+          CODESIGN_PASSWORD: ${{ secrets.RELEASE_CODESIGN_PASSWORD }}
+          TIMESTAMP_SERVER: ${{ secrets.RELEASE_TIMESTAMP_SERVER }}
+        run: |
+          foreach($taskName in @('MANIFEST_PRIVATE_KEY','MANIFEST_KEY_ID','CODESIGN_PFX','CODESIGN_PASSWORD','TIMESTAMP_SERVER')) { if(-not [Environment]::GetEnvironmentVariable($taskName)){throw '正式签名材料未配置，停止稳定发行构建'} }
+          $taskKey=Join-Path $env:RUNNER_TEMP ('whale-release-'+[guid]::NewGuid().ToString('N')+'.pem')
+          $taskPfx=Join-Path $env:RUNNER_TEMP ('whale-release-'+[guid]::NewGuid().ToString('N')+'.pfx')
+          $taskImported=@()
+          $taskExisting=@(Get-ChildItem Cert:\CurrentUser\My | ForEach-Object Thumbprint)
+          try {
+            [IO.File]::WriteAllText($taskKey,$env:MANIFEST_PRIVATE_KEY,[Text.UTF8Encoding]::new($false))
+            [IO.File]::WriteAllBytes($taskPfx,[Convert]::FromBase64String($env:CODESIGN_PFX))
+            $taskImported=@(Import-PfxCertificate -FilePath $taskPfx -CertStoreLocation Cert:\CurrentUser\My -Password (ConvertTo-SecureString $env:CODESIGN_PASSWORD -AsPlainText -Force))
+            $taskSigningCertificate=$taskImported | Where-Object HasPrivateKey | Select-Object -First 1
+            if(-not $taskSigningCertificate){throw '代码签名证书没有私钥'}
+            node scripts/package.mjs --output release/WhaleWorkbench-stable --channel stable --zip --signing-key $taskKey --key-id $env:MANIFEST_KEY_ID --trust-file components/release-trust.json --certificate-thumbprint $taskSigningCertificate.Thumbprint --timestamp-server $env:TIMESTAMP_SERVER
+            if($LASTEXITCODE -ne 0){exit $LASTEXITCODE}
+          } finally {
+            foreach($taskFile in @($taskKey,$taskPfx)){if(Test-Path -LiteralPath $taskFile){Remove-Item -LiteralPath $taskFile -Force}}
+            foreach($taskCertificate in $taskImported){if($taskCertificate.Thumbprint -notin $taskExisting){Remove-Item -LiteralPath ('Cert:\CurrentUser\My\'+$taskCertificate.Thumbprint)}}
+          }
+      - name: 候选自身的原生窗口与安装演练
+        run: |
+          powershell -NoProfile -ExecutionPolicy Bypass -File tests/desktop-smoke.ps1 -ReleaseDirectory release/WhaleWorkbench-stable -SeparateData -SkipTrayCheck
+          if($LASTEXITCODE -ne 0){exit $LASTEXITCODE}
+          node tests/setup-smoke.mjs --package release/WhaleWorkbench-stable --output release/validation/native-installer
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: WhaleWorkbench-stable-${{ github.sha }}
+          path: |
+            release/WhaleWorkbench-stable.zip
+            release/WhaleWorkbench-stable.zip.sha256
+            release/validation/
+          if-no-files-found: error
+          retention-days: 30
