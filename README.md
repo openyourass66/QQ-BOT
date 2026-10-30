@@ -2,9 +2,9 @@
 
 基于 DSH（ACP）与 NapCat（OneBot 11）的 QQ 机器人，提供 Windows 原生 WPF 控制台，支持私聊、群聊、人设、长期记忆和受权限与额度约束的 QQ 操作。
 
-当前为 **0.2.0 开发版本**，主要交付平台是 Windows 10/11 x64。此前候选已完成真实 QQ 登录和私聊回复，最新源码全量隔离回归为 **528 项通过**（本轮未启用真实 FFmpeg）；停机加密备份与原实例恢复已接入桌面，脱敏诊断、停机清理和用户级安装/升级/修复/回退已实现；正式签名材料、干净系统及长时验收仍待补齐。实施范围见[精简改造方案](docs/product-readiness-plan.md)，实际结果见[实施进展](docs/implementation-status.md)。
+当前为 **0.2.0 开发版本**，主要交付平台是 Windows 10/11 x64。此前候选已完成真实 QQ 登录和私聊回复，最新源码在 `454ac4f` 后复跑全量隔离回归 **528 项通过**（本轮未启用真实 FFmpeg）；停机加密备份与原实例恢复已接入桌面，脱敏诊断、停机清理和用户级安装/升级/修复/回退已实现；正式签名材料、干净系统及长时验收仍待补齐。本机故障矩阵与性能执行方案见[故障矩阵](docs/local-failure-matrix.md)和[性能方案](docs/performance-execution-plan.md)。实施范围见[精简改造方案](docs/product-readiness-plan.md)，实际结果见[实施进展](docs/implementation-status.md)。
 
-最新 `rc7` 候选来源为 `8a71d22`，包含登录与运行库修复、停机加密备份恢复及桌面入口；包内 Node 的 24 项专项和隔离原生窗口检查通过，尚未进行本包真实 QQ 收发或长时恢复验收。候选摘要见[验证记录](docs/validation/release-candidate-rc7-2026-10-30.json)。先继续完善 Windows 本地版本，云端部署与本地远程控制台分支后置。
+最新 `rc8` 内部候选来源为 `ec33430`，包含登录恢复、停机备份与清理、脱敏诊断及安装升级工具；包内 Node 的 48 项专项通过，ZIP 全文件摘要与独立测试公钥校验通过，原生安装工具已完成签名校验、首次安装、升级、回退、损坏程序修复和保留数据卸载六步演练。临时测试签名不代表正式发布身份，本包尚未进行真实 QQ 收发或长时验收。候选摘要见[验证记录](docs/validation/release-candidate-rc8-2026-10-30.json)。Linux 部署与本地远程控制台作为后续独立分支推进。
 
 ```text
 QQ ↔ NapCat / OneBot 11 ↔ bridge ↔ DSH（ACP）

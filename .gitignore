@@ -79,3 +79,8 @@
 .DS_Store
 Thumbs.db
 Desktop.ini
+
+# 本地代理与编辑器工作区
+/.claude/
+/.vscode/
+*.code-workspace
