@@ -1,0 +1,60 @@
+{
+  "date": "2026-10-30",
+  "timezone": "Asia/Shanghai",
+  "candidate": "WhaleWorkbench-0.2.0-win-x64-rc6",
+  "channel": "internal-validation",
+  "sourceRevision": "03be9935c94e9f0349f9f8d7de365fc2b9c3291a",
+  "archive": {
+    "path": "release/WhaleWorkbench-0.2.0-win-x64-rc6.zip",
+    "bytes": 50706880,
+    "sha256": "45850d88bfb040fc433f870ded3a97f8a7cc7c1f66cff2d8e820ef917c37e791",
+    "entries": 8093,
+    "singleTopLevelDirectory": true,
+    "standardPathSeparators": true,
+    "requiredFilesPresent": true,
+    "bundledNodeHashMatchesCatalog": true,
+    "personalDataAbsent": true,
+    "publisherSignatureVerified": false
+  },
+  "runtime": {
+    "node": "24.22.1",
+    "qqComponentTestNode": "22.11.0",
+    "modulesChecked": 126,
+    "relativeImportsChecked": 274,
+    "packageImportsChecked": 31,
+    "developmentToolsRequiredForUser": false
+  },
+  "automatedChecks": {
+    "hostNode": "22.20.0",
+    "isolatedRegression": {"passed": 485, "failed": 0, "skipped": 0},
+    "realSyntheticFfmpegTestEnabled": false,
+    "releaseNodeFocusedRegression": {"passed": 34, "failed": 0, "skipped": 0},
+    "typecheck": "passed",
+    "desktopBuild": "passed",
+    "qqWorkerRecovery": "controlled-child-process-fixtures-only"
+  },
+  "nativeWindowCheck": {
+    "directlyTestedCandidate": "rc6",
+    "bundledRuntimeAndProductionDependencies": true,
+    "developerNodeRemovedFromTestPath": true,
+    "independentDataDirectoryWithSpaces": true,
+    "data": "synthetic-isolated-fixture",
+    "windowChecks": "passed-first-run",
+    "programmaticTrayRestoreAndExit": "passed-first-run",
+    "physicalTrayClick": "not-performed"
+  },
+  "realQqCheck": "not-performed-on-this-candidate",
+  "existingUserInstance": "left-running-without-data-or-credential-changes",
+  "remaining": [
+    "complete first-use and failure flows for new users",
+    "real QQ login-expiry and recovery validation on this candidate",
+    "clean Windows 10 and Windows 11 installation",
+    "declared QQ, media, space and native-network combinations",
+    "ordinary-user maintenance interface, consistent backup and restore",
+    "installer, trusted signed manifests, upgrade and paired rollback",
+    "full mixed-load and fault reports",
+    "72-hour mixed-load run followed by 7-day real-use observation",
+    "five new-user trials and G01-G06 release evidence"
+  ],
+  "deploymentBranch": "deferred-until-local-readiness-work-is-complete"
+}

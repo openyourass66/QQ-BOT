@@ -2,9 +2,9 @@
 
 基于 DSH（ACP）与 NapCat（OneBot 11）的 QQ 机器人，提供 Windows 原生 WPF 控制台，支持私聊、群聊、人设、长期记忆和受权限与额度约束的 QQ 操作。
 
-当前为 **0.2.0 开发版本**，主要交付平台是 Windows 10/11 x64。本机候选已完成真实 QQ 登录和私聊回复，最新源码全量隔离回归为 **481 项通过**；安装程序、完整备份恢复界面、升级回退、干净系统及长时验收仍待完成。实施范围见[精简改造方案](docs/product-readiness-plan.md)，实际结果见[实施进展](docs/implementation-status.md)。
+当前为 **0.2.0 开发版本**，主要交付平台是 Windows 10/11 x64。此前候选已完成真实 QQ 登录和私聊回复，最新源码全量隔离回归为 **485 项通过**（本轮未启用真实 FFmpeg）；安装程序、完整备份恢复界面、升级回退、干净系统及长时验收仍待完成。实施范围见[精简改造方案](docs/product-readiness-plan.md)，实际结果见[实施进展](docs/implementation-status.md)。
 
-现有 `rc5` 候选来源为 `a756d38`，尚未包含后续登录进程重建修复。源码更新和候选包分别记录版本；合并主分支不代表正式发行验收完成。
+最新 `rc6` 候选来源为 `03be993`，已包含登录 Worker 重建、每代账号目录隔离和运行库诊断修复，包内运行库及隔离原生窗口检查通过，尚未进行本包真实 QQ 收发或长时恢复验收。候选摘要见[验证记录](docs/validation/release-candidate-rc6-2026-10-30.json)。先继续完善 Windows 本地版本，云端部署与本地远程控制台分支后置。
 
 ```text
 QQ ↔ NapCat / OneBot 11 ↔ bridge ↔ DSH（ACP）
