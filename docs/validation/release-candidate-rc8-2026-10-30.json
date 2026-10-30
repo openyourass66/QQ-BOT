@@ -1,0 +1,70 @@
+{
+  "date": "2026-10-30",
+  "timezone": "Asia/Shanghai",
+  "candidate": "WhaleWorkbench-0.2.0-win-x64-rc8",
+  "channel": "internal-validation",
+  "sourceRevision": "ec334309e828ab20ad2cd22caa8beb9f9d474b49",
+  "archive": {
+    "path": "release/WhaleWorkbench-0.2.0-win-x64-rc8.zip",
+    "bytes": 51235907,
+    "sha256": "cec77b83930899984807d4f3f240637202b4f375d26899a5bc27287f8f3e7c83",
+    "files": 8105,
+    "singleTopLevelDirectory": true,
+    "standardPathSeparators": true,
+    "everyFileMatchesSignedInventory": true,
+    "requiredFilesPresent": true,
+    "bundledNodeHashMatchesCatalog": true,
+    "personalDataAbsent": true
+  },
+  "signature": {
+    "algorithm": "rsa-sha256",
+    "keyId": "internal-validation",
+    "manifestSha256": "ac0142c50018ce0294bd257d7dd8363ce905fcb52447ef43831b49082e03a6da",
+    "independentTrustVerification": "passed",
+    "temporaryInternalKey": true,
+    "formalPublisherIdentity": false,
+    "authenticodeSigningPerformed": false
+  },
+  "runtime": {
+    "node": "24.22.1",
+    "modulesChecked": 134,
+    "relativeImportsChecked": 304,
+    "packageImportsChecked": 31
+  },
+  "automatedChecks": {
+    "isolatedRegression": {"node": "22.20.0", "passed": 528, "failed": 0, "skipped": 0, "rerunRevision": "454ac4f"},
+    "releaseNodeFocusedRegression": {"node": "24.22.1", "passed": 48, "failed": 0, "skipped": 0},
+    "crossPlatformRestartAudit": {"windowsPassed": 2, "linuxPassed": 2},
+    "linuxBaseline": {"status": "not-rerun-on-this-candidate", "previousResult": "510 passed / 1 failed / 9 skipped", "note": "失败项已由 454ac4f 修复并在两平台各 2 项复测通过；全量复跑归入后续部署分支"},
+    "realSyntheticFfmpegTestEnabled": false,
+    "typecheck": "passed",
+    "desktopBuild": "passed",
+    "mainAndFixedDshProductionAudit": "zero-known-vulnerabilities"
+  },
+  "nativeInstallerCheck": {
+    "status": "passed",
+    "completeRunPassed": true,
+    "steps": ["native-signature-and-full-file-verification", "native-install", "native-install", "native-rollback", "native-repair", "native-uninstall"],
+    "dataRetainedAfterUninstall": true,
+    "inputCandidate": "rc8",
+    "completeBundledRuntime": true,
+    "data": "synthetic-isolated-fixture",
+    "signing": "temporary-fixture-key",
+    "registryAndShortcuts": "isolated-test-locations",
+    "realUserDataChanged": false
+  },
+  "sourceBuildSynchronization": {
+    "modules": ["core/data-paths", "core/runtime-failure"],
+    "javascriptAndSourceMaps": "copied-from-verified-candidate-after-backing-up-previous-build",
+    "runningExecutableReplaced": false
+  },
+  "realQqCheck": "not-performed-on-this-candidate",
+  "remaining": [
+    "formal publisher signing material and actual remote CI results",
+    "clean Windows 10 and Windows 11 and physical tray interaction",
+    "real account login expiry, component and capability acceptance",
+    "full mixed-load performance and power-loss validation",
+    "72-hour mixed-load run followed by 7-day real-use observation",
+    "five new-user trials and G01-G06 release evidence"
+  ]
+}
