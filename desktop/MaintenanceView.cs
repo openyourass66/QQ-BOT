@@ -15,7 +15,7 @@ partial class App
     static ScrollViewer maintenanceContent;
     static int maintenancePreviewDays,maintenanceEligible;
     static readonly List<Button> maintenanceActions=new List<Button>();
-    static bool maintenanceBusy,recoveryPending;
+    static bool maintenanceBusy,recoveryPending,upgradePending;
 
     static void BuildMaintenanceCard(StackPanel panel) {
         var body=new StackPanel();var button=new Button {Content="数据备份与恢复",HorizontalAlignment=HorizontalAlignment.Left,MinHeight=36,Margin=new Thickness(0,8,0,10)};
@@ -41,6 +41,7 @@ partial class App
         var cleanupActions=new WrapPanel();foreach(var pair in new[]{new[]{"预览媒体清理","cleanup-preview"},new[]{"清理预览中的缓存","cleanup"},new[]{"导出脱敏诊断","diagnostic"}}){string operation=pair[1];var button=new Button {Content=pair[0],MinHeight=36,Margin=new Thickness(0,0,10,10)};button.Click+=(s,e)=>RequestMaintenance(operation);cleanupActions.Children.Add(button);maintenanceActions.Add(button);if(operation=="cleanup")maintenanceDelete=button;}body.Children.Add(cleanupActions);
         maintenancePreviewDays=0;maintenanceEligible=0;maintenanceDelete.IsEnabled=false;maintenanceRetention.TextChanged+=(s,e)=>{maintenancePreviewDays=0;maintenanceEligible=0;maintenanceDelete.IsEnabled=false;};
         body.Children.Add(new TextBlock {Text="脱敏诊断不需要备份密码，只含版本、配置状态和数据库检查结果，不含聊天、提示词、日志正文、路径或密钥。",TextWrapping=TextWrapping.Wrap,LineHeight=20,Foreground=Ink("Muted"),Margin=new Thickness(0,0,0,14)});
+        var installer=new Button {Content="安装、升级与回退",HorizontalAlignment=HorizontalAlignment.Left,MinHeight=36,Margin=new Thickness(0,0,0,12)};installer.Click+=(s,e)=>OpenInstaller();body.Children.Add(installer);maintenanceActions.Add(installer);
         maintenanceRecover=new Button {Content="处理上次中断",HorizontalAlignment=HorizontalAlignment.Left,MinHeight=34,Margin=new Thickness(0,0,0,12),Visibility=recoveryPending?Visibility.Visible:Visibility.Collapsed};maintenanceRecover.Click+=(s,e)=>RequestMaintenance("recover");body.Children.Add(maintenanceRecover);
         maintenanceProgress=new ProgressBar {Height=5,IsIndeterminate=true,Visibility=Visibility.Collapsed,Margin=new Thickness(0,0,0,12)};body.Children.Add(maintenanceProgress);
         maintenanceStatus=new TextBlock {Text="请选择操作。备份包含私人数据，请妥善保管。",TextWrapping=TextWrapping.Wrap,LineHeight=21,MinHeight=50,Margin=new Thickness(0,0,0,12)};System.Windows.Automation.AutomationProperties.SetName(maintenanceStatus,"维护结果");body.Children.Add(maintenanceStatus);
@@ -66,7 +67,7 @@ partial class App
         maintenanceStatus.Text=operation=="backup"?"正在准备加密备份…":"正在检查备份…";SetMaintenanceBusy(true);Send("maintenance",new {operation=operation,file=file,password=password});
     }
     static void RenderMaintenance(Dictionary<string,object> message) {
-        string operation=Convert.ToString(message["operation"]);if(operation=="status"){recoveryPending=message.ContainsKey("recoveryPending")&&(bool)message["recoveryPending"];if(maintenanceDialog!=null){maintenanceRecover.Visibility=recoveryPending?Visibility.Visible:Visibility.Collapsed;if(recoveryPending)maintenanceStatus.Text="上次恢复尚未收尾，请先点击“处理上次中断”。";}return;}
+        string operation=Convert.ToString(message["operation"]);if(operation=="status"){recoveryPending=message.ContainsKey("recoveryPending")&&(bool)message["recoveryPending"];upgradePending=message.ContainsKey("recoveryKind")&&Convert.ToString(message["recoveryKind"])=="upgrade";if(maintenanceDialog!=null){maintenanceRecover.Visibility=recoveryPending&&!upgradePending?Visibility.Visible:Visibility.Collapsed;if(recoveryPending)maintenanceStatus.Text=upgradePending?"上次升级尚未收尾，请选择“安装、升级与回退”，在工具中处理上次中断。":"上次恢复尚未收尾，请先点击“处理上次中断”。";}return;}
         if(operation=="restore"||operation=="recover"){recoveryPending=false;maintenancePreviewDays=0;maintenanceEligible=0;}
         if(operation=="cleanup-preview"){maintenancePreviewDays=Convert.ToInt32(message["retentionDays"]);maintenanceEligible=Convert.ToInt32(message["eligible"]);}
         SetMaintenanceBusy(false);if(maintenanceDialog!=null){maintenancePassword.Clear();maintenanceConfirmation.Clear();maintenanceRecover.Visibility=recoveryPending?Visibility.Visible:Visibility.Collapsed;maintenanceStatus.Text=operation=="diagnostic"?"脱敏诊断已保存，可分享此文件：\n"+Convert.ToString(message["file"]):operation.StartsWith("cleanup")?(operation=="cleanup-preview"?"预览完成：候选 "+message["eligible"]+" 个":"已删除 "+message["deleted"]+" 个，释放 "+Math.Round(Convert.ToDouble(message["bytes"])/1048576,2)+" MiB")+"，引用保护 "+message["protected"]+" 个。"+((bool)message["complete"]?" 本次检查完成。":" 本次达到数量或时间上限，可再次预览继续。") :operation=="backup"?"加密备份已保存：\n"+Convert.ToString(message["file"]):operation=="verify"?"备份校验通过，共 "+message["files"]+" 个文件。":operation=="restore"?"数据已恢复。切换前的加密恢复点：\n"+Convert.ToString(message["recoveryPoint"]):"中断处理完成，可以重新检查并启动机器人。";}
@@ -76,7 +77,13 @@ partial class App
     static void MaintenanceError(string text) {SetMaintenanceBusy(false);if(maintenanceDialog!=null){maintenancePassword.Clear();maintenanceConfirmation.Clear();maintenanceStatus.Text=text;maintenanceRecover.Visibility=recoveryPending?Visibility.Visible:Visibility.Collapsed;}}
     static void MaintenanceSmoke() {
         OpenMaintenance(true);SetMaintenanceBusy(true);if(maintenanceActions[0].IsEnabled||!maintenanceCancel.IsEnabled)throw new Exception("Maintenance controls are not protected");
+        var activeHost=host;try{host=null;Send("maintenance",new {operation="status"});}finally{host=activeHost;}if(maintenanceBusy||!maintenanceActions[0].IsEnabled)throw new Exception("Maintenance dialog cannot recover from a lost host");SetMaintenanceBusy(true);
         if(maintenanceDelete.IsEnabled||maintenanceRetention.IsEnabled)throw new Exception("Media maintenance is not protected");SetMaintenanceBusy(false);maintenancePreviewDays=30;maintenanceEligible=1;SetMaintenanceBusy(false);if(!maintenanceDelete.IsEnabled)throw new Exception("Media preview cannot be confirmed");maintenanceRetention.Text="31";if(maintenanceDelete.IsEnabled)throw new Exception("Changed retention must invalidate preview");maintenanceRetention.Text="30";
         recoveryPending=true;MaintenanceError("测试：恢复中断，原数据保留。请处理上次中断后再启动。");maintenanceDialog.Width=480;maintenanceDialog.Height=540;maintenanceDialog.UpdateLayout();CaptureContent((FrameworkElement)maintenanceDialog.Content,System.IO.Path.Combine(root,"maintenance-compact.png"));if(maintenanceBusy||!maintenanceActions[0].IsEnabled||maintenanceRecover.Visibility!=Visibility.Visible)throw new Exception("Maintenance recovery action is unavailable");foreach(var action in new[]{maintenanceCancel,maintenanceRecover})if(action.TranslatePoint(new Point(0,action.ActualHeight),(UIElement)maintenanceDialog.Content).Y>((FrameworkElement)maintenanceDialog.Content).ActualHeight)throw new Exception("Maintenance action is below the viewport");maintenanceContent.ScrollToEnd();maintenanceDialog.UpdateLayout();CaptureContent((FrameworkElement)maintenanceDialog.Content,System.IO.Path.Combine(root,"maintenance-tools.png"));maintenanceDialog.Close();recoveryPending=false;
+    }
+    static void OpenInstaller(){
+        if(maintenanceBusy)return;string executable=System.IO.Path.Combine(root,"WhaleSetup.exe");if(!System.IO.File.Exists(executable)){maintenanceStatus.Text="当前构建缺少安装工具，请使用完整新版发行包。";return;}
+        if(MessageBox.Show(maintenanceDialog,"将退出当前工作台并停止机器人，然后打开安装升级工具。请先准备已解压的完整新发行包，是否继续？","打开安装升级工具",MessageBoxButton.YesNo,MessageBoxImage.Question)!=MessageBoxResult.Yes)return;
+        try{System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(executable,"--data-dir \""+dataRoot.Replace("\"","")+"\""){WorkingDirectory=root,UseShellExecute=false,CreateNoWindow=true});maintenanceDialog.Close();Exit();}catch{maintenanceStatus.Text="安装工具无法打开，请检查完整发行文件。";}
     }
 }

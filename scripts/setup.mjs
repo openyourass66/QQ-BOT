@@ -4,7 +4,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 export async function setup(root, dataRoot = root) {
-  try{lstatSync(join(dataRoot,'.restore-journal.json'));return [];}catch(error){if(error.code!=='ENOENT'&&error.code!=='ENOTDIR')throw error;}
+  for(const file of ['.restore-journal.json','.upgrade-journal.json'])try{lstatSync(join(dataRoot,file));return [];}catch(error){if(error.code!=='ENOENT'&&error.code!=='ENOTDIR')throw error;}
   await mkdir(dataRoot, { recursive: true });
   const created = [];
   async function copyMissing(source, destination) {

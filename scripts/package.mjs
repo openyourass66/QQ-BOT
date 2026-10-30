@@ -7,9 +7,19 @@ import { obtainArchive, extractZip, sha256 } from './components/archive.mjs';
 import { childEnvironment, runChild } from './components/manager.mjs';
 import {spawnSync} from 'node:child_process';
 import {releaseScripts,validateRelease} from './release-validation.mjs';
+import {signReleasePackage} from './release-integrity.mjs';
+import {releaseInputTree,validateAcceptance} from './check-release-gates.mjs';
+import {trackedPublicInputs,copyPublicInputs,copyCompiledInputs} from './release-inputs.mjs';
 
 const root=resolve(dirname(fileURLToPath(import.meta.url)),'..');
-const {values}=parseArgs({options:{output:{type:'string'},'node-archive':{type:'string'},zip:{type:'boolean',default:false}}});
+const {values}=parseArgs({options:{output:{type:'string'},'node-archive':{type:'string'},zip:{type:'boolean',default:false},'signing-key':{type:'string'},'key-id':{type:'string'},'trust-file':{type:'string'},channel:{type:'string',default:'internal-validation'},'certificate-thumbprint':{type:'string'},'timestamp-server':{type:'string'}}});
+if(!['internal-validation','stable'].includes(values.channel))throw new Error('发行通道无效');
+const signed=Boolean(values['signing-key']);if(['signing-key','key-id','trust-file'].some(key=>Boolean(values[key])!==signed)||values.channel==='stable'&&!signed)throw new Error('签名发行须同时提供私钥文件、公钥编号和信任清单；稳定通道不接受未签名输入');
+if(Boolean(values['certificate-thumbprint'])!==Boolean(values['timestamp-server'])||values.channel==='stable'&&!values['certificate-thumbprint'])throw new Error('正式稳定包还须配置发布者证书指纹及时间戳服务；两项须同时提供');
+if(values.channel==='stable'){
+  if(resolve(values['trust-file']).toLowerCase()!==join(root,'components/release-trust.json').toLowerCase())throw new Error('正式发行必须使用已经提交的发布公钥清单');
+  const record=JSON.parse(await readFile(join(root,'docs/validation/release-acceptance.json'),'utf8')),acceptance=await validateAcceptance({root,record,codeInputTreeSha256:releaseInputTree(root)});if(!acceptance.ready)throw new Error('G01–G06 实际验收尚未齐全，继续内部验证，不能生成稳定发行');
+}
 if(process.platform!=='win32'||process.arch!=='x64')throw new Error('发行目录构建仅支持 Windows x64');
 const pkg=JSON.parse(await readFile(join(root,'package.json'),'utf8'));
 const revision=spawnSync('git',['rev-parse','HEAD'],{cwd:root,windowsHide:true,encoding:'utf8'});
@@ -35,17 +45,15 @@ try {
   await obtainArchive(spec,archive,{archivePath:local});
   await extractZip(archive,join(app,'runtime'),{prefix:spec.prefix});
   console.log('复制业务程序与公开模板…');
-  for(const path of ['dist','templates','components','.env.example','LICENSE'])await cp(join(root,path),join(app,path),{recursive:true,filter:async source=>{const info=await lstat(source);if(info.isSymbolicLink())throw new Error('发行输入不接受目录链接');return !source.includes('node_modules');}});
+  await copyCompiledInputs(root,app);await copyPublicInputs(root,app,trackedPublicInputs(root));
   await cp(join(root,'QQ-BOT.exe'),join(app,'QQ-BOT.exe'));
-  await mkdir(join(app,'desktop'));
-  for(const file of await readdir(join(root,'desktop')))if(file.endsWith('.mjs')||file.endsWith('.xaml'))await cp(join(root,'desktop',file),join(app,'desktop',file));
-  await cp(join(root,'desktop/assets'),join(app,'desktop/assets'),{recursive:true});
+  for(const file of ['WhaleSetup.exe','WhaleLauncher.exe'])await cp(join(root,file),join(app,file));
+  if(signed){await cp(resolve(values['trust-file']),join(app,'components/release-trust.json'));await runChild('powershell.exe',['-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',join(root,'desktop/build-installer.ps1'),'-TrustFile',resolve(values['trust-file']),'-OutputDirectory',app],{cwd:root});}
   await cp(join(root,'desktop/runtime-guard.exe'),join(app,'desktop/runtime-guard.exe'));
   await cp(join(root,'desktop/media-cleaner.exe'),join(app,'desktop/media-cleaner.exe'));
-  await mkdir(join(app,'scripts'));
+  await mkdir(join(app,'scripts'),{recursive:true});
   for(const file of releaseScripts)await cp(join(root,'scripts',file),join(app,'scripts',file));
-  await cp(join(root,'scripts/components'),join(app,'scripts/components'),{recursive:true});
-  const manifest={formatVersion:1,appId:'whale-workbench',version:pkg.version,channel:'internal-validation',sourceRevision,builtAt:new Date().toISOString(),node:spec.version,nodeArchiveSha256:spec.sha256,componentsCatalogSha256:await sha256(join(root,'components/catalog.json'))};
+  const manifest={formatVersion:1,appId:'whale-workbench',version:pkg.version,channel:values.channel,sourceRevision,builtAt:new Date().toISOString(),node:spec.version,nodeArchiveSha256:spec.sha256,componentsCatalogSha256:await sha256(join(root,'components/catalog.json'))};
   await writeFile(join(app,'release-manifest.json'),JSON.stringify(manifest,null,2)+'\n');
   const runtimePackage={...pkg,scripts:{}};delete runtimePackage.devDependencies;
   await writeFile(join(app,'package.json'),JSON.stringify(runtimePackage,null,2)+'\n');
@@ -71,6 +79,8 @@ try {
   const validation=await validateRelease(app);console.log(`发行模块核对通过：${validation.modules} 个模块，${validation.relativeImports} 项本地引用，${validation.packageImports} 项生产依赖引用`);
   const startup=await runChild(node,[join(app,'scripts/app-paths.mjs'),'--data-dir',join(stage,'validation-data')],{cwd:app,env:childEnvironment(node,stage),timeout:15000});
   if(JSON.parse(startup).programRoot.toLowerCase()!==app.toLowerCase())throw new Error('发行目录启动路径校验失败');
+  if(values['certificate-thumbprint']){console.log('签署并核对原生程序发布者…');await runChild('powershell.exe',['-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',join(root,'scripts/sign-native.ps1'),'-Directory',app,'-Thumbprint',values['certificate-thumbprint'],'-TimestampServer',values['timestamp-server']],{cwd:root,timeout:180000});}
+  if(signed){console.log('签发并复核发行文件完整性清单…');await signReleasePackage({packageRoot:app,privateKeyFile:resolve(values['signing-key']),keyId:values['key-id'],trustFile:resolve(values['trust-file'])});}
   await rename(app,output);
   console.log(`内部验证目录已生成：${output}`);
   if(values.zip){await runChild('powershell.exe',['-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-File',join(root,'scripts/zip-release.ps1'),'-Source',output,'-Destination',output+'.zip'],{cwd:root,env:childEnvironment(join(output,'runtime/node.exe'),stage)});await writeFile(output+'.zip.sha256',await sha256(output+'.zip')+'  '+output.split(/[\\/]/).at(-1)+'.zip\n');console.log(`内部验证包及摘要已生成：${output}.zip`);}

@@ -1,0 +1,13 @@
+{
+  "formatVersion": 1,
+  "appId": "whale-workbench",
+  "codeInputTreeSha256": "pending",
+  "gates": {
+    "G01": {"status": "pending", "evidenceFiles": []},
+    "G02": {"status": "pending", "evidenceFiles": []},
+    "G03": {"status": "pending", "evidenceFiles": []},
+    "G04": {"status": "pending", "evidenceFiles": []},
+    "G05": {"status": "pending", "evidenceFiles": []},
+    "G06": {"status": "pending", "evidenceFiles": []}
+  }
+}

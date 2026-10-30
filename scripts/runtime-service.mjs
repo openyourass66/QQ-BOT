@@ -6,7 +6,7 @@ import { RuntimeConfiguration } from './runtime-configuration.mjs';
 import { ProcessGuard } from './process-guard.mjs';
 import { ProcessSupervisor } from './supervisor.mjs';
 import { consumeLines } from './bounded-lines.mjs';
-import { sameRuntimePath,assertNoPendingRestore,maintenancePending } from './app-paths.mjs';
+import { sameRuntimePath,assertNoPendingRestore,maintenancePending,pendingMaintenanceKind } from './app-paths.mjs';
 import { classifyRuntimeFailure } from '../dist/core/runtime-failure.js';
 
 export const runtimeActions=new Set(["maintenance","maintenance-cancel","qq-login","components","components-cancel","onboarding","model","qzone-check","knowledge","social","memory","settings-status","load","settings","env","runtime","connection","persona","diagnose","start","restart","restartBridge","stop","quit"]);
@@ -87,7 +87,7 @@ const emit = event => {
 const state = () => {
   const supervision=supervisor?.snapshot()??{},phases=Object.values(supervision).map(item=>item.phase);
   const phase=phases.includes('needs_attention')?'needs_attention':phases.includes('recovering')?'recovering':supervision.bridge?.phase==='ready'?'ready':phases.includes('waiting_login')?'waiting_login':phases.includes('connecting')?'connecting':'stopped';
-  emit({ type: 'state', bridge: children.has('bridge'), napcat: children.has('napcat') || externalNapcat, externalNapcat, busy, maintenance:Boolean(maintenanceWorker),recoveryPending:maintenancePending(dataRoot),paths: layout,phase,supervision });
+  emit({ type: 'state', bridge: children.has('bridge'), napcat: children.has('napcat') || externalNapcat, externalNapcat, busy, maintenance:Boolean(maintenanceWorker),recoveryPending:maintenancePending(dataRoot),recoveryKind:pendingMaintenanceKind(dataRoot)??null,paths: layout,phase,supervision });
 };
 supervisor=new ProcessSupervisor({onChange:()=>state(),recover:async name=>{
   const task=queue.then(async()=>{if(closing||quitting||!lease.held||!desired.has(name)){supervisor.stopped(name);return;}if(children.has(name))return;const plan=launchPlans.get(name);if(!plan)throw new Error('缺少受管启动配置');await launch(name,plan.script,plan.overrides,true);});

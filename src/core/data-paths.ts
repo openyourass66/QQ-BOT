@@ -16,7 +16,7 @@ export function dataPaths(env: NodeJS.ProcessEnv = process.env, root = process.c
 }
 
 export function mutableDataResources(paths: ReturnType<typeof dataPaths>,allowRecovery=false) {
-  if(!allowRecovery){let pending=false;try{lstatSync(join(paths.root,'.restore-journal.json'));pending=true;}catch(error){if(!['ENOENT','ENOTDIR'].includes((error as NodeJS.ErrnoException).code??''))throw error;}if(pending)throw Object.assign(new Error('上次恢复尚未收尾，请先在本机维护入口处理恢复中断。'),{code:'MAINTENANCE_RECOVERY_REQUIRED'});}
+  if(!allowRecovery)for(const [file,code] of [['.restore-journal.json','MAINTENANCE_RECOVERY_REQUIRED'],['.upgrade-journal.json','UPGRADE_RECOVERY_REQUIRED']]){let pending=false;try{lstatSync(join(paths.root,file));pending=true;}catch(error){if(!['ENOENT','ENOTDIR'].includes((error as NodeJS.ErrnoException).code??''))throw error;}if(pending)throw Object.assign(new Error(code==='UPGRADE_RECOVERY_REQUIRED'?'上次升级尚未收尾，请先在安装升级工具处理上次中断。':'上次恢复尚未收尾，请先在本机维护入口处理恢复中断。'),{code});}
   return [
     { path: paths.sessions, label: '模型会话映射' },
     { path: paths.sessions+'.sqlite', label: '会话映射数据库' },

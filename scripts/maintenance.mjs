@@ -11,9 +11,10 @@ import {DatabaseSync,backup as backupDatabase} from 'node:sqlite';
 import {dataPaths,mutableDataResources} from '../dist/core/data-paths.js';
 import {acquireDataResources} from '../dist/core/resource-lock.js';
 import {DATABASE_SCHEMA_VERSION} from '../dist/storage/database-types.js';
-import {canonicalRuntimePath} from './app-paths.mjs';
+import {canonicalRuntimePath,pendingMaintenanceKind} from './app-paths.mjs';
 
 const scrypt=promisify(derive),magic=Buffer.from('WHALEBK1\n'),journalName='.restore-journal.json';
+const heldContext=Symbol('offline-maintenance-context');
 const limits={files:50000,bytes:10*1024**3,line:131072};
 const hash=bytes=>createHash('sha256').update(bytes).digest('hex');
 const fail=(message,code='MAINTENANCE_INVALID')=>Object.assign(new Error(message),{code});
@@ -121,6 +122,7 @@ async function temporaryRoot(){const parent=await realpath(tmpdir()),path=await 
 
 async function backupLocked(ctx,output,secret,options={}){
   check(options);output=await safePath(resolve(output));await safePath(dirname(output));
+  if(options.root&&inside(canonical(await canonicalRuntimePath(options.root)),canonical(output)))throw fail('请将私人备份保存到程序目录之外。');
   if(await optional(output))throw fail('备份目标已存在，请选择新的文件名。');
   for(const spec of ctx.specs)if(canonical(spec.path)===canonical(output)||spec.kind==='directory'&&inside(canonical(spec.path),canonical(output)))throw fail('备份文件不能保存在被备份的数据目录内。');
   await mkdir(dirname(output),{recursive:true});const scratch=await temporaryRoot(),temporary=output+'.partial-'+randomUUID();
@@ -223,7 +225,7 @@ async function decodeArchive(file,secret,options={}){
 
 export async function createBackup({dataRoot,file,password:secret,...options}){
   password(secret);
-  const ctx=await context(dataRoot,options);try{return await backupLocked(ctx,file,secret,options);}finally{ctx.lease.release();}
+  const borrowed=options[heldContext],ctx=borrowed??await context(dataRoot,options);try{return await backupLocked(ctx,file,secret,options);}finally{if(!borrowed)ctx.lease.release();}
 }
 export async function verifyBackup({file,password:secret,...options}){
   const archive=await decodeArchive(file,secret,options);try{
@@ -257,13 +259,14 @@ async function finishJournal(ctx,journal){
   await rm(join(ctx.dataRoot,journalName));
 }
 export async function recoverMaintenance({dataRoot,...options}){
+  if(await optional(join(dataRoot,'.upgrade-journal.json'))&&!await optional(join(dataRoot,journalName)))throw fail('请打开安装升级工具，选择“处理上次中断”。','UPGRADE_RECOVERY_REQUIRED');
   const ctx=await context(dataRoot,{...options,recovery:true});try{if(!ctx.journal)return {operation:'recover',recovered:false};await finishJournal(ctx,ctx.journal);return {operation:'recover',recovered:true,committed:ctx.journal.state==='committed'};}finally{ctx.lease.release();}
 }
-export async function maintenanceStatus(dataRoot){return {operation:'status',recoveryPending:!!await optional(join(resolve(dataRoot),journalName))};}
+export async function maintenanceStatus(dataRoot){const kind=pendingMaintenanceKind(dataRoot);return {operation:'status',recoveryPending:Boolean(kind),recoveryKind:kind??null};}
 
 export async function restoreBackup({dataRoot,file,password:secret,...options}){
   password(secret);
-  const ctx=await context(dataRoot,options);let archive,journal,recoveryPoint;const preparedStages=[];
+  const borrowed=options[heldContext],ctx=borrowed??await context(dataRoot,options);let archive,journal,recoveryPoint;const preparedStages=[];
   try{
     const input=await safePath(resolve(file));
     if(ctx.specs.some(spec=>canonical(spec.path)===canonical(input)||spec.kind==='directory'&&inside(canonical(spec.path),canonical(input))))throw fail('请将备份文件移到待恢复数据目录之外，再执行恢复。');
@@ -301,6 +304,16 @@ export async function restoreBackup({dataRoot,file,password:secret,...options}){
     try{
       if(!await optional(join(ctx.dataRoot,journalName)))for(const item of preparedStages){const entry=journal?.entries.find(entry=>entry.staged===item.path);await removeOwned(item.path,entry?.next,item.kind);}
       await archive?.scratch.remove();
-    }finally{ctx.lease.release();}
+    }finally{if(!borrowed)ctx.lease.release();}
   }
+}
+
+/** Keep all data locks across an install transaction; the context token never crosses IPC. */
+export async function withOfflineData(dataRoot,options,run){
+  const ctx=await context(dataRoot,options);
+  try{return await run({
+    fingerprint:async({uncancelled=false}={})=>{const values=[];for(const spec of ctx.specs)values.push([spec.id,await fingerprint(spec.path,spec.kind,uncancelled?{}:options)]);return hash(JSON.stringify(values));},
+    backup:(file,password)=>createBackup({...options,dataRoot:ctx.dataRoot,file,password,[heldContext]:ctx}),
+    restore:(file,password)=>restoreBackup({...options,dataRoot:ctx.dataRoot,file,password,[heldContext]:ctx}),
+  });}finally{ctx.lease.release();}
 }

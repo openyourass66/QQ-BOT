@@ -114,7 +114,7 @@ partial class App
     static void Send(string action, object data = null) {
         if (new[] { "settings", "env", "runtime", "connection", "persona" }.Contains(action)) Find<TabControl>("Tabs").IsEnabled = false;
         try { if (host == null || host.HasExited) throw new Exception(); hostInput.WriteLine(json.Serialize(new { action = action, data = data })); hostInput.Flush(); }
-        catch { Find<TabControl>("Tabs").IsEnabled = true; SetSocialBusy(false); SetKnowledgeBusy(false);SetChatModelBusy(false); Feedback("控制进程不可用，请退出后重新打开控制台。"); }
+        catch { Find<TabControl>("Tabs").IsEnabled = true; SetSocialBusy(false); SetKnowledgeBusy(false);SetChatModelBusy(false);if(maintenanceBusy)MaintenanceError("控制进程不可用，本次维护结果未确认；请退出后重新打开并检查中断记录。"); Feedback("控制进程不可用，请退出后重新打开控制台。"); }
     }
     static void Restore() { window.ShowInTaskbar = true; window.Show(); window.WindowState = WindowState.Normal; window.Activate(); window.Topmost = true; window.Topmost = false; }
     static void MarkDirty(string section) { if (!loading) { dirtySections.Add(section); dirty = true; Find<TextBlock>("SaveState").Text = "有尚未保存的修改"; UpdateConnectionEditing(); } }
@@ -241,9 +241,12 @@ partial class App
         } else if (type == "state") {
             bool bridge = (bool)message["bridge"], napcat = (bool)message["napcat"], busy = (bool)message["busy"];
             recoveryPending=message.ContainsKey("recoveryPending")&&(bool)message["recoveryPending"];
+            upgradePending=message.ContainsKey("recoveryKind")&&Convert.ToString(message["recoveryKind"])=="upgrade";
+            if(maintenanceDialog!=null&&!maintenanceBusy)maintenanceRecover.Visibility=recoveryPending&&!upgradePending?Visibility.Visible:Visibility.Collapsed;
             runtimePhase=message.ContainsKey("phase")?Convert.ToString(message["phase"]):"";runtimeFailure="";
             if(message.ContainsKey("supervision"))foreach(var entry in ((Dictionary<string,object>)message["supervision"]).Values){var item=entry as Dictionary<string,object>;if(item!=null&&item.ContainsKey("failure")&&Convert.ToString(item["phase"])=="needs_attention"){var failure=item["failure"] as Dictionary<string,object>;if(failure!=null)runtimeFailure=Convert.ToString(failure["message"]);}}
             Find<TextBlock>("State").Text = busy ? "小鲸正在安排工作…" : bridge && napcat ? "小鲸已出发，等待连接就绪" : bridge || napcat ? "部分进程运行中，请查看日志" : "小鲸休息中，随时可以出发";
+            if(recoveryPending&&!busy)Find<TextBlock>("State").Text=upgradePending?"安装升级尚未收尾，请在安装工具处理中断":"数据恢复尚未收尾，请在数据维护处理中断";
             runtimeBusy=busy;
             Find<Button>("Start").IsEnabled = !busy && !recoveryPending && !(bridge && napcat) && runtimePhase!="recovering"; Find<Button>("Stop").IsEnabled = !busy && (bridge || napcat || runtimePhase=="recovering"); Find<Button>("Restart").IsEnabled = !busy&&!recoveryPending; Find<Button>("RestartBot").IsEnabled = !busy&&!recoveryPending && (bridge || napcat || runtimePhase=="needs_attention"); Find<Button>("RestartBot").Content=busy?"正在处理…":"重新启动";UpdateConnectionEditing();
             if (!bridge) Find<TextBlock>("Stats").Text = "桥接已停止 · NapCat " + (napcat ? "运行中" : "已停止");

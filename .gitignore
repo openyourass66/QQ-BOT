@@ -10,6 +10,10 @@
 /runtime/
 /QQ-BOT*.exe
 /QQ-BOT*.pdb
+/WhaleSetup.exe
+/WhaleLauncher.exe
+.install-journal.json*
+.upgrade-journal.json*
 /desktop/runtime-guard.exe
 /desktop/media-cleaner.exe
 *.tsbuildinfo
