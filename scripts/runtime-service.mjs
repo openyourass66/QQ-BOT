@@ -36,11 +36,15 @@ async function qqLogin(data) {
   if(data.operation==='prepare') {
     if(children.has('bridge')||children.has('napcat'))throw new Error('请先停止机器人，再创建 QQ 连接；已运行时可直接查看登录状态');
     if(data.mode==='external')throw new Error('当前使用外部 QQ 服务，请在原服务中完成登录');
+    if(await qqController.existingConfiguration()) {
+      await launch('napcat','scripts/napcat-node.mjs',{BOT_NAPCAT_DIR:data.shell});
+      emit({type:'qq-login',operation:'prepare',phase:'starting',managed:false,message:'正在使用已有配置启动 QQ，请稍候扫码。'});state();return;
+    }
     const result=await config('qq-prepare',{shell:data.shell});
     await launch('napcat','scripts/napcat-node.mjs',{BOT_NAPCAT_DIR:result.suggestions.BOT_NAPCAT_DIR});
     emit({type:'qq-login',...result});state();return;
   }
-  try {emit({type:'qq-login',...await qqController.status({refresh:data.operation==='refresh'})});}
+  try {emit({type:'qq-login',...await qqController.status({refresh:data.operation==='refresh',mode:data.mode})});}
   catch(error) {emit({type:'qq-login',operation:data.operation,phase:'needs_attention',message:error.message});}
 }
 async function components(operation, data) {
@@ -121,12 +125,13 @@ async function launch(name, script, overrides = {}, recovering=false) {
   child.on('error', error => emit({ type: 'error', text: `${name} 启动失败：${error.code || error.message}` }));
   child.once('close', (code, signal) => {
     if(children.get(name)!==child)return;children.delete(name);
-    emit({type:expectedExits.has(child)?'log':'error',text:`[${name}] 已退出，代码 ${code??signal}`});
+    const failure=failures.get(child)??classifyRuntimeFailure(undefined);
+    emit({type:expectedExits.has(child)?'log':'error',text:`[${name}] 已退出，代码 ${code??signal}${!expectedExits.has(child)&&!failure.recoverable?'：'+failure.message:''}`});
     if(name==='bridge'){
       for(const request of socialRequests.values()){clearTimeout(request.timer);request.reject(new Error('桥接已退出，请等待恢复后重试'));}socialRequests.clear();
       if(lastBridgeStatus)emit({...lastBridgeStatus,acpConnected:false,wsConnected:false});
     }
-    if(expectedExits.has(child)||closing||!desired.has(name))supervisor.stopped(name);else supervisor.exited(name,failures.get(child)??classifyRuntimeFailure(undefined));state();
+    if(expectedExits.has(child)||closing||!desired.has(name))supervisor.stopped(name);else supervisor.exited(name,failure);state();
   });
   }catch(error){error.runtimeComponent=name;throw error;}
 }

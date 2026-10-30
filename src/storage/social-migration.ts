@@ -17,7 +17,7 @@ async function sourceBytes(path:string):Promise<Buffer|undefined>{
 }
 export async function verifyMigrationSource(path:string,source:{sha256?:string|null}|undefined){
   if(!source)throw failure('DATABASE_INVALID','数据库缺少来源记录，请保留文件并使用恢复工具。');
-  const raw=await sourceBytes(path);if(raw&&digest(raw)!==source.sha256)throw failure('DATABASE_INVALID','旧数据文件在迁移后发生变化，请保留两份数据并核对，不能覆盖现有数据库。');
+  const raw=await sourceBytes(path);if(raw&&digest(raw)!==source.sha256)throw failure('DATABASE_SOURCE_CHANGED',`旧数据文件在迁移后发生变化：${path}。请保留两份数据并核对，不能覆盖现有数据库。`);
 }
 export async function ensureSocialDatabase(path:string,onProgress?:(progress:MigrationProgress)=>void|Promise<void>):Promise<string>{
   const destination=socialDatabasePath(path),existing=await lstat(destination).catch(error=>{if(error.code!=='ENOENT')throw error;return undefined;});

@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtemp,mkdir,writeFile,rm,readFile} from 'node:fs/promises';
+import {mkdtemp,mkdir,writeFile,rm,readFile,cp} from 'node:fs/promises';
 import {join} from 'node:path';
 import {tmpdir} from 'node:os';
 import {pathToFileURL} from 'node:url';
@@ -71,7 +71,7 @@ test('损坏数据转为待处理且不自动重启；手动处理后可以重�
   const entry=join(options.root,'dist/bridge.js');await writeFile(entry,"process.send({type:'fatal',failure:{code:'DATA_INVALID',recoverable:false,message:'数据需要恢复'}});setTimeout(()=>process.exit(1),50);");
   const events=[],service=await createRuntimeService({...options,onEvent:event=>events.push(event)});
   try{
-    await service.receive({action:'start'});await until(()=>events.some(e=>e.phase==='needs_attention'));await new Promise(done=>setTimeout(done,1300));assert.equal(events.filter(e=>e.type==='state').at(-1).supervision.bridge.failure.code,'DATA_INVALID');assert.ok(!events.some(e=>e.phase==='recovering'));
+    await service.receive({action:'start'});await until(()=>events.some(e=>e.phase==='needs_attention'));await new Promise(done=>setTimeout(done,1300));assert.equal(events.filter(e=>e.type==='state').at(-1).supervision.bridge.failure.code,'DATA_INVALID');assert.ok(!events.some(e=>e.phase==='recovering'));assert.ok(events.some(e=>e.type==='error'&&e.text.includes('数据需要恢复')));
     await writeFile(entry,"process.on('message',m=>{if(m==='shutdown')process.exit()});process.send({type:'status',acpConnected:true,qqOnline:true,wsConnected:true});setInterval(()=>{},1000);");
     await service.receive({action:'start'});await until(()=>events.some(e=>e.phase==='ready'));
   }finally{await service.close();}
@@ -82,5 +82,20 @@ test('停止命令立即取消退避中的恢复，不产生新的业务进程',
   const events=[],service=await createRuntimeService({...options,onEvent:event=>events.push(event)});
   try{
     await service.receive({action:'start'});await until(()=>events.some(e=>e.phase==='recovering'));await service.receive({action:'stop'});await new Promise(done=>setTimeout(done,1400));assert.equal(await readFile(marker,'utf8'),'x');assert.equal(events.filter(e=>e.type==='state').at(-1).phase,'stopped');
+  }finally{await service.close();}
+}));
+
+test('已有本机 QQ 从登录入口启动时沿用配置，只启动 QQ 进程',()=>fixture(async({createRuntimeService,...options})=>{
+  await cp(new URL('../scripts/qq-runtime.mjs',import.meta.url),join(options.root,'scripts/qq-runtime.mjs'));
+  const directory=join(options.layout.dataRoot,'napcat/node-runtime/config');await mkdir(directory,{recursive:true});
+  const file=join(directory,'webui.json'),original=JSON.stringify({host:'::',port:6099,token:'fixture-existing-token'});await writeFile(file,original);
+  const events=[],service=await createRuntimeService({...options,onEvent:event=>events.push(event)});
+  try{
+    await service.receive({action:'qq-login',data:{operation:'prepare',mode:'auto',shell:'napcat/shell'}});
+    await until(()=>events.some(event=>event.type==='state'&&event.napcat));
+    await until(()=>events.some(event=>event.type==='log'&&event.source==='napcat'));
+    assert.ok(events.some(event=>event.type==='qq-login'&&event.phase==='starting'&&event.managed===false));
+    assert.equal(events.filter(event=>event.type==='state').at(-1).bridge,false);assert.equal(await readFile(file,'utf8'),original);
+    assert.doesNotMatch(await readFile(join(options.layout.logDir,'console.log'),'utf8'),/fixture-existing-token/);
   }finally{await service.close();}
 }));

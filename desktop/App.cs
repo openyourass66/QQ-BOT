@@ -120,7 +120,7 @@ partial class App
     static void MarkDirty(string section) { if (!loading) { dirtySections.Add(section); dirty = true; Find<TextBlock>("SaveState").Text = "有尚未保存的修改"; UpdateConnectionEditing(); } }
     static void EditChanged(object sender, TextChangedEventArgs e) { MarkDirty(sender == Find<TextBox>("Env") ? "env" : sender == Find<TextBox>("Persona") ? "persona" : "settings"); }
     static void MakeFields(Dictionary<string, object> data, string prefix, StackPanel panel) { BuildSettings(data, panel); }
-    static void RuntimeFields(object value) { BuildRuntimeFields(value); }
+    static void RuntimeFields(object value) { BuildRuntimeFields(value);Find<Button>("OverviewQQLogin").IsEnabled=true;Find<Button>("RuntimeQQLogin").IsEnabled=true; }
     static void RefreshLogs() {
         var search = Find<TextBox>("LogSearch").Text;
         int filter = Find<ComboBox>("LogFilter").SelectedIndex;
