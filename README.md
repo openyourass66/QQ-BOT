@@ -4,7 +4,7 @@
 
 当前为 **0.2.0 开发版本**，主要交付平台是 Windows 10/11 x64。此前候选已完成真实 QQ 登录和私聊回复，最新源码全量隔离回归为 **503 项通过**（本轮未启用真实 FFmpeg）；停机加密备份与原实例恢复已接入桌面，脱敏诊断导出、清理界面、安装程序、升级回退、干净系统及长时验收仍待完成。实施范围见[精简改造方案](docs/product-readiness-plan.md)，实际结果见[实施进展](docs/implementation-status.md)。
 
-最新 `rc6` 候选来源为 `03be993`，已包含登录 Worker 重建、每代账号目录隔离和运行库诊断修复，包内运行库及隔离原生窗口检查通过，尚未进行本包真实 QQ 收发或长时恢复验收。候选摘要见[验证记录](docs/validation/release-candidate-rc6-2026-10-30.json)。先继续完善 Windows 本地版本，云端部署与本地远程控制台分支后置。
+最新 `rc7` 候选来源为 `8a71d22`，包含登录与运行库修复、停机加密备份恢复及桌面入口；包内 Node 的 24 项专项和隔离原生窗口检查通过，尚未进行本包真实 QQ 收发或长时恢复验收。候选摘要见[验证记录](docs/validation/release-candidate-rc7-2026-10-30.json)。先继续完善 Windows 本地版本，云端部署与本地远程控制台分支后置。
 
 ```text
 QQ ↔ NapCat / OneBot 11 ↔ bridge ↔ DSH（ACP）
