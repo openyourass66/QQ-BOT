@@ -1,0 +1,87 @@
+{
+  "date": "2026-10-30",
+  "timezone": "Asia/Shanghai",
+  "candidate": "WhaleWorkbench-0.2.0-win-x64-rc7",
+  "channel": "internal-validation",
+  "sourceRevision": "8a71d227418c18e8c6e2fb1bd7c49f5e441eb338",
+  "archive": {
+    "path": "release/WhaleWorkbench-0.2.0-win-x64-rc7.zip",
+    "bytes": 50722940,
+    "sha256": "81510d7ebe8297d9faee2b14200612ac39f0b0614b05076f399f9695c027c65f",
+    "entries": 8095,
+    "singleTopLevelDirectory": true,
+    "standardPathSeparators": true,
+    "requiredFilesPresent": true,
+    "bundledNodeHashMatchesCatalog": true,
+    "personalDataAbsent": true,
+    "publisherSignatureVerified": false
+  },
+  "runtime": {
+    "node": "24.22.1",
+    "modulesChecked": 128,
+    "relativeImportsChecked": 283,
+    "packageImportsChecked": 31,
+    "developmentToolsRequiredForUser": false
+  },
+  "automatedChecks": {
+    "hostNode": "22.20.0",
+    "isolatedRegression": {"passed": 503, "failed": 0, "skipped": 0},
+    "realSyntheticFfmpegTestEnabled": false,
+    "releaseNodeFocusedRegression": {"passed": 24, "failed": 0, "skipped": 0},
+    "focusedScope": ["maintenance-core-17", "runtime-maintenance-1", "release-validation-and-archive-6"],
+    "typecheck": "passed",
+    "desktopBuild": "passed"
+  },
+  "maintenanceCheck": {
+    "data": "synthetic-isolated-fixtures-only",
+    "encryption": "scrypt-and-aes-256-gcm",
+    "realFourStoreRoundTrip": "passed",
+    "wrongPasswordTamperingAndTruncation": "passed",
+    "authenticatedMaliciousPathsAndJournalTampering": "passed",
+    "windowsShortPathAndLinkedPaths": "passed",
+    "currentCorruptDatabaseAndSettingsRescue": "passed",
+    "resourceExclusionAndIndependentCancellation": "passed",
+    "processExitBeforeAndAfterCommit": "passed",
+    "recoveryPendingBlocksInitializationAndStartup": "passed",
+    "manualEditsAfterInterruption": "preserved-and-rejected",
+    "passwordAbsentFromEventsAndLogs": "passed",
+    "supportedRestoreScope": "same-instance-and-same-configured-paths",
+    "qqAndDshLoginStateIncluded": false,
+    "actualUserDataRestore": "not-performed",
+    "systemPowerLoss": "not-performed"
+  },
+  "nativeWindowCheck": {
+    "directlyTestedCandidate": "rc7",
+    "bundledRuntimeAndProductionDependencies": true,
+    "developerNodeRemovedFromTestPath": true,
+    "independentDataDirectoryWithSpaces": true,
+    "data": "synthetic-isolated-fixture",
+    "windowChecks": "passed-first-run",
+    "maintenanceCompactViewport": "passed-and-screenshot-reviewed",
+    "maintenanceCancelAndRecoveryVisibility": "passed",
+    "programmaticTrayRestoreAndExit": "passed-first-run",
+    "physicalTrayClick": "not-performed"
+  },
+  "sourceBuildSynchronization": {
+    "modules": ["storage/database-types", "storage/database-worker", "core/data-paths", "core/runtime-failure"],
+    "javascriptAndSourceMaps": "atomically-synchronized-after-backing-up-previous-build",
+    "hashesMatchCandidate": true,
+    "maintenanceImportAndStartupGuards": "passed",
+    "runningExecutableReplaced": false
+  },
+  "realQqCheck": "not-performed-on-this-candidate",
+  "existingUserInstance": "left-running-without-data-or-credential-changes; read-only-status-online-and-healthy",
+  "remaining": [
+    "complete first-use and failure flows for new users",
+    "real QQ login-expiry and recovery validation on this candidate",
+    "clean Windows 10 and Windows 11 installation",
+    "declared QQ, media, space and native-network combinations",
+    "redacted diagnostic export and ordinary-user media cleanup interface",
+    "real-user maintenance acceptance and system-power-loss fault checks",
+    "installer, trusted signed manifests, upgrade and paired rollback",
+    "full mixed-load and fault reports",
+    "72-hour mixed-load run followed by 7-day real-use observation",
+    "five new-user trials and G01-G06 release evidence"
+  ],
+  "deploymentBranch": "deferred-until-local-readiness-work-is-complete"
+}
