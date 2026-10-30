@@ -14,7 +14,7 @@ export function filesHandlers(port: Pick<SocialExecutionPort, "feature" | "messa
                     const { buffer } = await port.media.bytes(await port.source(segment, ctx), ctx.signal, 25000000);
                     const extension = extname(String(segment.data.name ?? '')).toLowerCase();
                     const file = await port.media.save(buffer, /^\.[a-z0-9]{1,8}$/.test(extension) ? extension : '.bin');
-                    return { file, bytes: buffer.length, name: segment.data.name, text: ['.txt', '.md', '.csv', '.json', '.log', '.xml', '.html'].includes(extension) ? buffer.toString('utf8').slice(0, 30000) : undefined, note: '二进制文档尚未提取正文，可使用 DSH 已配置的文档读取能力' };
+                    return { file, bytes: buffer.length, name: segment.data.name, text: ['.txt', '.md', '.csv', '.json', '.log', '.xml', '.html'].includes(extension) ? buffer.toString('utf8').slice(0, 30000) : undefined, note: '当前仅提取文本文件正文；PDF、Word 等二进制文档仅保存文件，不会解析内容。' };
                 }
                 case 'qq_event_file': {
                     port.feature('filesEnabled');
