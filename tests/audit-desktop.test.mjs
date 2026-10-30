@@ -36,9 +36,12 @@ test('保存并重启检查失败时报告失败，保留原进程；恢复检�
   try {
     send('start');await until(()=>starts()===1);await writeFile(join(root,'fail'),'1');
     send('connection',{restart:true});await until(()=>events.some(e=>e.type==='control'&&e.action==='restartBridge'&&e.ok===false));
+    const failedControl=events.findIndex(e=>e.type==='control'&&e.action==='restartBridge'&&e.ok===false);
+    await until(()=>events.slice(failedControl+1).some(e=>e.type==='state'&&!e.busy));
     assert.equal(starts(),1);assert.ok(events.some(e=>e.type==='saved'&&e.restartRequested));
-    assert.equal(events.at(-1).bridge,true);assert.equal(events.at(-1).busy,false);
-    await rm(join(root,'fail'));const before=events.length;send('restartBridge');await until(()=>starts()===2);
+    const settled=events.slice(failedControl+1).find(e=>e.type==='state'&&!e.busy);
+    assert.equal(settled.bridge,true);assert.equal(settled.busy,false);
+    await rm(join(root,'fail'));const before=events.length;send('restartBridge');await until(()=>starts()===2&&events.slice(before).some(e=>e.type==='control'&&e.action==='restartBridge'&&e.ok));
     assert.ok(events.slice(before).some(e=>e.type==='control'&&e.action==='restartBridge'&&e.ok));
     send('quit');const [code]=await once(child,'exit');assert.equal(code,0);
   } finally {
