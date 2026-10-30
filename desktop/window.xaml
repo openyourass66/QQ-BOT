@@ -214,7 +214,7 @@
      <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
      <DockPanel Margin="0,0,0,18"><Button x:Name="RunDiagnostics" Content="重新检查" Style="{StaticResource Primary}" DockPanel.Dock="Right"/><StackPanel><TextBlock x:Name="DiagnosticSummary" Text="正在检查启动环境…" FontSize="16" FontWeight="SemiBold"/><TextBlock Text="检查依赖、配置路径和访问权限。" Foreground="{StaticResource Muted}" FontSize="11" Margin="0,7,0,0"/></StackPanel></DockPanel>
      <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto"><StackPanel x:Name="Diagnostics"/></ScrollViewer>
-     <Button x:Name="OpenLogs" Grid.Row="2" Content="打开日志目录" HorizontalAlignment="Right" Margin="0,15,0,0"/>
+     <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,15,0,0"><Button x:Name="OpenDataMaintenance" Content="数据备份与恢复" Margin="0,0,10,0"/><Button x:Name="OpenLogs" Content="打开日志目录"/></StackPanel>
     </Grid></Border></TabItem>
    </TabControl>
    <Border x:Name="ErrorBanner" Grid.Row="1" Grid.Column="1" VerticalAlignment="Top" Margin="28,96,28,0" Background="#FFF1F2" BorderBrush="#F5D7DD" BorderThickness="1" CornerRadius="9" Padding="13,10" Visibility="Collapsed" Panel.ZIndex="10">

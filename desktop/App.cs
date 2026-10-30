@@ -169,6 +169,9 @@ partial class App
     static void Event(string line) {
         var message = json.Deserialize<Dictionary<string, object>>(line);
         string type = (string)message["type"];
+        if(type=="maintenance"){RenderMaintenance(message);return;}
+        if(type=="maintenance-progress"){RenderMaintenanceProgress(message);return;}
+        if(type=="error"&&message.ContainsKey("action")&&(string)message["action"]=="maintenance")MaintenanceError((string)message["text"]);
         if(type=="qq-login"){RenderQQLogin(message);return;}
         if(type=="error"&&message.ContainsKey("action")&&(string)message["action"]=="qq-login")QQLoginError((string)message["text"]);
         if(type=="components"){RenderComponents(message);return;}
@@ -237,11 +240,12 @@ partial class App
             Find<TextBlock>("DiagnosticSummary").Text = (bool)message["ok"] ? "启动检查通过" : "有项目需要处理";
         } else if (type == "state") {
             bool bridge = (bool)message["bridge"], napcat = (bool)message["napcat"], busy = (bool)message["busy"];
+            recoveryPending=message.ContainsKey("recoveryPending")&&(bool)message["recoveryPending"];
             runtimePhase=message.ContainsKey("phase")?Convert.ToString(message["phase"]):"";runtimeFailure="";
             if(message.ContainsKey("supervision"))foreach(var entry in ((Dictionary<string,object>)message["supervision"]).Values){var item=entry as Dictionary<string,object>;if(item!=null&&item.ContainsKey("failure")&&Convert.ToString(item["phase"])=="needs_attention"){var failure=item["failure"] as Dictionary<string,object>;if(failure!=null)runtimeFailure=Convert.ToString(failure["message"]);}}
             Find<TextBlock>("State").Text = busy ? "小鲸正在安排工作…" : bridge && napcat ? "小鲸已出发，等待连接就绪" : bridge || napcat ? "部分进程运行中，请查看日志" : "小鲸休息中，随时可以出发";
             runtimeBusy=busy;
-            Find<Button>("Start").IsEnabled = !busy && !(bridge && napcat) && runtimePhase!="recovering"; Find<Button>("Stop").IsEnabled = !busy && (bridge || napcat || runtimePhase=="recovering"); Find<Button>("Restart").IsEnabled = !busy; Find<Button>("RestartBot").IsEnabled = !busy && (bridge || napcat || runtimePhase=="needs_attention"); Find<Button>("RestartBot").Content=busy?"正在处理…":"重新启动";UpdateConnectionEditing();
+            Find<Button>("Start").IsEnabled = !busy && !recoveryPending && !(bridge && napcat) && runtimePhase!="recovering"; Find<Button>("Stop").IsEnabled = !busy && (bridge || napcat || runtimePhase=="recovering"); Find<Button>("Restart").IsEnabled = !busy&&!recoveryPending; Find<Button>("RestartBot").IsEnabled = !busy&&!recoveryPending && (bridge || napcat || runtimePhase=="needs_attention"); Find<Button>("RestartBot").Content=busy?"正在处理…":"重新启动";UpdateConnectionEditing();
             if (!bridge) Find<TextBlock>("Stats").Text = "桥接已停止 · NapCat " + (napcat ? "运行中" : "已停止");
             Find<TextBlock>("NapcatState").Text = napcat ? (message.ContainsKey("externalNapcat") && (bool)message["externalNapcat"] ? "复用外部 NapCat" : "NapCat 运行中") : "NapCat 等待启动";
             if (!bridge) { Find<TextBlock>("ModelState").Text = "未连接"; Find<TextBlock>("QqState").Text = napcat ? "等待桥接" : "未连接"; }
@@ -416,7 +420,7 @@ partial class App
         Find<Button>("Memory").Click += (s, e) => { try { string path = Path.Combine(Path.GetDirectoryName(personaPath), "memory"); Directory.CreateDirectory(path); Process.Start(new ProcessStartInfo(path) { UseShellExecute = true }); } catch { Feedback("无法打开记忆目录，请先加载配置。"); } };
         Find<TextBox>("Env").TextChanged += EditChanged;
         Find<TextBox>("LogSearch").TextChanged += (s,e) => RefreshLogs(); Find<ComboBox>("LogFilter").SelectionChanged += (s,e) => RefreshLogs();
-        Find<Button>("Diagnose").Click += (s,e) => { SelectedPage = MainPage.Diagnostics; Send("diagnose"); }; Find<Button>("RunDiagnostics").Click += (s,e) => Send("diagnose");
+        Find<Button>("Diagnose").Click += (s,e) => { SelectedPage = MainPage.Diagnostics; Send("diagnose"); }; Find<Button>("RunDiagnostics").Click += (s,e) => Send("diagnose");Find<Button>("OpenDataMaintenance").Click+=(s,e)=>OpenMaintenance();
         Find<Button>("OpenLogs").Click += (s,e) => { string path = Path.Combine(dataRoot,"data/desktop"); Directory.CreateDirectory(path); Process.Start(new ProcessStartInfo(path) { UseShellExecute = true }); };
         Find<Button>("ExportLogs").Click += (s,e) => { var dialog = new Microsoft.Win32.SaveFileDialog { FileName = "小鲸运行日志.txt", Filter = "文本日志|*.txt" }; if (dialog.ShowDialog(window) == true) { try { File.WriteAllLines(dialog.FileName, logs, new UTF8Encoding(true)); Feedback("日志已导出，连接凭据已自动遮盖。"); } catch (Exception error) { Feedback(error.Message); } } };
         var timer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(200) };
@@ -528,6 +532,7 @@ partial class App
                     Process.Start(new ProcessStartInfo(Path.Combine(root, "QQ-BOT.exe"), startupArguments) { WorkingDirectory = launchDirectory, UseShellExecute = false, CreateNoWindow = true });
                     smokeStep = 1;
                 } else if (smokeStep == 1 && window.IsVisible) {
+                    MaintenanceSmoke();
                     File.WriteAllText(Path.Combine(root, "smoke-result.txt"), "PASS: persona library save and selection, independent conversation copies, retained drafts, workspace and friend memory editing, compact layout, settings and model validation, activity isolation, QQ favorites and local migration controls, autonomous thought controls, interest editing, decision summaries, Shell tray restore, graceful exit");
                     smokeStep = 2; Exit();
                 }

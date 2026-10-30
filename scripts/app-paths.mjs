@@ -1,11 +1,14 @@
 import { mkdir, open, readFile, realpath, rm } from 'node:fs/promises';
-import { existsSync } from 'node:fs';
+import { existsSync,lstatSync } from 'node:fs';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { homedir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { loadEnvFile } from 'node:process';
 import { randomUUID } from 'node:crypto';
 import { setup } from './setup.mjs';
+
+export function maintenancePending(dataRoot){try{lstatSync(join(dataRoot,'.restore-journal.json'));return true;}catch(error){if(error.code==='ENOENT'||error.code==='ENOTDIR')return false;throw error;}}
+export function assertNoPendingRestore(dataRoot){if(maintenancePending(dataRoot))throw Object.assign(new Error('上次数据恢复尚未收尾，请在“存储与高级 → 数据备份与恢复”处理上次中断。'),{code:'MAINTENANCE_RECOVERY_REQUIRED'});}
 
 export const programRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -18,6 +21,7 @@ async function canonical(path) {
     return join(await canonical(parent), path.slice(parent.length).replace(/^[\\/]+/, ''));
   }
 }
+export {canonical as canonicalRuntimePath};
 
 /** 按实际目录身份比较路径，兼容 Windows 短名称、目录联接和大小写。 */
 export async function sameRuntimePath(left,right) {

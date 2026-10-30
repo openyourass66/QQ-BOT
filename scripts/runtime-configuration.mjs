@@ -5,6 +5,7 @@ import {parseEnv} from 'node:util';
 import {runtimeFields,mergeRuntimeEnv,validateRuntimeEnv} from '../desktop/runtime-fields.mjs';
 import {acquireDataResources} from '../dist/core/resource-lock.js';
 import {protectEnvironmentText} from './credentials.mjs';
+import {assertNoPendingRestore} from './app-paths.mjs';
 
 const editable=new Set(['BOT_ONEBOT_MODE','BOT_CHAT_MODE','BOT_CHAT_MODEL','BOT_CHAT_BASE_URL','BOT_LEARNING_BASE_URL','BOT_LEARNING_MODEL','BOT_MEDIA_BASE_URL','ONEBOT_HTTP_URL','ONEBOT_WS_URL','BOT_SELF_ID','TURN_TIMEOUT_MS','QUEUE_PER_CONVERSATION','QUEUE_TOTAL','MAX_CONCURRENT_TURNS','INGRESS_PER_CONVERSATION','INGRESS_TOTAL','INGRESS_MAX_BYTES','BATCH_MAX_BYTES']);
 const secretKeys=new Set(runtimeFields.filter(field=>field[4]==='secret').map(field=>field[1]));
@@ -36,6 +37,7 @@ export class RuntimeConfiguration {
   #revision(text){return createHmac('sha256',this.#key).update(text).digest('hex');}
   async read(){const text=await this.#raw();return {revision:this.#revision(text),fields:configurationFields(text)};}
   async update({revision,values,secret}={}) {
+    assertNoPendingRestore(this.dataRoot);
     if(typeof revision!=='string'||!/^[a-f0-9]{64}$/.test(revision))throw new ConfigurationError('请先读取最新配置');
     let changes;
     if(secret){

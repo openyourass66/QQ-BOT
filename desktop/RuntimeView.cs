@@ -155,7 +155,7 @@ partial class App
         }
         var shortcuts=new StackPanel();shortcuts.Children.Add(new TextBlock{Text="管理员 QQ、触发前缀、回复节奏和命令确认统一在机器人设置编辑。高级环境文件中的同名项仅补齐缺失默认值。",FontSize=11,TextWrapping=TextWrapping.Wrap,Foreground=Ink("Muted"),LineHeight=18});
         var openSettings=new Button{Content="前往机器人设置",Style=(Style)window.FindResource("Quiet"),HorizontalAlignment=HorizontalAlignment.Left,Margin=new Thickness(0,10,0,10)};openSettings.Click+=(s,e)=>NavigateSetting("approval.adminQq");shortcuts.Children.Add(openSettings);panel.Children.Add(RuntimeCard("行为设置入口","",shortcuts,5));
-        BuildQzoneConnection(panel);BuildMediaEditors(panel);runtimeCardOrder=panel.Children.Cast<UIElement>().ToList();RefreshMediaEditors();RefreshChatModelEditor();FilterRuntime();
+        BuildQzoneConnection(panel);BuildMediaEditors(panel);BuildMaintenanceCard(panel);runtimeCardOrder=panel.Children.Cast<UIElement>().ToList();RefreshMediaEditors();RefreshChatModelEditor();FilterRuntime();
     }
     static void BuildQzoneConnection(StackPanel panel) {
         var body=new StackPanel();
