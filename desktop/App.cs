@@ -42,7 +42,8 @@ partial class App
     static Dictionary<string, Control> runtimeInputs = new Dictionary<string, Control>();
     static Dictionary<string, object> settings;
     static Queue<string> logs = new Queue<string>();
-    static bool exiting, paused, dirty, loading, hostFailed;
+    static bool exiting, remoteExitPending, remoteExitReady, paused, dirty, loading, hostFailed;
+    static DateTime remoteExitDeadline;
     static string runtimePhase="stopped", runtimeFailure="";
     static HashSet<string> dirtySections = new HashSet<string>();
     static string personaPath;
@@ -163,12 +164,27 @@ partial class App
     static void Exit() {
         if (exiting) return;
         if (dirty && MessageBox.Show(window, "有尚未保存的编辑，仍要退出吗？", "小鲸提醒", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes) return;
-        exiting = true; window.Show(); Feedback("正在保存运行数据并停止机器人，请稍候…");
+        if (connectionMode == "remote" && (host == null || host.HasExited)) {
+            exiting = true; Feedback("已退出控制台；服务器上的机器人继续运行。");
+            window.Close(); return;
+        }
+        window.Show();
+        if (connectionMode == "remote") {
+            // 远程模式只停止机器人，守护进程保持运行，便于之后直接重连。
+            exiting = true; Feedback("正在请求服务器停止机器人，控制台随后退出；服务器守护进程保持运行…");
+            window.IsEnabled = false;
+            remoteExitPending = true; remoteExitReady = false; remoteExitDeadline = DateTime.UtcNow.AddSeconds(15);
+            Send("stop");
+            return;
+        }
+        exiting = true; Feedback("正在保存运行数据并停止机器人，请稍候…");
         window.IsEnabled = false; Send("quit");
     }
     static void Event(string line) {
         var message = json.Deserialize<Dictionary<string, object>>(line);
+        if (connectionMode == "remote") NoteRemoteEvent();
         string type = (string)message["type"];
+        if (type == "control" && remoteExitPending && message.ContainsKey("action") && (string)message["action"] == "stop") { remoteExitReady = true; return; }
         if(type=="maintenance"){RenderMaintenance(message);return;}
         if(type=="maintenance-progress"){RenderMaintenanceProgress(message);return;}
         if(type=="error"&&message.ContainsKey("action")&&(string)message["action"]=="maintenance")MaintenanceError((string)message["text"]);
@@ -348,7 +364,7 @@ partial class App
         var application = new Application();
         application.Resources.MergedDictionaries.Add((ResourceDictionary)XamlReader.Parse(File.ReadAllText(Path.Combine(root,"desktop/theme.xaml"),Encoding.UTF8)));
         window = (Window)XamlReader.Parse(File.ReadAllText(Path.Combine(root, "desktop/window.xaml"), Encoding.UTF8));
-        InitSettingsView(); InitRuntimeView(); InitQuickSetup(); InitActivityView(); InitKnowledgeView();
+        InitSettingsView(); InitRuntimeView(); InitQuickSetup(); InitActivityView(); InitKnowledgeView(); InitConnectionView();
         window.Width = Math.Min(window.Width, SystemParameters.WorkArea.Width - 24);
         window.Height = Math.Min(window.Height, SystemParameters.WorkArea.Height - 24);
         var iconStream = typeof(App).Assembly.GetManifestResourceStream("whale.ico");
@@ -379,6 +395,7 @@ partial class App
             Find<Button>("Maximize").ToolTip = maximized ? "还原" : "最大化";
         };
         Find<Button>("CloseWindow").Click += (s,e) => window.Close();
+        Find<Button>("ErrorDismiss").Click += (s,e) => Find<Border>("ErrorBanner").Visibility = Visibility.Collapsed;
         if (args.Length > 0 && args[0] == "--preview") {
             if (args.Length > 4) { window.Width = int.Parse(args[3]); window.Height = int.Parse(args[4]); }
             if (args.Length > 5) {
@@ -390,22 +407,23 @@ partial class App
             window.Show(); window.UpdateLayout();
             Capture(args[1], args.Length > 2 ? PageForTab((TabItem)Find<TabControl>("Tabs").Items[int.Parse(args[2])]) : MainPage.Overview); window.Close(); return;
         }
-        var info = new ProcessStartInfo(nodeExecutable, QuoteArgument(Path.Combine(root, "desktop/host.mjs"))+" "+startupArguments) { WorkingDirectory = launchDirectory, UseShellExecute = false, CreateNoWindow = true, RedirectStandardInput = true, RedirectStandardOutput = true, RedirectStandardError = true, StandardOutputEncoding = Encoding.UTF8, StandardErrorEncoding = Encoding.UTF8 };
-        info.EnvironmentVariables["QQBOT_LOW_INTEGRITY"] = NativeTray.IsLowIntegrity() ? "1" : "0";
-        host = new Process { StartInfo = info, EnableRaisingEvents = true };
-        host.OutputDataReceived += (s, e) => { if (e.Data != null) events.Enqueue(e.Data); };
-        host.ErrorDataReceived += (s, e) => { if (e.Data != null) {
-            if(IsSqliteNotice(e.Data))events.Enqueue("{\"type\":\"log\",\"text\":\"[runtime] 当前 Node 版本将 SQLite 标记为实验功能；此提示不影响数据库运行。\"}");
-            else if(!e.Data.StartsWith("(Use `node --trace-warnings"))events.Enqueue("{\"type\":\"error\",\"text\":\"控制进程异常，请检查配置与 Node 版本。\"}");
-        } };
-        host.Start(); hostInput = new StreamWriter(host.StandardInput.BaseStream, new UTF8Encoding(false)); host.BeginOutputReadLine(); host.BeginErrorReadLine();
+        StartHost();
         tray = new NativeTray(window, trayImage.Handle, args.Contains("--tray-check") ? "Whale UI tray check " + Path.GetFileName(root.TrimEnd(Path.DirectorySeparatorChar,Path.AltDirectorySeparatorChar)) : "小鲸工作台 · 点击打开");
         var menu = new ContextMenu();
-        foreach (var entry in new[] { new[] { "打开小鲸工作台", "show" }, new[] { "启动机器人", "start" }, new[] { "重新启动机器人", "restart" }, new[] { "重连模型", "restartBridge" }, new[] { "停止机器人", "stop" }, new[] { "退出并停止机器人", "quit" } }) {
-            var item = new MenuItem { Header = entry[0], Padding = new Thickness(14,8,14,8) }; string command = entry[1]; item.Click += (s,e) => { if (command == "show") Restore(); else if (command == "quit") Exit(); else Send(command); }; menu.Items.Add(item);
+        MenuItem trayQuit = null, trayDisconnect = null;
+        foreach (var entry in new[] { new[] { "打开小鲸工作台", "show" }, new[] { "启动机器人", "start" }, new[] { "重新启动机器人", "restart" }, new[] { "重连模型", "restartBridge" }, new[] { "停止机器人", "stop" }, new[] { "断开服务器连接", "disconnect" }, new[] { "退出并停止机器人", "quit" } }) {
+            var item = new MenuItem { Header = entry[0], Padding = new Thickness(14,8,14,8) }; string command = entry[1];
+            item.Click += (s,e) => { if (command == "show") Restore(); else if (command == "quit") Exit(); else if (command == "disconnect") DisconnectRemote(); else Send(command); };
+            if (command == "quit") trayQuit = item; else if (command == "disconnect") trayDisconnect = item;
+            menu.Items.Add(item);
             System.Windows.Automation.AutomationProperties.SetAutomationId(item, "Tray-" + command);
         }
-        tray.Click += Restore; tray.ContextMenu += () => { menu.Placement = System.Windows.Controls.Primitives.PlacementMode.MousePoint; menu.IsOpen = true; };
+        tray.Click += Restore; tray.ContextMenu += () => {
+            bool remoteConnected = connectionMode == "remote" && host != null && !host.HasExited;
+            if (trayQuit != null) trayQuit.Header = connectionMode == "remote" && !remoteConnected ? "退出控制台" : "退出并停止机器人";
+            if (trayDisconnect != null) trayDisconnect.Visibility = remoteConnected ? Visibility.Visible : Visibility.Collapsed;
+            menu.Placement = System.Windows.Controls.Primitives.PlacementMode.MousePoint; menu.IsOpen = true;
+        };
         window.Closing += (s, e) => { if (!exiting) { e.Cancel = true; if (tray.Ensure()) window.Hide(); else { window.WindowState = WindowState.Minimized; Feedback("托盘暂不可用，已保留任务栏窗口，可再次打开 EXE 恢复。"); } } };
         Find<Button>("Start").Click += (s, e) => Send("start"); Find<Button>("Stop").Click += (s, e) => Send("stop"); Find<Button>("Restart").Click += (s, e) => Send("restartBridge"); Find<Button>("RestartBot").Click += (s, e) => Send("restart");
         Find<Button>("Pause").Click += (s, e) => { paused = !paused; Find<Button>("Pause").Content = paused ? "继续滚动" : "暂停滚动"; };
@@ -424,7 +442,7 @@ partial class App
         Find<TextBox>("Env").TextChanged += EditChanged;
         Find<TextBox>("LogSearch").TextChanged += (s,e) => RefreshLogs(); Find<ComboBox>("LogFilter").SelectionChanged += (s,e) => RefreshLogs();
         Find<Button>("Diagnose").Click += (s,e) => { SelectedPage = MainPage.Diagnostics; Send("diagnose"); }; Find<Button>("RunDiagnostics").Click += (s,e) => Send("diagnose");Find<Button>("OpenDataMaintenance").Click+=(s,e)=>OpenMaintenance();
-        Find<Button>("OpenLogs").Click += (s,e) => { string path = Path.Combine(dataRoot,"data/desktop"); Directory.CreateDirectory(path); Process.Start(new ProcessStartInfo(path) { UseShellExecute = true }); };
+        Find<Button>("OpenLogs").Click += (s,e) => { if (connectionMode == "remote") { DownloadServerLog(); return; } string path = Path.Combine(dataRoot,"data/desktop"); Directory.CreateDirectory(path); Process.Start(new ProcessStartInfo(path) { UseShellExecute = true }); };
         Find<Button>("ExportLogs").Click += (s,e) => { var dialog = new Microsoft.Win32.SaveFileDialog { FileName = "小鲸运行日志.txt", Filter = "文本日志|*.txt" }; if (dialog.ShowDialog(window) == true) { try { File.WriteAllLines(dialog.FileName, logs, new UTF8Encoding(true)); Feedback("日志已导出，连接凭据已自动遮盖。"); } catch (Exception error) { Feedback(error.Message); } } };
         var timer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(200) };
         timer.Tick += (s, e) => {
@@ -432,11 +450,12 @@ partial class App
             string line; int count = 0; while (count++ < 300 && events.TryDequeue(out line)) { try { Event(line); } catch { Feedback("收到无效的控制消息。"); } }
             RefreshLogs();
             if (++ticks % 25 == 0) tray.Ensure();
-            if (host.HasExited) { if (exiting) { timer.Stop(); window.Close(); } else if (!hostFailed) { hostFailed = true; Find<TextBlock>("State").Text = "控制进程已退出"; Feedback("请退出并重新打开控制台。"); } }
+            if (host != null && host.HasExited) HandleHostExit(timer);
+            if (remoteExitPending && (remoteExitReady || DateTime.UtcNow > remoteExitDeadline)) { remoteExitPending = false; window.Close(); }
             if (smoke && !exiting) {
                 if (DateTime.UtcNow > smokeDeadline) { Environment.ExitCode = 1; File.WriteAllText(Path.Combine(root, "smoke-result.txt"), "FAIL: lifecycle timeout at step "+smokeStep+", socialBusy="+socialBusy+", knowledgeBusy="+knowledgeBusy+", rows="+Find<ListView>("SocialList").Items.Count+", feedback="+Find<TextBlock>("Feedback").Text); exiting = true; Send("quit"); return; }
                 if (smokeStep == 0 && settings != null) {
-                    try { VerifyActivityInteraction(); VerifySettingsInteraction(); VerifyRuntimeInteraction(); VerifyQuickSetupInteraction(); VerifyScopeInteraction(); VerifyKnowledgeInteraction(); VerifyComponentInteraction(); VerifyQQLoginInteraction();
+                    try { VerifyActivityInteraction(); VerifySettingsInteraction(); VerifyRuntimeInteraction(); VerifyQuickSetupInteraction(); VerifyScopeInteraction(); VerifyKnowledgeInteraction(); VerifyComponentInteraction(); VerifyQQLoginInteraction(); VerifyConnectionInteraction(); VerifyRemoteFilesInteraction();
                         Event("{\"type\":\"state\",\"bridge\":false,\"napcat\":false,\"busy\":false,\"phase\":\"recovering\"}");if(Find<TextBlock>("ConnectionBadge").Text!="正在恢复"||!Find<Button>("Stop").IsEnabled)throw new Exception("恢复等待期间不能取消");
                         Event("{\"type\":\"state\",\"bridge\":false,\"napcat\":true,\"busy\":false,\"phase\":\"needs_attention\"}");if(Find<TextBlock>("ConnectionBadge").Text!="需要处理"||!Find<Button>("Start").IsEnabled)throw new Exception("待处理状态不能重新启动");
                         Event("{\"type\":\"state\",\"bridge\":false,\"napcat\":false,\"busy\":false,\"phase\":\"stopped\"}");
@@ -541,6 +560,9 @@ partial class App
                 }
             }
         };
-        timer.Start(); Send("load"); Send("diagnose"); application.Run(window); timer.Stop();
+        timer.Start();
+        if (host != null) { if (connectionMode != "remote") { Send("load"); Send("diagnose"); } }
+        else Feedback("服务器连接尚未就绪，请打开「服务器连接」完成配置并连接。");
+        application.Run(window); timer.Stop();
     }
 }

@@ -154,7 +154,7 @@ process.once('message', async ({ action, data }) => {
     process.send({ ok: true, result }, () => process.disconnect());
   } catch (e) {
     const error = e.issues ? e.issues.map(issue => `${issue.path.join('.')}: ${issue.message}`).join('；')
-      : e.code === 'BOT_RESOURCE_LOCKED' || e.code?.startsWith('DATABASE_') || /工作区已变更|协议无效|配置格式无效|^Windows 凭据|^管理操作失败：|^空间连接检查失败：/.test(e.message) ? e.message : '配置操作失败，请检查文件格式与访问权限；原有文件保留。';
+      : e.code === 'BOT_RESOURCE_LOCKED' || e.code?.startsWith('DATABASE_') || /工作区已变更|协议无效|配置格式无效|^Windows 凭据|^管理操作失败：|^空间连接检查失败：|^程序缺少组件清单|^组件清单不受支持|^组件记录损坏/.test(e.message) ? e.message : '配置操作失败，请检查文件格式与访问权限；原有文件保留。';
     process.send({ ok: false, error }, () => process.disconnect());
   } finally {
     configurationLease?.release();

@@ -1,10 +1,10 @@
 # QQ-BOT · 小鲸工作台
 
-基于 DSH（ACP）与 NapCat（OneBot 11）的 QQ 机器人，提供 Windows 原生 WPF 控制台，支持私聊、群聊、人设、长期记忆和受权限与额度约束的 QQ 操作。
+基于 DSH（ACP）与 NapCat（OneBot 11）的 QQ 机器人，提供 Windows 原生 WPF 控制台，支持私聊、群聊、人设、长期记忆和受权限与额度约束的 QQ 操作。机器人既可本机直连，也可部署在 Linux 服务器由 `whaled` 守护，Windows 控制台通过 SSH 远程管理。
 
-当前为 **0.2.0 开发版本**，主要交付平台是 Windows 10/11 x64。此前候选已完成真实 QQ 登录和私聊回复，最新源码在 `454ac4f` 后复跑全量隔离回归 **528 项通过**（本轮未启用真实 FFmpeg）；停机加密备份与原实例恢复已接入桌面，脱敏诊断、停机清理和用户级安装/升级/修复/回退已实现；正式签名材料、干净系统及长时验收仍待补齐。本机故障矩阵与性能执行方案见[故障矩阵](docs/local-failure-matrix.md)和[性能方案](docs/performance-execution-plan.md)。实施范围见[精简改造方案](docs/product-readiness-plan.md)，实际结果见[实施进展](docs/implementation-status.md)。
+当前为 **0.2.0 开发版本**，交付平台为 Windows 10/11 x64，并新增 Linux 服务器部署与 Windows 远程控制台。此前候选已完成真实 QQ 登录和私聊回复；本分支全量隔离回归 **534 项（532 通过、2 项 Linux 专用跳过）**（本轮未启用真实 FFmpeg）；停机加密备份与原实例恢复已接入桌面，脱敏诊断、停机清理和用户级安装/升级/修复/回退已实现；Linux 侧在 Ubuntu 24.04 虚拟机完成守护进程、SSH 远程控制、签名安装升级回退与备份迁移验收。正式签名材料、干净系统、72 小时负载及新用户试用仍待补齐。本机故障矩阵与性能执行方案见[故障矩阵](docs/local-failure-matrix.md)和[性能方案](docs/performance-execution-plan.md)。实施范围见[精简改造方案](docs/product-readiness-plan.md)，实际结果见[实施进展](docs/implementation-status.md)。
 
-最新 `rc8` 内部候选来源为 `ec33430`，包含登录恢复、停机备份与清理、脱敏诊断及安装升级工具；包内 Node 的 48 项专项通过，ZIP 全文件摘要与独立测试公钥校验通过，原生安装工具已完成签名校验、首次安装、升级、回退、损坏程序修复和保留数据卸载六步演练。临时测试签名不代表正式发布身份，本包尚未进行真实 QQ 收发或长时验收。候选摘要见[验证记录](docs/validation/release-candidate-rc8-2026-10-30.json)。Linux 部署与本地远程控制台作为后续独立分支推进。
+最新 `rc8` 内部候选来源为 `ec33430`，包含登录恢复、停机备份与清理、脱敏诊断及安装升级工具；包内 Node 的 48 项专项通过，ZIP 全文件摘要与独立测试公钥校验通过，原生安装工具已完成签名校验、首次安装、升级、回退、损坏程序修复和保留数据卸载六步演练。临时测试签名不代表正式发布身份，本包尚未进行真实 QQ 收发或长时验收。候选摘要见[验证记录](docs/validation/release-candidate-rc8-2026-10-30.json)。Linux 服务器部署与本地远程控制台已完成内部验证，见[云部署与远程控制台方案](docs/linux-remote-console-plan.md)。
 
 ```text
 QQ ↔ NapCat / OneBot 11 ↔ bridge ↔ DSH（ACP）
@@ -77,6 +77,16 @@ npm run desktop
 
 本机 NapCat 的登录 Worker 支持重建，受管模式的每代进程都先安装独立账号目录适配。登录失效后仍可能需要按官方流程重新扫码；更新启动脚本须点击「重新启动」，仅「重连模型」不会更新 QQ 进程。详见[QQ 登录与隔离](docs/qq-login.md)。
 
+### Linux 服务器与远程控制台
+
+机器人可以运行在 Linux x64 服务器，由 systemd 托管的 `whaled` 常驻进程管理；Windows 控制台留在本机，通过 SSH 连接远程实例。
+
+- 服务器侧：`whaled` 持有单实例锁与子进程，负责启停、维护、备份和开机恢复；关闭控制台、退出 SSH 或网络中断都不会停止机器人。管理接口只走数据目录下的 unix socket，公网只需开放 SSH。
+- 控制台侧：在「连接与运行 → 服务器连接」新建配置，填写主机、SSH 端口、用户名、私钥、服务器上的 Node、程序目录和数据目录。首次连接会显示主机密钥 SHA256 指纹并要求确认，之后变更必须再次确认。
+- 远程文件：备份、恢复、迁移、诊断、组件导入和日志下载通过服务器暂存目录与 scp 传输，操作完成后清理暂存文件；记忆和工作区文件在页面内直接读写服务器内容。
+- 安装与升级：在服务器上用签名的 Linux 发行目录执行 `whaled-install.mjs` 和 `whaled-upgrade.mjs`；升级只替换程序，不改写数据目录，检查或启动失败会自动切回上一版。步骤见[安装与升级说明](docs/install-and-upgrade.md#linux-服务器部署分支)。
+- 已知边界：DPAPI 凭据和 QQ 登录态不能跨平台迁移，服务器上需重新录入模型密钥并扫码；远程模式隐藏 Windows 专属的安装、注册表和开始菜单入口。
+
 ### 更新与运行文件
 
 程序与数据目录的启动契约已经接入，源码继续使用原目录；内部发行目录默认使用用户目录，也支持显式便携/自定义目录。安装工具及受约束的升级回退流程已实现，操作见[安装与升级说明](docs/install-and-upgrade.md)，目录规则见[运行布局说明](docs/runtime-layout.md)。
@@ -133,10 +143,12 @@ templates/              可提交的默认人设
 tests/                  单元与集成测试、隔离夹具、原生窗口测试
 docs/                   使用指南与开发说明
 components/             固定组件来源、依赖锁及许可
+packaging/              Linux systemd 服务单元与发行打包输入
 server/、web/            私有浏览器管理的源码验证入口
 bot-workspace/          本机人设、记忆与输出（Git 忽略）
 data/                   本机会话、聊天、媒体与日志（Git 忽略）
 napcat/                 本机协议运行环境与账号配置（Git 忽略）
+remote/                 远程控制台的本地连接配置与主机指纹（Git 忽略）
 dist/                   自动生成的 JavaScript 与调试映射（Git 忽略）
 ```
 
@@ -158,6 +170,10 @@ dist/                   自动生成的 JavaScript 与调试映射（Git 忽略�
 | `npm run benchmark:store` | 使用合成消息测量 JSON 存储开销 |
 | `npm run components` | 固定组件的准备与核对入口，具体参数见组件说明 |
 | `npm run package:dir -- --output release/候选目录 --zip` | 从已提交的发行输入生成完整目录、ZIP 与摘要 |
+| `npm run whaled` | 在 Linux 服务器启动受管守护进程（Windows 下拒绝运行） |
+| `npm run whaled:install -- --program 程序目录 --data 数据目录` | 安装签名 Linux 发行目录并注册 systemd 服务 |
+| `npm run remote-host` | SSH 调用的远程主机桥接入口，由控制台自动启动，一般无需手动运行 |
+| `npm run package:linux -- --output release/linux目录 --zip` | 生成 Linux x64 发行目录与 ZIP |
 | `npm run web:build` | 编译可选私有网页控制台，不是 Windows 桌面启动前置 |
 
 假 OneBot 联调、原生窗口测试和维护方法见[开发说明](docs/development.md)。单独运行 `npm run mcp` 可发现工具，实际受管操作需桥接自动传入的连接凭据。
@@ -193,10 +209,10 @@ node scripts/storage.mjs cleanup-media --data-dir 'D:\机器人数据' --dry-run
 
 - 「保存机器人设置」保存行为配置；「保存连接与媒体」保存该页内容，两者不会携带另一页未保存的草稿。
 - `bot.config.json` 的显式值优先于环境默认值，保存后热更新；连接地址与凭据修改通常需要重启。
-- 工作台关闭窗口后隐藏到托盘；从托盘选择「退出并停止机器人」才停止受管进程。外部启动的 OneBot 不会被工作台结束。
+- 工作台关闭窗口后隐藏到托盘；从托盘选择「退出并停止机器人」才停止受管进程。外部启动的 OneBot 不会被工作台结束。远程模式下该操作只停止服务器上的机器人并退出控制台，`whaled` 守护进程保持运行，可再次直接连接；只想关闭控制台则用「断开服务器连接」。
 - 同一数据资源只允许一个桥接写入，重复启动会明确拒绝。首次升级前先停止所有旧桥接；运行时不要删除 `*.qqbot-lock.sqlite` 互斥侧文件。超时、损坏数据、权限或服务不可用时，先看工作日志和启动诊断。
 - 自动测试使用隔离数据与模拟服务；不能据此判断真实 QQ 接口、付费服务可达性或模型理解质量。
 
 项目代码采用 [MIT 许可证](LICENSE)。第三方组件与依赖继续遵守各自许可，NapCat 的个人非商业使用与组件获取方式见[组件说明](docs/components-and-packaging.md)。
 
-服务器运行与浏览器管理见[云端控制台方案](docs/cloud-console-plan.md)，私有只读预览见[当前使用说明](docs/cloud-console.md)。Linux 发行及完整网页操作仍在开发，当前内部发行包只用于 Windows 验证。
+服务器运行与浏览器管理见[云端控制台方案](docs/cloud-console-plan.md)，私有只读预览见[当前使用说明](docs/cloud-console.md)。Linux 发行与远程控制台已完成内部验证，正式签名材料、干净系统、72 小时负载及新用户试用仍待补齐。

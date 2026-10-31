@@ -29,6 +29,54 @@
 
 无法确认、已经被修改或仍被占用的历史文件保留在程序目录的 `.retired-...` 下，窗口显示位置，不通过递归强删冒险移除用户资料。少量卸载归属记录和恢复入口保留，供重试或再次安装识别。删除用户数据须另行明确选择，不属于卸载默认行为。
 
+## Linux 服务器（部署分支）
+
+Linux 实例由 systemd 托管的 `whaled` 常驻进程运行，桌面控制台通过 SSH 连接；安装、升级与回退在服务器端执行，不修改数据目录。
+
+1. 准备完整、已解压且已签名的发行包。首次安装需要 `--trust` 指向发布公钥清单，之后使用安装目录中的 `trust.json`；新发行必须保留当前公钥，否则拒绝升级以保证失败回退。
+2. 先写入 systemd 单元。程序路径指向 `current` 链接，升级切换后重启即生效：
+
+   ```bash
+   sudo node scripts/whaled-install.mjs \
+     --data-dir /var/lib/whaleworkbench \
+     --program /opt/whaleworkbench/current \
+     --node /opt/whaleworkbench/current/runtime/bin/node \
+     --service whaled.service --no-start
+   ```
+
+   `--service` 可指定其它单元名，仅用于隔离验收；正式实例保持 `whaled.service`。
+3. 安装或升级：
+
+   ```bash
+   sudo node scripts/whaled-upgrade.mjs \
+     --package /path/to/release \
+     --install-root /opt/whaleworkbench \
+     --data-dir /var/lib/whaleworkbench \
+     --trust /path/to/components/release-trust.json
+   ```
+
+   工具校验签名与全部文件后复制到 `releases/<uuid>`，执行只读安装检查，原子切换 `current` 并重启服务；检查或启动失败会自动切回上一版并恢复服务。`--dry-run` 只校验不切换，`--rollback` 回到上一版，`--recover` 处理上次中断的升级。程序目录最多保留 20 个版本。
+4. 升级只更换程序文件，不改写数据库、配置、凭据或备份；需要处理数据时仍使用桌面控制台的备份与恢复入口。回退只切回程序版本，不用旧快照覆盖当前数据。
+5. 进程强退或切换中断时保留安装目录中的 `upgrade-journal.json`，使用相同安装目录、数据目录和服务名执行 `--recover`，不要手工删除记录。正式发布仍使用正式签名身份；内部验证密钥只允许 `internal-validation` 通道。
+
+### 构建 Linux 发行目录
+
+在 Linux x64 的完整 Git 工作区中执行，需先运行 `npm run build` 生成 `dist/`。脚本固定官方 Node tar.gz，复制编译产物、Linux 运行脚本、systemd 模板、公开模板与组件清单，用包内 npm 按锁文件安装生产依赖，核对本地引用与启动路径，最后按签名清单签发：
+
+```bash
+node scripts/package-linux.mjs \
+  --output release/WhaleWorkbench-0.2.0-linux-x64 \
+  --signing-key /secure/release-manifest.pem \
+  --key-id release-2026 \
+  --trust-file components/release-trust.json
+```
+
+- 首次构建会下载并缓存 Node 官方包到 `release/cache/node-v<版本>-linux-x64.tar.gz`；可用 `--node-archive` 指定已验证的本地副本。
+- `--zip` 额外生成 `tar.gz` 与 SHA-256 摘要；签名发行必须同时提供 `--signing-key`、`--key-id`、`--trust-file`。
+- `stable` 通道要求干净工作区、已提交的信任清单和齐全的 G01–G06 验收记录；内部验证使用默认 `internal-validation` 通道，未提交改动需显式加 `--allow-dirty`。
+- 输出必须是本项目 `release/` 下的直接子目录，已存在的输出、摘要或版本目录不会被覆盖。
+- 产物中的 `release-manifest.json` 记录版本、来源提交、固定 Node 版本与组件清单摘要，可交给 `whaled-upgrade.mjs` 做安装、升级与回退。
+
 ## 签名与构建
 
 `components/release-trust.json` 保存发布公钥；源码默认不附带正式发布身份。发行清单为 `release-integrity.json` 与独立签名文件，RSA 至少 3072 位、SHA-256；原生安装器与稳定启动器嵌入相同公钥，在执行 Node 之前核对全部文件。Node 与 .NET 的相应签名接口见 [Node crypto](https://nodejs.org/api/crypto.html#cryptosignalgorithm-data-key-callback)和 [Microsoft RSA 验证接口](https://learn.microsoft.com/en-us/dotnet/api/system.security.cryptography.rsacryptoserviceprovider.verifydata)。
@@ -43,6 +91,6 @@ node scripts/package.mjs --output release/WhaleWorkbench-preview --zip --signing
 
 正式通道还要求代码签名证书、HTTPS RFC 3161 时间戳和绑定当前代码输入树的实际验收记录。原生文件通过 Windows SDK 的 SignTool 签署并复核，固定 Node 官方二进制保持原样；方式依据 [Microsoft SignTool](https://learn.microsoft.com/en-us/windows/win32/seccrypto/signtool)。安装工具声明 `asInvoker`，不要求提升，见 [Windows 应用清单](https://learn.microsoft.com/en-us/windows/win32/sbscs/application-manifests)。
 
-`.github/workflows/release-internal.yml` 构建内部签名候选并执行原生检查；`release-stable.yml` 检查 G01–G06、正式清单密钥、证书和验收证据后才构建稳定通道，上传产物不自动公开发布。工作流 action 固定提交，运行库、npm 清单、组件摘要与许可沿用锁定来源。工作流存在不计为已经在远端通过，本轮未推送或触发远端构建。
+`.github/workflows/release-internal.yml` 构建内部签名候选并执行原生检查；`release-stable.yml` 检查 G01–G06、正式清单密钥、证书和验收证据后才构建稳定通道，上传产物不自动公开发布。工作流 action 固定提交，运行库、npm 清单、组件摘要与许可沿用锁定来源。工作流是否实际执行以 GitHub Actions 运行记录为准；发布工作流均为手动触发，不会因推送自动构建。
 
 正式工作流所需环境 secrets：`RELEASE_MANIFEST_PRIVATE_KEY_PEM`、`RELEASE_MANIFEST_KEY_ID`、`RELEASE_CODESIGN_PFX_BASE64`、`RELEASE_CODESIGN_PASSWORD` 和 `RELEASE_TIMESTAMP_SERVER`。私钥与 PFX 仅进入作业临时文件，最终删除，不放进源码、ZIP 或验证附件。

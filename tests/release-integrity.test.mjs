@@ -6,7 +6,7 @@ import {verifyReleasePackage,releaseFileName} from '../scripts/release-integrity
 import {releaseFixture} from './helpers/releases.mjs';
 
 test('发行签名绑定来源、通道和所有文件，验证后不执行新包代码',()=>releaseFixture(async({make,trustFile})=>{
-  const packageRoot=await make('中文 发行'),result=await verifyReleasePackage({packageRoot,trustFile});assert.equal(result.keyId,'fixture-test');assert.equal(result.manifest.version,'0.2.0');assert.ok(result.manifest.files.some(file=>file.path==='runtime/node.exe'));
+  const packageRoot=await make('中文 发行'),result=await verifyReleasePackage({packageRoot,trustFile});assert.equal(result.keyId,'fixture-test');assert.equal(result.manifest.version,'0.2.0');assert.ok(result.manifest.files.some(file=>file.path===(process.platform==='win32'?'runtime/node.exe':'runtime/bin/node')));
   await writeFile(join(packageRoot,'scripts/install-worker.mjs'),'tampered-content');await assert.rejects(verifyReleasePackage({packageRoot,trustFile}),/摘要不匹配/);
 }));
 test('缺失签名、未知发布者、通道越界及篡改清单均拒绝',()=>releaseFixture(async({make,trustFile})=>{

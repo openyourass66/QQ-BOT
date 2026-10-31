@@ -31,6 +31,7 @@ test('项目模型配置：独立凭据引用、不在覆盖文件中写入密�
     assert.equal(patch.find(p => p.id === 'acp').config.model, 'custom-flash');
     assert.equal(patch.find(p => p.id === 'web-search-deepseek').config.apiKeyEnv, 'QQ_BOT_DEEPSEEK_API_KEY');
     assert.equal(patch.find(p => p.id === 'web-deepseek-api').config.apiKeyEnv, 'QQ_BOT_DEEPSEEK_API_KEY');
+    assert.deepEqual(patch.find(p => p.id === 'web').config, { searchProvider: 'deepseek-official', fetchProvider: 'deepseek-fetch-api' });
     const account = chatModelPatches(readChatModelConfig({ BOT_CHAT_MODE: 'account' }));
     assert.equal(account.find(p => p.id === 'acp').config.provider, 'deepseek-account');
     assert.ok(!account.some(p => p.id === 'llm-deepseek'));

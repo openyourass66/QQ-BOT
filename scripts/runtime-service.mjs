@@ -104,9 +104,9 @@ async function launch(name, script, overrides = {}, recovering=false) {
   env.BOT_DATA_DIR = dataRoot;
   let execPath = process.execPath;
   if (name === 'napcat') {
-    const { installedComponent } = await import('../scripts/component-paths.mjs');
+    const { installedComponent, napcatShellDirectory } = await import('../scripts/component-paths.mjs');
     const managed = await installedComponent('napcat',dataRoot,root);
-    if (managed && await sameRuntimePath(resolve(dataRoot,env.BOT_NAPCAT_DIR || 'napcat/shell'),join(managed.directory,'napcat'))) execPath = join(managed.directory,'node.exe');
+    if (managed && await sameRuntimePath(resolve(dataRoot,env.BOT_NAPCAT_DIR || 'napcat/shell'),napcatShellDirectory(managed))) execPath = process.platform === 'win32' ? join(managed.directory,'node.exe') : execPath;
   }
   const child = await processGuard.fork(script,{cwd:dataRoot,env,execPath});
   children.set(name, child);
@@ -180,7 +180,7 @@ async function command({ action, data }) {
   if(action==='maintenance'){
     if(data?.operation==='status'){emit({type:'maintenance',operation:'status',recoveryPending:maintenancePending(dataRoot)});return;}
     if(children.size||componentWorker||configWorkers.size||desired.size)throw new Error('请先停止机器人和受管 QQ，并等待其它操作结束，再进行备份或恢复。');
-    if(!['backup','verify','restore','recover','diagnostic','cleanup-preview','cleanup'].includes(data?.operation))throw new Error('未知维护操作。');
+    if(!['backup','verify','restore','migrate','recover','diagnostic','cleanup-preview','cleanup'].includes(data?.operation))throw new Error('未知维护操作。');
     busy=true;state();
     try{
       if(maintenanceCancelRequested)throw new Error('维护已取消，未开始操作数据。');

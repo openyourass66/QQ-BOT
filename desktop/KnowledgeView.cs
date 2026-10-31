@@ -127,9 +127,11 @@ partial class App
         knowledgeLoading=true;Find<ListView>("KnowledgeList").ItemsSource=rows;
         var selected=rows.FirstOrDefault(row=>row.Key==knowledgeSelections[KnowledgePage])??rows.FirstOrDefault();Find<ListView>("KnowledgeList").SelectedItem=selected;knowledgeLoading=false;
         Find<TextBlock>("KnowledgeCount").Text=knowledgeCategories[KnowledgePage]+" · "+rows.Count+" 项";
-        Find<TextBlock>("KnowledgeStatus").Text=KnowledgePage==0?"切换条目保留草稿 · 会话可选择已保存的人设":KnowledgePage==1?"名字、QQ、群号或内容 · 回车搜索全部记忆":KnowledgePage==3?"仅在来源群使用 · 确认后生效 · 支持纠正与停用":"支持子目录 · 回车搜索文件内容 · 切换条目保留草稿";
+        string status=KnowledgePage==0?"切换条目保留草稿 · 会话可选择已保存的人设":KnowledgePage==1?"名字、QQ、群号或内容 · 回车搜索全部记忆":KnowledgePage==3?"仅在来源群使用 · 确认后生效 · 支持纠正与停用":"支持子目录 · 回车搜索文件内容 · 切换条目保留草稿";
+        if(KnowledgePage==2&&connectionMode=="remote")status="远程模式：在页面内浏览和编辑服务器记忆文件 · 支持子目录 · 回车搜索文件内容";
+        Find<TextBlock>("KnowledgeStatus").Text=status;
         Find<Button>("KnowledgeNew").Visibility=KnowledgePage==1||KnowledgePage==3?Visibility.Collapsed:Visibility.Visible;Find<Button>("KnowledgeNew").Content=KnowledgePage==0?"新建人设":"新建记忆文件";
-        Find<Button>("Memory").Visibility=KnowledgePage==2?Visibility.Visible:Visibility.Collapsed;
+        Find<Button>("Memory").Visibility=connectionMode!="remote"&&KnowledgePage==2?Visibility.Visible:Visibility.Collapsed;
         Find<TextBlock>("KnowledgeEmpty").Visibility=rows.Count==0?Visibility.Visible:Visibility.Collapsed;
         Find<TextBlock>("KnowledgeEmpty").Text=query.Length>0?"没有匹配的记录\n可按回车搜索更多内容":KnowledgePage==3?"还没有群内用语\n开启指定群的用语学习后，候选会出现在这里":KnowledgePage==1?"还没有群友记忆\n开启长期记忆并与小鲸互动后会出现在这里":"还没有记忆文件\n点击“新建记忆文件”开始记录";
         ShowKnowledge(selected);

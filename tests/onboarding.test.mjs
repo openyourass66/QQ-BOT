@@ -10,6 +10,7 @@ import { fork, spawn } from 'node:child_process';
 import { createInterface } from 'node:readline';
 import { WebSocketServer } from 'ws';
 import { detectEnvironment, checkSetup } from '../desktop/onboarding.mjs';
+import { specHash } from '../scripts/component-paths.mjs';
 import { validateRuntimeEnv } from '../desktop/runtime-fields.mjs';
 
 test('环境检测仅返回已存在的程序路径，支持 PATH 与运行中的 QQ，不执行程序或泄露凭据', async () => {
@@ -26,6 +27,24 @@ test('环境检测仅返回已存在的程序路径，支持 PATH 与运行中�
     assert.equal((await detectEnvironment(root, { BOT_DSH_BIN: 'fake.cmd' }, { runningPaths: [], platform: 'test' })).suggestions.length, 0);
     assert.throws(() => validateRuntimeEnv('BOT_ONEBOT_MODE=unknown'), /接入方式无效/);
   } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test('环境检测从程序目录读取组件清单，独立数据目录仍能识别受管 dsh', async () => {
+  const program = await mkdtemp(join(tmpdir(), 'qq-detect-program-'));
+  const data = await mkdtemp(join(tmpdir(), 'qq-detect-data-'));
+  try {
+    const spec = { version: '1.2.3', required: ['dsh'] };
+    await mkdir(join(program, 'components'), { recursive: true });
+    await writeFile(join(program, 'components/catalog.json'), JSON.stringify({ formatVersion: 1, platform: 'test', components: { dsh: spec, napcat: {}, node: {} } }));
+    const token = spec.version + '-abcdef123456';
+    const installed = join(data, 'components/dsh', token);
+    await mkdir(installed, { recursive: true });
+    await writeFile(join(data, 'components/active.json'), JSON.stringify({ dsh: token }));
+    await writeFile(join(installed, 'installation.json'), JSON.stringify({ specHash: specHash(spec) }));
+    await writeFile(join(installed, 'dsh'), 'fixture');
+    const result = await detectEnvironment(data, { PATH: '' }, { runningPaths: [], platform: 'test', programRoot: program });
+    assert.deepEqual(result.suggestions, [{ key: 'BOT_DSH_BIN', value: join(installed, 'dsh') }]);
+  } finally { await rm(program, { recursive: true, force: true }); await rm(data, { recursive: true, force: true }); }
 });
 
 test('快速检查使用未保存输入，外部服务跳过本机依赖，鉴权错误明确定位，检查不保存配置', async () => {

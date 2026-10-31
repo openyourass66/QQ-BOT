@@ -125,7 +125,7 @@ export class GroupContextStore {
   }
 }
 
-export interface GroupTrigger { ok: boolean; body: string; direct: boolean; reason: string }
+export interface GroupTrigger { ok: boolean; body: string; direct: boolean; reason: string; directedElsewhere?: boolean }
 
 export function groupTrigger(event: MessageEvent, settings: BotSettings, memory: GroupContextStore, aliases: string[] = []): GroupTrigger {
   const account = event.self_id;
@@ -141,11 +141,11 @@ export function groupTrigger(event: MessageEvent, settings: BotSettings, memory:
     if (alias.trim().length >= 2 && content.toLocaleLowerCase().startsWith(alias.trim().toLocaleLowerCase())) return result('name');
   }
   if (new RegExp(`@${account}(?!\\d)`).test(content)) return result('text-mention', content.replace(new RegExp(`@${account}(?!\\d)`, 'g'), '').trim());
-  // 引用第三方或 @ 其他人时，不把对方的对话当作对机器人的追问。
-  const directedElsewhere = quoted || event.message.some((segment) => segment.type === 'at');
+  // 引用第三方或 @ 其他人时，对方是在和别人说话：既不算追问，也不算普通旁聊。
+  const directedElsewhere = Boolean(quoted) || event.message.some((segment) => segment.type === 'at');
   if (!directedElsewhere && memory.canFollowUp(account, event.group_id!, event.user_id, settings.chat.group.followUpMs) &&
     /[?？]|^(那|所以|然后|还有|但是|不过|为啥|为什么|怎么|如何|能不能|可以|比如|举个|继续|再说|什么意思|没懂|不对|不是|你|这个|那个|它|刚才)/.test(content)) return result('follow-up');
-  return { ok: !settings.chat.group.requireMention, body: content, direct: false, reason: 'ambient' };
+  return { ok: !settings.chat.group.requireMention && !directedElsewhere, body: content, direct: false, reason: directedElsewhere ? 'addressed-elsewhere' : 'ambient', directedElsewhere };
 }
 
 export function formatGroupEntry(entry: Pick<Entry, 'name' | 'userId' | 'text' | 'role'>): string {

@@ -1,7 +1,8 @@
+import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { createReadStream, createWriteStream } from 'node:fs';
-import { mkdir, open, rm } from 'node:fs/promises';
-import { dirname, isAbsolute, relative, resolve } from 'node:path';
+import { chmod, lstat, mkdir, open, readlink, readdir, realpath, rename, rm } from 'node:fs/promises';
+import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { Transform, Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 
@@ -11,6 +12,78 @@ function allowedUrl(input) {
   if (url.protocol !== 'https:' || url.username || url.password || !hosts.has(url.hostname) || url.port && url.port !== '443') throw new Error('组件下载地址不在官方来源清单中');
   return url;
 }
+/** 运行系统打包工具；输出用于校验条目或报告失败原因。 */
+function runTool(command, args, { cwd, signal } = {}) {
+  return new Promise((done, reject) => {
+    const child = spawn(command, args, { cwd, signal, stdio: ['ignore', 'pipe', 'pipe'] });
+    let out = '', errors = '', bytes = 0, failure;
+    child.stdout.on('data', chunk => {
+      bytes += chunk.length;
+      if (bytes > 67108864) { failure = new Error('组件解压输出超过限制'); child.kill(); return; }
+      out += chunk;
+    });
+    child.stderr.on('data', chunk => { errors = (errors + chunk.toString()).slice(-16000); });
+    child.once('error', error => { failure = error; if (!child.pid) reject(error); });
+    child.once('close', code => failure ? reject(failure) : code === 0 ? done(out) : reject(new Error(`组件解压失败（退出码 ${code}）：${errors.trim().slice(0, 300)}`)));
+  });
+}
+
+function posixName(name) {
+  const clean = name.replace(/\/+$/, '');
+  if (!clean || clean.startsWith('/') || clean.includes('\\') || clean.includes('\0')) throw new Error('组件包包含不安全的文件路径');
+  if (clean.split('/').some(part => !part || part === '.' || part === '..')) throw new Error('组件包包含不安全的文件路径');
+  return clean;
+}
+
+/** 拒绝解压结果中指向目录外部的符号链接。 */
+export async function assertContainedLinks(root, { maxEntries = 60000 } = {}) {
+  const base = await realpath(root);
+  const pending = [base];
+  let count = 0;
+  while (pending.length) {
+    for (const entry of await readdir(pending.pop(), { withFileTypes: true })) {
+      if (++count > maxEntries) throw new Error('组件文件数量超过限制');
+      const path = join(entry.parentPath ?? entry.path, entry.name);
+      const info = await lstat(path);
+      if (info.isSymbolicLink()) {
+        const rel = relative(base, resolve(dirname(path), await readlink(path)));
+        if (!rel || rel.startsWith('..') || isAbsolute(rel)) throw new Error('组件包包含指向外部的链接');
+      } else if (info.isDirectory()) pending.push(path);
+    }
+  }
+}
+
+/** 解压官方 tar.gz 组件包；条目名称先整体校验，再按清单前缀剥离。 */
+export async function extractTarGz(archive, destination, { prefix = '', signal, maxFiles = 30000 } = {}) {
+  const entries = (await runTool('tar', ['-tzf', archive], { signal })).split('\n').map(line => line.trim()).filter(Boolean);
+  if (entries.length > maxFiles) throw new Error('组件包文件数量超过限制');
+  const cleanPrefix = prefix.replace(/\/+$/, '');
+  const seen = new Set();
+  for (const entry of entries) {
+    const name = posixName(entry);
+    if (cleanPrefix && name !== cleanPrefix && !name.startsWith(`${cleanPrefix}/`)) throw new Error('组件包目录结构与清单不匹配');
+    const rel = cleanPrefix ? name.slice(cleanPrefix.length).replace(/^\//, '') : name;
+    if (rel && seen.has(rel)) throw new Error('组件包包含重复文件');
+    if (rel) seen.add(rel);
+  }
+  await mkdir(destination);
+  const strip = cleanPrefix ? `--strip-components=${cleanPrefix.split('/').length}` : undefined;
+  await runTool('tar', ['-xzf', archive, '-C', destination, '--no-same-owner', '--no-same-permissions', ...(strip ? [strip] : [])], { signal });
+  await assertContainedLinks(destination);
+}
+
+/** 通过 AppImage 自带运行时解包，无需 FUSE；解包后仍要求可执行入口。 */
+export async function extractAppImage(archive, workDir, destination, { signal } = {}) {
+  await chmod(archive, 0o700);
+  await runTool(archive, ['--appimage-extract'], { cwd: workDir, signal });
+  const root = join(workDir, 'squashfs-root');
+  const info = await lstat(root).catch(() => undefined);
+  if (!info?.isDirectory() || info.isSymbolicLink()) throw new Error('组件包解压结构不受支持');
+  await assertContainedLinks(root);
+  for (const name of ['AppRun', 'qq']) await chmod(join(root, name), 0o755);
+  await rename(root, destination);
+}
+
 export async function sha256(file) {
   const hash = createHash('sha256');
   for await (const chunk of createReadStream(file)) hash.update(chunk);

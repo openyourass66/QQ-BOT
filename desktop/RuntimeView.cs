@@ -56,6 +56,7 @@ partial class App
     static Dictionary<FrameworkElement,string[]> runtimeCardKeys = new Dictionary<FrameworkElement,string[]>();
     static List<UIElement> runtimeCardOrder = new List<UIElement>();
     static List<TextBlock> runtimeSaveBadges = new List<TextBlock>();
+    static Dictionary<string,Button> runtimeBrowses = new Dictionary<string,Button>();
     static Dictionary<string,Control> mediaInputs = new Dictionary<string,Control>();
     static Dictionary<string,TextBlock> mediaErrors = new Dictionary<string,TextBlock>();
     static TextBlock mediaSummary;
@@ -108,7 +109,7 @@ partial class App
         runtimeCards[card]=category;return card;
     }
     static void BuildRuntimeFields(object value) {
-        var panel=Find<StackPanel>("RuntimeFields");panel.Children.Clear();runtimeInputs.Clear();runtimeErrors.Clear();runtimeCards.Clear();runtimeRows.Clear();runtimeCardKeys.Clear();runtimeCardOrder.Clear();runtimeSaveBadges.Clear();mediaInputs.Clear();mediaErrors.Clear();
+        var panel=Find<StackPanel>("RuntimeFields");panel.Children.Clear();runtimeInputs.Clear();runtimeErrors.Clear();runtimeCards.Clear();runtimeRows.Clear();runtimeCardKeys.Clear();runtimeCardOrder.Clear();runtimeSaveBadges.Clear();runtimeBrowses.Clear();mediaInputs.Clear();mediaErrors.Clear();
         var all=((IEnumerable)value).Cast<Dictionary<string,object>>().ToList();
         savedRuntimeValues=all.ToDictionary(field=>(string)field["key"],field=>(string)field["value"]);
         foreach(var group in all.Where(f=>!f.ContainsKey("initialDefault")||!(bool)f["initialDefault"]).GroupBy(f=>(string)f["group"]).OrderBy(g=>RuntimeCategory(g.Key))) {
@@ -142,7 +143,7 @@ partial class App
                     var browse=new Button {Content="浏览…",Margin=new Thickness(8,0,0,0),Padding=new Thickness(10,8,10,8)};
                     System.Windows.Automation.AutomationProperties.SetName(browse,"选择"+label);
                     browse.Click+=(s,e)=>{if(kind=="folder"){using(var dialog=new Forms.FolderBrowserDialog()){if(dialog.ShowDialog()==Forms.DialogResult.OK)((TextBox)input).Text=dialog.SelectedPath;}}else{var dialog=new Microsoft.Win32.OpenFileDialog {Filter="启动文件|*.cmd;*.exe;*.bat|所有文件|*.*"};if(dialog.ShowDialog(window)==true)((TextBox)input).Text=dialog.FileName;}};
-                    DockPanel.SetDock(browse,Dock.Right);holder.Children.Add(browse);
+                    DockPanel.SetDock(browse,Dock.Right);holder.Children.Add(browse);runtimeBrowses[key]=browse;
                 }
                 holder.Children.Add(input);editor.Children.Add(holder);
                 var error=new TextBlock {Foreground=Ink("Danger"),FontSize=10,Margin=new Thickness(0,5,0,0),TextWrapping=TextWrapping.Wrap,Visibility=Visibility.Collapsed};runtimeErrors[key]=error;editor.Children.Add(error);
@@ -155,7 +156,7 @@ partial class App
         }
         var shortcuts=new StackPanel();shortcuts.Children.Add(new TextBlock{Text="管理员 QQ、触发前缀、回复节奏和命令确认统一在机器人设置编辑。高级环境文件中的同名项仅补齐缺失默认值。",FontSize=11,TextWrapping=TextWrapping.Wrap,Foreground=Ink("Muted"),LineHeight=18});
         var openSettings=new Button{Content="前往机器人设置",Style=(Style)window.FindResource("Quiet"),HorizontalAlignment=HorizontalAlignment.Left,Margin=new Thickness(0,10,0,10)};openSettings.Click+=(s,e)=>NavigateSetting("approval.adminQq");shortcuts.Children.Add(openSettings);panel.Children.Add(RuntimeCard("行为设置入口","",shortcuts,5));
-        BuildQzoneConnection(panel);BuildMediaEditors(panel);BuildMaintenanceCard(panel);runtimeCardOrder=panel.Children.Cast<UIElement>().ToList();RefreshMediaEditors();RefreshChatModelEditor();FilterRuntime();
+        BuildQzoneConnection(panel);BuildMediaEditors(panel);BuildMaintenanceCard(panel);runtimeCardOrder=panel.Children.Cast<UIElement>().ToList();RefreshMediaEditors();RefreshChatModelEditor();FilterRuntime();ApplyConnectionModeUI();
     }
     static void BuildQzoneConnection(StackPanel panel) {
         var body=new StackPanel();

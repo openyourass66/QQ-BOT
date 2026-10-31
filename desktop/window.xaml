@@ -11,7 +11,7 @@
 
  <Border Background="#F5F7FB" BorderBrush="#DAE2F0" BorderThickness="1" CornerRadius="10">
   <Grid>
-   <Grid.RowDefinitions><RowDefinition Height="40"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+   <Grid.RowDefinitions><RowDefinition Height="40"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
    <Grid.ColumnDefinitions><ColumnDefinition Width="186"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
    <Border Grid.ColumnSpan="2" Background="#FCFDFF" BorderBrush="#E8EDF5" BorderThickness="0,0,0,1">
     <DockPanel><StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
@@ -20,18 +20,18 @@
      <Button x:Name="CloseWindow" Style="{StaticResource CaptionClose}" ToolTip="关闭窗口" AutomationProperties.Name="关闭窗口"><Grid Width="12" Height="12"><Path Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.2" Data="M1.5,1.5 L10.5,10.5 M1.5,10.5 L10.5,1.5"/></Grid></Button>
     </StackPanel><TextBlock Text="小鲸工作台" Foreground="#7A879D" FontSize="11" Margin="19,0,0,0" VerticalAlignment="Center"/></DockPanel>
    </Border>
-   <Border Grid.Row="1" Background="White" BorderBrush="#E8EDF5" BorderThickness="0,0,1,0">
+   <Border Grid.Row="2" Background="White" BorderBrush="#E8EDF5" BorderThickness="0,0,1,0">
     <Grid Margin="20,28,18,20"><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
      <StackPanel><DockPanel><Image x:Name="BrandIcon" Width="36" Height="36" DockPanel.Dock="Left" Margin="0,0,10,0"/><StackPanel VerticalAlignment="Center"><TextBlock Text="小鲸" FontSize="21" FontWeight="SemiBold"/><TextBlock Text="WHALE DESK" Foreground="#8491A7" FontSize="9" Margin="0,2,0,0"/></StackPanel></DockPanel><TextBlock Text="工作空间" FontSize="10" Foreground="#98A3B6" Margin="12,35,0,0"/></StackPanel>
      <TextBlock Grid.Row="2" Text="QQ BOT  /  轻量桌面端" Foreground="#96A2B6" FontSize="10" Margin="12,0,0,0"/>
     </Grid>
    </Border>
-   <Grid Grid.Row="1" Grid.Column="1" Margin="28,24,28,0" VerticalAlignment="Top">
+   <Grid Grid.Row="2" Grid.Column="1" Margin="28,24,28,0" VerticalAlignment="Top">
     <DockPanel><StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center"><TextBlock x:Name="Uptime" Text="尚未启动" Foreground="{StaticResource Muted}" FontSize="11" VerticalAlignment="Center" Margin="0,0,14,0"/><Border x:Name="ConnectionPill" Background="#EDF1F7" CornerRadius="13" Padding="11,6"><StackPanel Orientation="Horizontal"><Ellipse x:Name="ConnectionDot" Fill="#98A5BC" Width="6" Height="6" Margin="0,0,7,0"/><TextBlock x:Name="ConnectionBadge" Text="未启动" Foreground="#66748C" FontSize="11"/></StackPanel></Border></StackPanel>
      <StackPanel><TextBlock x:Name="PageTitle" Text="工作总览" FontSize="25" FontWeight="SemiBold"/><TextBlock x:Name="PageSubtitle" Text="连接、消息与运行状态，一目了然。" Foreground="{StaticResource Muted}" FontSize="12" Margin="0,6,0,0"/></StackPanel>
     </DockPanel>
    </Grid>
-   <TabControl x:Name="Tabs" Grid.Row="1" Grid.ColumnSpan="2" TabStripPlacement="Left" Background="Transparent" BorderThickness="0">
+   <TabControl x:Name="Tabs" Grid.Row="2" Grid.ColumnSpan="2" TabStripPlacement="Left" Background="Transparent" BorderThickness="0">
     <TabControl.Template><ControlTemplate TargetType="TabControl"><Grid><Grid.ColumnDefinitions><ColumnDefinition Width="186"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
      <StackPanel IsItemsHost="True" VerticalAlignment="Top" Margin="12,126,12,0"/>
      <ContentPresenter x:Name="PART_SelectedContentHost" Grid.Column="1" ContentSource="SelectedContent" TextElement.Foreground="#25324B" Margin="28,104,28,42"/>
@@ -41,7 +41,7 @@
      <Border CornerRadius="18" Padding="24,22" Margin="0,0,0,18"><Border.Background><LinearGradientBrush StartPoint="0,0" EndPoint="1,0"><GradientStop Color="#E9EFFF"/><GradientStop Color="#F0F5FF" Offset="1"/></LinearGradientBrush></Border.Background>
       <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="220"/></Grid.ColumnDefinitions>
        <StackPanel><StackPanel Orientation="Horizontal"><Border Background="#DDE6FF" CornerRadius="5" Padding="7,3"><TextBlock Text="HELLO, WHALE" FontSize="9" Foreground="#536FC0" FontWeight="SemiBold"/></Border><TextBlock Text="今天也请多多关照" Foreground="#7384A9" FontSize="10" VerticalAlignment="Center" Margin="9,0,0,0"/></StackPanel>
-        <TextBlock x:Name="State" Text="小鲸准备好了，随时出发" FontSize="24" FontWeight="SemiBold" Margin="0,12,0,7" TextWrapping="Wrap"/>
+        <TextBlock x:Name="State" Text="小鲸准备好了，随时出发" FontSize="24" FontWeight="SemiBold" Margin="0,12,0,7" TextWrapping="Wrap" AutomationProperties.AutomationId="State"/>
         <TextBlock x:Name="Stats" Text="启动机器人，开始今天的陪伴。" Foreground="#60759F" FontSize="12" TextWrapping="Wrap"/>
         <WrapPanel Margin="0,18,0,0"><Button x:Name="Start" Style="{StaticResource Primary}" Content="启动机器人" MinWidth="122" Margin="0,0,10,0"/><Button x:Name="RestartBot" Content="重新启动" Margin="0,0,10,0" ToolTip="使用已保存的配置重新启动机器人和受管 QQ 进程"/><Button x:Name="Stop" Content="停止运行" Background="#F8FAFF"/></WrapPanel>
        </StackPanel>
@@ -182,7 +182,7 @@
     </Grid></TabItem>
     <TabItem Tag="Runtime" Header="连接与运行"><Grid>
      <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
-     <StackPanel Margin="0,0,0,14"><WrapPanel Margin="0,0,0,10"><Button x:Name="OpenQuickSetup" Content="快速配置" Margin="0,0,8,0"/><Button x:Name="OpenAllSettings" Content="全部连接设置" Style="{StaticResource Quiet}" Margin="0,0,8,0"/><Button x:Name="RuntimeQQLogin" Content="QQ 登录" Style="{StaticResource Quiet}"/></WrapPanel><Border x:Name="RuntimeCategoryBar" Background="White" CornerRadius="12" BorderBrush="{StaticResource Line}" BorderThickness="1" Padding="6"><ListBox x:Name="RuntimeNav" Background="Transparent" BorderThickness="0" ItemContainerStyle="{StaticResource SettingsNavItem}" ScrollViewer.HorizontalScrollBarVisibility="Disabled" ScrollViewer.VerticalScrollBarVisibility="Disabled" ScrollViewer.CanContentScroll="False" AutomationProperties.Name="连接配置分类"><ListBox.ItemsPanel><ItemsPanelTemplate><WrapPanel/></ItemsPanelTemplate></ListBox.ItemsPanel></ListBox></Border></StackPanel>
+     <StackPanel Margin="0,0,0,14"><WrapPanel Margin="0,0,0,10"><Button x:Name="OpenQuickSetup" Content="快速配置" Margin="0,0,8,0"/><Button x:Name="OpenAllSettings" Content="全部连接设置" Style="{StaticResource Quiet}" Margin="0,0,8,0"/><Button x:Name="RuntimeQQLogin" Content="QQ 登录" Style="{StaticResource Quiet}" Margin="0,0,8,0"/><Button x:Name="ServerConnection" Content="服务器连接" Style="{StaticResource Quiet}" Margin="0,0,8,0" AutomationProperties.Name="服务器连接" AutomationProperties.AutomationId="ServerConnection"/><TextBlock x:Name="ServerState" Text="本地运行" Foreground="{StaticResource Muted}" FontSize="10" VerticalAlignment="Center" Margin="0,0,0,8" AutomationProperties.AutomationId="ServerState"/></WrapPanel><Border x:Name="RuntimeCategoryBar" Background="White" CornerRadius="12" BorderBrush="{StaticResource Line}" BorderThickness="1" Padding="6"><ListBox x:Name="RuntimeNav" Background="Transparent" BorderThickness="0" ItemContainerStyle="{StaticResource SettingsNavItem}" ScrollViewer.HorizontalScrollBarVisibility="Disabled" ScrollViewer.VerticalScrollBarVisibility="Disabled" ScrollViewer.CanContentScroll="False" AutomationProperties.Name="连接配置分类"><ListBox.ItemsPanel><ItemsPanelTemplate><WrapPanel/></ItemsPanelTemplate></ListBox.ItemsPanel></ListBox></Border></StackPanel>
      <ScrollViewer x:Name="RuntimeScroll" Grid.Row="1" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Padding="0,0,8,0"><StackPanel>
       <TextBlock x:Name="RuntimeTitle" Text="QQ 连接" FontSize="20" FontWeight="SemiBold"/>
       <TextBlock x:Name="RuntimeSubtitle" Foreground="{StaticResource Muted}" FontSize="11" TextWrapping="Wrap" Margin="0,6,0,18"/>
@@ -217,10 +217,10 @@
      <StackPanel Grid.Row="2" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,15,0,0"><Button x:Name="OpenDataMaintenance" Content="数据备份与恢复" Margin="0,0,10,0"/><Button x:Name="OpenLogs" Content="打开日志目录"/></StackPanel>
     </Grid></Border></TabItem>
    </TabControl>
-   <Border x:Name="ErrorBanner" Grid.Row="1" Grid.Column="1" VerticalAlignment="Top" Margin="28,96,28,0" Background="#FFF1F2" BorderBrush="#F5D7DD" BorderThickness="1" CornerRadius="9" Padding="13,10" Visibility="Collapsed" Panel.ZIndex="10">
-    <DockPanel><TextBlock x:Name="LastError" Foreground="#A43D52" TextWrapping="Wrap" FontSize="11"/></DockPanel>
+   <Border x:Name="ErrorBanner" Grid.Row="1" Grid.ColumnSpan="2" VerticalAlignment="Top" Margin="28,10,28,0" Background="#FFF1F2" BorderBrush="#F5D7DD" BorderThickness="1" CornerRadius="9" Padding="13,10" Visibility="Collapsed">
+    <DockPanel><Button x:Name="ErrorDismiss" DockPanel.Dock="Right" Content="关闭" MinHeight="24" MinWidth="0" Padding="10,2" FontSize="11" Margin="12,0,0,0" VerticalAlignment="Center" AutomationProperties.Name="关闭错误提示" AutomationProperties.AutomationId="ErrorDismiss"/><ScrollViewer MaxHeight="72" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"><TextBlock x:Name="LastError" Foreground="#A43D52" TextWrapping="Wrap" FontSize="11" VerticalAlignment="Center"/></ScrollViewer></DockPanel>
    </Border>
-   <DockPanel Grid.Row="1" Grid.Column="1" VerticalAlignment="Bottom" Margin="29,0,29,14"><TextBlock x:Name="SaveState" DockPanel.Dock="Right" Text="" FontSize="10" Foreground="#8693AA"/><TextBlock x:Name="Feedback" Text="" Foreground="#8693AA" FontSize="10" TextTrimming="CharacterEllipsis"/></DockPanel>
+   <DockPanel Grid.Row="2" Grid.Column="1" VerticalAlignment="Bottom" Margin="29,0,29,14"><TextBlock x:Name="SaveState" DockPanel.Dock="Right" Text="" FontSize="10" Foreground="#8693AA"/><TextBlock x:Name="Feedback" Text="" Foreground="#8693AA" FontSize="10" TextTrimming="CharacterEllipsis" AutomationProperties.AutomationId="Feedback"/></DockPanel>
   </Grid>
  </Border>
 </Window>

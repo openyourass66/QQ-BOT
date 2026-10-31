@@ -80,6 +80,9 @@
 Thumbs.db
 Desktop.ini
 
+# 远程控制台的本地连接配置与主机指纹；每台控制机独立生成
+/remote/
+
 # 本地代理与编辑器工作区
 /.claude/
 /.vscode/

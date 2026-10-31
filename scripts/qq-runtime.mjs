@@ -3,7 +3,7 @@ import { createServer } from 'node:net';
 import { readFile, writeFile, mkdir, lstat, readdir, unlink, rename } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { parseEnv } from 'node:util';
-import { installedComponent } from './component-paths.mjs';
+import { installedComponent, napcatShellDirectory } from './component-paths.mjs';
 import { sameRuntimePath } from './app-paths.mjs';
 
 const allowedCalls = new Set(['/QQLogin/CheckLoginStatus','/QQLogin/GetQQLoginInfo','/QQLogin/RefreshQRcode','/OB11Config/GetConfig']);
@@ -45,7 +45,7 @@ export class ManagedQQ {
   async selected(shell) {
     const managed=await installedComponent('napcat',this.dataRoot,this.root);
     if(!managed || managed.spec.version!=='4.18.41')throw new Error('请先准备支持的 QQ 组件');
-    if(shell && !await sameRuntimePath(resolve(this.dataRoot,shell),join(managed.directory,'napcat')))throw new Error('当前选择的是自定义 QQ 组件，请使用高级连接配置，或选择已准备的组件');
+    if(shell && !await sameRuntimePath(resolve(this.dataRoot,shell),napcatShellDirectory(managed)))throw new Error('当前选择的是自定义 QQ 组件，请使用高级连接配置，或选择已准备的组件');
     return managed;
   }
   async metadata() {
@@ -66,7 +66,7 @@ export class ManagedQQ {
     try {return !(await this.loginConfiguration()).metadata;}catch(error){if(error.code==='ENOENT')return false;throw error;}
   }
   suggestions(metadata,managed) {
-    return {BOT_ONEBOT_MODE:'managed',BOT_NAPCAT_DIR:join(managed.directory,'napcat'),ONEBOT_HTTP_URL:`http://127.0.0.1:${metadata.httpPort}`,ONEBOT_WS_URL:`ws://127.0.0.1:${metadata.wsPort}`,ONEBOT_TOKEN:metadata.token};
+    return {BOT_ONEBOT_MODE:'managed',BOT_NAPCAT_DIR:napcatShellDirectory(managed),ONEBOT_HTTP_URL:`http://127.0.0.1:${metadata.httpPort}`,ONEBOT_WS_URL:`ws://127.0.0.1:${metadata.wsPort}`,ONEBOT_TOKEN:metadata.token};
   }
   async connection(shell) {
     const managed=await this.selected(shell),metadata=await this.metadata();

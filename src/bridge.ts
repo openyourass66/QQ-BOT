@@ -325,6 +325,8 @@ function shouldReply(event: MessageEvent, text: string): { ok: boolean; body: st
     return { ok: settings.chat.privateAutoReply, body: text, direct: true, reason: 'private' };
   }
   const base = groupTrigger(event, settings, groupContext, [status.nickname]);
+  // @ 别人或引用第三方时由对方接话，不因旁聊模式或活跃话题主动插话。
+  if (base.directedElsewhere) return { ...base, ok: false };
   if (base.direct) return base;
   const topic = activeTopics.get(keyOf(event));
   if (topic && topic.until > Date.now()) return { ...base, ok: true, reason: 'active-topic' };
@@ -377,7 +379,7 @@ async function buildPrompt(event: MessageEvent, body: string, seq: number, direc
       '最近的群聊：',
       history || '(暂无)',
       '',
-      `${sender}（QQ ${event.user_id}）对你说：`,
+      `${sender}（QQ ${event.user_id}）${direct ? '对你说' : '在群里说'}：`,
       body,
       `【当前消息编号 #${event.message_id}】`,
       ...(quoteId !== undefined ? ['', quoted ? `当前发言引用：${formatGroupEntry(quoted)}` : '当前发言包含引用，但原文不在最近记录中；不要编造被引用的内容。'] : []),
@@ -388,7 +390,7 @@ async function buildPrompt(event: MessageEvent, body: string, seq: number, direc
       '沿用现有人设，用自然口语接话；简单问题简短回答，复杂问题保留必要信息，不用客服式模板。',
       '当前群的普通回答直接返回文字，由桥接发送；不要为这条回答调用主动发消息工具，以免重复发送或消耗主动消息额度。',
       await socialPrompt(keyOf(event),event.user_id,body),
-      direct ? '这条是在直接找你：请给出实际、简短的回应，不要空回复或选择潜水。只有 @ 或叫名字时，可以自然问一句“在呢，怎么了”。' : '这是群聊背景，和你无关时可以保持安静，避免抢别人之间的对话。',
+      direct ? '这条是在直接找你：请给出实际、简短的回应，不要空回复或选择潜水。只有 @ 或叫名字时，可以自然问一句“在呢，怎么了”。' : '这是群聊里的普通发言，不一定在对你说话；别人之间的对话、与你无关时保持安静，避免抢话。',
     ].join('\n');
   }
   return `【QQ私聊】${sender}（QQ ${event.user_id}）对你说：\n${body}\n【当前消息编号 #${event.message_id}】\n\n${await socialPrompt(keyOf(event),event.user_id,body)}`;
@@ -754,6 +756,7 @@ async function main(): Promise<void> {
 
   let connectionGeneration = 0;
   let heartbeatRevision = 0;
+  let offlineSince = 0, offlineNoticed = false;
   ws = new OneBotWs({
     url: config.onebot.wsUrl,
     token: config.onebot.token,
@@ -764,7 +767,16 @@ async function main(): Promise<void> {
     onState: (connected) => {
       status.wsConnected = connected;
       const generation = ++connectionGeneration;
-      if (!connected) { status.qqOnline = false; return; }
+      if (!connected) {
+        status.qqOnline = false;
+        if (!offlineSince) offlineSince = Date.now();
+        else if (!offlineNoticed && Date.now() - offlineSince >= 120_000) {
+          offlineNoticed = true;
+          log('warn', '[onebot] QQ 消息连接已中断超过 2 分钟，正在后台按退避间隔重试；若长时间未恢复，请在桌面端“QQ 登录”窗口确认是否需要重新扫码。');
+        }
+        return;
+      }
+      offlineSince = 0; offlineNoticed = false;
       const revision = heartbeatRevision;
       void api.call<{ user_id: number; nickname: string }>('get_login_info').then((info) => {
         if (generation !== connectionGeneration || !status.wsConnected) return;

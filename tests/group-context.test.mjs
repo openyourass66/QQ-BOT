@@ -66,6 +66,26 @@ test('群触发：纯 @、实际账号、叫名字、引用机器人和同人追
   } finally { await rm(dir, { recursive: true, force: true }); }
 });
 
+test('@ 其他人或引用第三方时不当作旁聊，即使已允许旁聊', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'qq-trigger-elsewhere-'));
+  try {
+    const store = new GroupContextStore(join(dir, 'groups.json'));
+    const settings = structuredClone(DEFAULT_SETTINGS);
+    settings.identity.name = '小鲸鱼'; settings.chat.group.requireMention = false;
+    const event = (message, user = 2) => ({ self_id: 1, user_id: user, group_id: 10, message });
+    const text = (value) => ({ type: 'text', data: { text: value } });
+    const at = (qq) => ({ type: 'at', data: { qq } });
+    const ambient = groupTrigger(event([text('今天吃啥')]), settings, store);
+    assert.equal(ambient.ok, true); assert.equal(ambient.reason, 'ambient');
+    const elsewhere = groupTrigger(event([at('3'), text('家庭库不是共享了吗')]), settings, store);
+    assert.equal(elsewhere.ok, false); assert.equal(elsewhere.directedElsewhere, true); assert.equal(elsewhere.reason, 'addressed-elsewhere');
+    assert.equal(groupTrigger(event([at('1'), text('在吗')]), settings, store).reason, 'mention');
+    store.record(1, 10, { messageId: 21, userId: 3, name: '其他群友', text: '我的问题', role: 'user' });
+    const quote = groupTrigger(event([{ type: 'reply', data: { id: 21 } }, text('那为什么？')]), settings, store);
+    assert.equal(quote.ok, false); assert.equal(quote.directedElsewhere, true);
+  } finally { await rm(dir, { recursive: true, force: true }); }
+});
+
 test('群记录容量与过期淘汰有界；损坏的持久化文件不会被覆盖', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'qq-context-bounds-'));
   try {

@@ -4,23 +4,37 @@ import { spawn } from 'node:child_process';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { enterRuntime, prepareRuntime, sameRuntimePath,assertNoPendingRestore } from './app-paths.mjs';
-import { installedComponent } from './component-paths.mjs';
+import { installedComponent, napcatShellDirectory } from './component-paths.mjs';
 import { installQQProfileIsolation } from './qq-profile.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const layout = await prepareRuntime({ root });
 assertNoPendingRestore(layout.dataRoot);
 enterRuntime(layout);
-if (process.platform !== 'win32') throw new Error('此 NapCat Node 启动器仅支持 Windows');
-const managed = await installedComponent('napcat',layout.dataRoot,root);
+if (!['win32','linux'].includes(process.platform)) throw new Error('此 NapCat 启动器仅支持 Windows 与 Linux');
+const managed = await installedComponent('napcat',layout.dataRoot,root,process.platform,process.arch);
 const selectedShell = resolve(layout.dataRoot,process.env.BOT_NAPCAT_DIR || 'napcat/shell');
-const managedSelected = managed && await sameRuntimePath(selectedShell,join(managed.directory,'napcat'));
+const managedSelected = managed && await sameRuntimePath(selectedShell,napcatShellDirectory(managed));
 // 登录失效后由 NapCat 主进程重建 Worker，单进程模式不会初始化重启回调。
 const processMode = {
   NAPCAT_DISABLE_PIPE:'1',NAPCAT_DISABLE_MULTI_PROCESS:'0',NAPCAT_DISABLE_MULTIPROCESSING:'0',
   NAPCAT_FORCE_NODE_PROCESS:'1',NAPCAT_WORKER_PROCESS:'0',
 };
-if (managedSelected && !await sameRuntimePath(process.execPath,join(managed.directory,'node.exe'))) {
+if (process.platform === 'linux') {
+  if (!managedSelected) throw new Error('Linux 下请先在组件页准备 QQ 接入组件，或在 .env 中指向解压后的 AppImage 目录');
+  const runtime = layout.napcatRuntime;
+  await mkdir(join(runtime,'config'),{recursive:true,mode:0o700});
+  try { await writeFile(join(runtime,'config/webui.json'),JSON.stringify({host:'127.0.0.1',port:6099,token:randomBytes(24).toString('hex'),loginRate:10},null,2)+'\n',{flag:'wx',mode:0o600}); }
+  catch(error){if(error.code!=='EEXIST')throw error;}
+  try { await access('/usr/bin/xvfb-run'); }
+  catch { try { await access('/usr/local/bin/xvfb-run'); } catch { throw new Error('缺少无桌面运行组件 xvfb-run，请先安装 xvfb（sudo apt install xvfb）'); } }
+  console.log('正在启动受管 QQ 组件（无桌面模式），首次使用请按官方流程登录。');
+  const child = spawn(join(managed.directory,'AppRun'),[],{cwd:runtime,env:{...process.env,NAPCAT_WORKDIR:runtime},stdio:'inherit'});
+  child.once('error',error=>{console.error(`QQ 组件启动失败：${error.message}`);console.error('请确认已安装 xvfb 与 Electron 运行库（libgtk-3-0、libnss3 等）。');process.exitCode=1;});
+  child.once('close',code=>{process.exitCode=code??1;});
+  const forward=signal=>{try{child.kill(signal);}catch{}};
+  process.once('SIGINT',()=>forward('SIGINT'));process.once('SIGTERM',()=>forward('SIGTERM'));
+} else if (managedSelected && !await sameRuntimePath(process.execPath,join(managed.directory,'node.exe'))) {
   // 命令行也使用组件自己的原生运行库，与桌面入口保持一致。
   await new Promise((done,reject) => {
     const child = spawn(join(managed.directory,'node.exe'),[fileURLToPath(import.meta.url)],{cwd:layout.dataRoot,env:process.env,stdio:'inherit',windowsHide:true});

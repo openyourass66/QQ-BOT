@@ -75,7 +75,7 @@ export async function createManagementServer({root,dataRoot,port=18380,origin:co
   authenticate('login',['password']);authenticate('claim',['token','password']);
   app.get('/api/session',async request=>({csrf:request.owner.csrf,expiresAt:request.owner.expires}));
   app.post('/api/auth/logout',async(request,reply)=>{const session=await auth.verify(cookie(request));auth.logout(cookie(request));closeSession(session.id);reply.header('set-cookie',`${cookieName}=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0`);return {ok:true};});
-  app.get('/api/status',async()=>({runtime:latest,capabilities:{readOnly:false,platform:process.platform,remoteShell:false,configuration:true,runtime:true,components:process.platform==='win32'&&process.arch==='x64'}}));
+  app.get('/api/status',async()=>({runtime:latest,capabilities:{readOnly:false,platform:process.platform,remoteShell:false,configuration:true,runtime:true,components:['win32','linux'].includes(process.platform)&&process.arch==='x64'}}));
   app.get('/api/config',async()=>service.readConfiguration());
   const revision={type:'string',pattern:'^[a-f0-9]{64}$'};
   app.patch('/api/config',{schema:{body:{type:'object',required:['revision','values'],additionalProperties:false,properties:{revision,values:{type:'object',minProperties:1,maxProperties:32,additionalProperties:{type:'string',maxLength:4096}}}}}},async request=>{
@@ -91,7 +91,7 @@ export async function createManagementServer({root,dataRoot,port=18380,origin:co
   for(const action of ['start','stop','restartBridge'])app.post('/api/runtime/'+action,{schema:{body:jobBody}},async(request,reply)=>submit(action,undefined,request,reply));
   app.post('/api/components/:id/prepare',{schema:{body:jobBody}},async(request,reply)=>{
     if(!['dsh','napcat'].includes(request.params.id))throw new JobError('未知受管组件',400);
-    if(process.platform!=='win32'||process.arch!=='x64')throw new JobError('此平台的受管组件尚未提供，请使用已配置的外部服务',409);
+    if(!['win32','linux'].includes(process.platform)||process.arch!=='x64')throw new JobError('此平台的受管组件尚未提供，请使用已配置的外部服务',409);
     if(latest.bridge||latest.napcat)throw new JobError('请先停止机器人，再准备组件');
     return submit('component',request.params.id,request,reply);
   });
