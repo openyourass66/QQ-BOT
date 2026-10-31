@@ -68,6 +68,8 @@ export function chatModelPatches(config: ChatModelConfig): object[] {
     } });
     patches.push({ id: 'web-search-deepseek', config: { apiKeyEnv: projectChatKey } });
     patches.push({ id: 'web-deepseek-api', config: { apiKeyEnv: projectChatKey } });
+    // 受管服务器常经 fake-ip 代理 DNS 解析公网站点，本地 HTTP 抓取会以非公网地址拒绝；正文改由 DeepSeek Fetch API 读取。
+    patches.push({ id: 'web', config: { searchProvider: 'deepseek-official', fetchProvider: 'deepseek-fetch-api' } });
   }
   return patches;
 }

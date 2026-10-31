@@ -170,6 +170,8 @@ export class OneBotWs {
   private stopped = true;
   private retry?: NodeJS.Timeout;
   private heartbeat?: NodeJS.Timeout;
+  private failures = 0;
+  private lastFailureLog = 0;
 
   constructor(private readonly options: OneBotWsOptions) {
     for (const value of [options.heartbeatIntervalMs, options.handshakeTimeoutMs]) {
@@ -212,6 +214,8 @@ export class OneBotWs {
 
     ws.on('open', () => {
       if (this.stopped || this.ws !== ws) { ws.terminate(); return; }
+      this.failures = 0;
+      this.lastFailureLog = 0;
       this.options.onState?.(true);
       this.options.onLog?.('[onebot] websocket connected');
       this.heartbeat = setInterval(() => {
@@ -258,15 +262,25 @@ export class OneBotWs {
     ws.on('error', (error) => {
       if (this.stopped || this.ws !== ws) return;
       this.options.onState?.(false);
-      this.options.onLog?.(`[onebot] websocket error: ${error.message}`);
+      this.failureLog(`[onebot] websocket error: ${error.message}`);
       if (ws.readyState === WebSocket.OPEN) ws.terminate();
     });
   }
 
+  /** 断线期间限制重复日志；QQ 登录失效时可能长时间无法恢复。 */
+  private failureLog(message: string): void {
+    const now = Date.now();
+    if (now - this.lastFailureLog < 300_000) return;
+    this.lastFailureLog = now;
+    this.options.onLog?.(message);
+  }
+
   private scheduleReconnect(): void {
     if (this.stopped || this.retry) return;
-    const delay = this.options.reconnectDelayMs ?? 3000;
-    this.options.onLog?.(`[onebot] reconnecting in ${delay}ms`);
+    const base = this.options.reconnectDelayMs ?? 3000;
+    const delay = Math.min(base * 2 ** Math.min(this.failures, 4), 30_000);
+    this.failures += 1;
+    this.failureLog(`[onebot] reconnecting in ${delay}ms`);
     this.retry = setTimeout(() => {
       this.retry = undefined;
       this.connect();

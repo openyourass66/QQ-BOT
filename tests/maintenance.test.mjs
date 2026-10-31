@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtemp,mkdir,writeFile,readFile,readdir,rm,realpath,symlink} from 'node:fs/promises';
+import {mkdtemp,mkdir,writeFile,appendFile,readFile,readdir,rm,realpath,symlink} from 'node:fs/promises';
 import {join,resolve,dirname,basename} from 'node:path';
 import {tmpdir} from 'node:os';
 import {spawn,spawnSync} from 'node:child_process';
@@ -9,7 +9,7 @@ import {pathToFileURL} from 'node:url';
 import {DatabaseSync} from 'node:sqlite';
 import {scryptSync,createDecipheriv,createCipheriv,randomBytes} from 'node:crypto';
 import {gzipSync,gunzipSync} from 'node:zlib';
-import {createBackup,verifyBackup,restoreBackup,recoverMaintenance,maintenanceStatus} from '../scripts/maintenance.mjs';
+import {createBackup,verifyBackup,restoreBackup,migrateBackup,recoverMaintenance,maintenanceStatus} from '../scripts/maintenance.mjs';
 import {dataPaths,mutableDataResources} from '../dist/core/data-paths.js';
 import {acquireDataResources} from '../dist/core/resource-lock.js';
 import {prepareRuntime,assertNoPendingRestore} from '../scripts/app-paths.mjs';
@@ -45,6 +45,40 @@ test('加密备份覆盖四库、原始配置、人设、记忆、媒体、密�
   const verified=await verifyBackup(options);assert.equal(verified.files,result.files);assert.equal(verified.bytes,result.bytes);
   await change(dataRoot);const restored=await restoreBackup(options);assert.equal(restored.restartRequired,true);await original(dataRoot);assert.deepEqual(await readFile(join(dataRoot,'data/media/fixture.bin')),Buffer.from([0,1,2,254,255]));assert.deepEqual(await readdir(join(dataRoot,'data/media/empty')),[]);await assert.rejects(readFile(join(dataRoot,'data/media/new.bin')),{code:'ENOENT'});assert.equal((await maintenanceStatus(dataRoot)).recoveryPending,false);
   await restoreBackup({...options,file:restored.recoveryPoint});assert.equal(value(join(dataRoot,'data/sessions.json.sqlite')),'changed');assert.equal(await readFile(join(dataRoot,'bot-workspace/memory/notes.md'),'utf8'),'新记忆');
+}));
+
+test('加密备份可迁移到另一数据目录，恢复原实例的入口仍受原路径限制',()=>fixture(async({root,dataRoot,file,options})=>{
+  const originalRoot=await realpath(dataRoot);
+  await appendFile(join(dataRoot,'.env'),`BOT_DSH_BIN=${join(originalRoot,'components','dsh','x','dsh')}\nBOT_DSH_HOME=${join(originalRoot,'dsh')}\nBOT_NAPCAT_DIR=${join(originalRoot,'components','napcat','x')}\nBOT_FFMPEG_BIN=${join(originalRoot,'tools','ffmpeg')}\n`);
+  await createBackup(options);
+  const target=join(root,'迁移 实例'),dirs=['data/media/empty','bot-workspace/memory','bot-workspace/.whale','.credentials'];
+  for(const dir of dirs)await mkdir(join(target,dir),{recursive:true});
+  await writeFile(join(target,'.env'),"BOT_WORKSPACE=bot-workspace\nQQ_BOT_DEEPSEEK_API_KEY='target-private-token'\n");await writeFile(join(target,'bot.config.json'),'{}');
+  await writeFile(join(target,'data/media/target.bin'),'target-media');database(join(target,'data/sessions.json.sqlite'),'target');
+  await assert.rejects(migrateBackup({...options,dataRoot:target,password:'fixture-incorrect-password'}),/密码错误|损坏/);
+  await assert.rejects(restoreBackup({...options,dataRoot:target}),/原实例/);
+  const migrated=await migrateBackup({...options,dataRoot:target});
+  assert.equal(migrated.operation,'migrate');assert.equal(migrated.restartRequired,true);assert.ok(migrated.recoveryPoint);
+  const migratedEnv=await readFile(join(target,'.env'),'utf8');assert.match(migratedEnv,/fixture-private-token/);
+  assert.match(migratedEnv,/^BOT_DSH_BIN=$/m);assert.match(migratedEnv,/^BOT_DSH_HOME=$/m);assert.match(migratedEnv,/^BOT_NAPCAT_DIR=napcat\/shell$/m);
+  assert.ok(migratedEnv.includes('BOT_FFMPEG_BIN='+join(await realpath(target),'tools','ffmpeg')),'machine paths inside the instance should be remapped');
+  assert.equal(await readFile(join(target,'bot-workspace/memory/notes.md'),'utf8'),'私人记忆正文');
+  assert.deepEqual(await readFile(join(target,'data/media/fixture.bin')),Buffer.from([0,1,2,254,255]));
+  for(const name of names)assert.equal(value(join(target,'data',name+'.json.sqlite')),'original');
+  await assert.rejects(readFile(join(target,'data/media/target.bin')),{code:'ENOENT'});
+  assert.equal((await maintenanceStatus(target)).recoveryPending,false);
+  await migrateBackup({...options,dataRoot:target,file:migrated.recoveryPoint});
+  assert.equal(value(join(target,'data/sessions.json.sqlite')),'target');assert.equal(await readFile(join(target,'data/media/target.bin'),'utf8'),'target-media');
+}));
+
+test('路径布局与备份不一致时拒绝迁移，未改动目标数据',()=>fixture(async({root,dataRoot,file,options})=>{
+  await createBackup(options);
+  const target=join(root,'布局 实例'),dirs=['other/data/media','other/bot-workspace/memory','other/bot-workspace/.whale','other/.credentials'];
+  for(const dir of dirs)await mkdir(join(target,dir),{recursive:true});
+  await writeFile(join(target,'.env'),"BOT_WORKSPACE=other/bot-workspace\nSESSION_STORE=other/data/sessions.json\n");await writeFile(join(target,'bot.config.json'),'{}');
+  await writeFile(join(target,'other/data/media/keep.bin'),'keep');
+  await assert.rejects(migrateBackup({...options,dataRoot:target}),/数据路径布局不一致/);
+  assert.equal(await readFile(join(target,'other/data/media/keep.bin'),'utf8'),'keep');assert.equal((await maintenanceStatus(target)).recoveryPending,false);await assert.rejects(readdir(join(target,'backups')),{code:'ENOENT'});
 }));
 
 test('错误密码、篡改和截断备份不切换任何当前数据',()=>fixture(async({dataRoot,file,options})=>{

@@ -1,0 +1,50 @@
+{
+  "formatVersion": 1,
+  "platform": "linux-x64",
+  "components": {
+    "node": {
+      "name": "模型运行环境",
+      "version": "24.22.1",
+      "kind": "tar.gz",
+      "url": "https://nodejs.org/dist/v24.22.1/node-v24.22.1-linux-x64.tar.gz",
+      "size": 58290700,
+      "sha256": "eb6728e77c576a35162c122c45ccadf224d89ff00abc8dae46cc2897c6002d7c",
+      "prefix": "node-v24.22.1-linux-x64/",
+      "required": [
+        "bin/node",
+        "lib/node_modules/npm/bin/npm-cli.js",
+        "LICENSE"
+      ],
+      "source": "https://nodejs.org/dist/v24.22.1/SHASUMS256.txt"
+    },
+    "dsh": {
+      "name": "模型运行器 DSH",
+      "version": "0.2.1-rc.2",
+      "kind": "npm",
+      "required": [
+        "dsh",
+        "node_modules/@deepseek-ai/dsh/lib/bin.js"
+      ],
+      "source": "https://registry.npmjs.org/@deepseek-ai%2fdsh/0.2.1-rc.2",
+      "lockSha256": "661ed9122b224e2be08d256cf76ca57eb98044674639963ba282050afd035415"
+    },
+    "napcat": {
+      "name": "QQ 接入组件",
+      "version": "4.18.41",
+      "licenseSha256": "2bbc0dba0c62fcde4adfe38ebadad0b7d4e23b06b88d9551904bbe07769dc46f",
+      "kind": "appimage",
+      "url": "https://github.com/NapNeko/NapCatAppImageBuild/releases/download/v4.18.41/QQ-53644_NapCat-v4.18.41-amd64.AppImage",
+      "size": 314201280,
+      "sha256": "512288997fd0f7dcde71df9b65b7238b3f8dd93bc4910f583ea62e718fc0da66",
+      "prefix": "",
+      "required": [
+        "AppRun",
+        "qq",
+        "napcat/napcat.mjs",
+        "napcat/package.json",
+        "LICENSE.electron.txt"
+      ],
+      "source": "https://github.com/NapNeko/NapCatAppImageBuild/releases/tag/v4.18.41"
+    }
+  }
+}

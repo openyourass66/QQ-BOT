@@ -1,0 +1,31 @@
+[Unit]
+Description=Whale Workbench daemon (QQ bot and model runtime)
+Documentation=file://@PROGRAM@/docs/linux-remote-console-plan.md
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=@USER@
+Group=@USER@
+WorkingDirectory=@DATA_DIR@
+Environment=HOME=@DATA_DIR@/home
+Environment=XDG_CONFIG_HOME=@DATA_DIR@/home/.config
+Environment=XDG_CACHE_HOME=@DATA_DIR@/home/.cache
+Environment=XDG_DATA_HOME=@DATA_DIR@/home/.local/share
+ExecStart=@NODE@ @PROGRAM@/scripts/whaled.mjs --data-dir @DATA_DIR@
+Restart=on-failure
+RestartSec=2
+TimeoutStopSec=30
+KillMode=control-group
+UMask=0077
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=@DATA_DIR@
+
+[Install]
+WantedBy=multi-user.target

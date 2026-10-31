@@ -4,14 +4,16 @@ import {createRequire,isBuiltin} from 'node:module';
 import ts from 'typescript';
 
 export const releaseScripts=['app-paths.mjs','setup.mjs','run.mjs','storage.mjs','maintenance.mjs','installer-core.mjs','install-worker.mjs','install-check.mjs','release-integrity.mjs','diagnostic-export.mjs','maintenance-cleanup.mjs','credentials.mjs','env-file.mjs','process-guard.mjs','managed-entry.mjs','supervisor.mjs','bounded-lines.mjs','component-paths.mjs','components.mjs','napcat-node.mjs','qq-runtime.mjs','qq-profile.mjs','qq-profile-preload.mjs','runtime-service.mjs','runtime-configuration.mjs','runtime-lease.mjs','media-cleaner.mjs'];
+export const releaseScriptsLinux=[...releaseScripts,'whaled.mjs','remote-host.mjs','whaled-install.mjs','whaled-upgrade.mjs'];
 export const releaseRequired=['QQ-BOT.exe','WhaleSetup.exe','WhaleLauncher.exe','components/release-trust.json','开始使用.cmd','使用说明.html','release-manifest.json','runtime/node.exe','runtime/LICENSE','runtime/node_modules/npm/bin/npm-cli.js','package.json','package-lock.json','.env.example','LICENSE','templates/bot-persona.md','components/catalog.json','desktop/window.xaml','desktop/host.mjs','desktop/config-worker.mjs','desktop/component-worker.mjs','desktop/maintenance-worker.mjs','desktop/runtime-guard.exe','desktop/media-cleaner.exe','dist/bridge.js','dist/mcp-qq.js',...releaseScripts.map(file=>'scripts/'+file)];
+export const releaseRequiredLinux=['release-manifest.json','runtime/bin/node','runtime/LICENSE','package.json','package-lock.json','.env.example','LICENSE','templates/bot-persona.md','components/catalog.linux-x64.json','desktop/window.xaml','desktop/host.mjs','desktop/runtime-fields.mjs','dist/bridge.js','dist/mcp-qq.js','packaging/systemd/whaled.service',...releaseScriptsLinux.map(file=>'scripts/'+file)];
 
 /** Validate emitted modules without importing entry points that start services or mutate data. */
-export async function validateRelease(root){
+export async function validateRelease(root,{required=releaseRequired}={}){
   root=resolve(root);const files=[];
   const inside=path=>{const rel=relative(root,path);if(!rel||rel.startsWith('..')||isAbsolute(rel))throw new Error('发行模块引用越过程序目录');return rel.replaceAll('\\','/');};
   for(const name of ['.env','bot.config.json','data','user-data','napcat','bot-workspace','.credentials','.dsh'])if(await lstat(join(root,name)).then(()=>true,error=>{if(error.code!=='ENOENT')throw error;return false;}))throw new Error('发行目录包含个人配置或运行数据：'+name);
-  for(const name of releaseRequired){const info=await lstat(join(root,name)).catch(()=>undefined);if(!info?.isFile()||info.isSymbolicLink())throw new Error('发行文件缺失或类型无效：'+name);}
+  for(const name of required){const info=await lstat(join(root,name)).catch(()=>undefined);if(!info?.isFile()||info.isSymbolicLink())throw new Error('发行文件缺失或类型无效：'+name);}
   async function walk(path){
     for(const entry of await readdir(path,{withFileTypes:true})){
       const file=join(path,entry.name),info=await lstat(file);if(info.isSymbolicLink())throw new Error('发行程序模块不接受链接：'+inside(file));

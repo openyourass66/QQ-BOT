@@ -5,7 +5,7 @@ import { homedir } from 'node:os';
 import { readChatModelConfig } from '../dist/agent/chat-model.js';
 import { readJsonLimited } from '../dist/services/read-json.js';
 import WebSocket from 'ws';
-import { installedComponent } from '../scripts/component-paths.mjs';
+import { installedComponent, napcatShellDirectory } from '../scripts/component-paths.mjs';
 import { resolveCredentialEnv } from '../scripts/credentials.mjs';
 import { sameRuntimePath } from '../scripts/app-paths.mjs';
 import { assertApplicationRuntime, APPLICATION_RUNTIME_REQUIREMENT } from '../dist/core/node-runtime.js';
@@ -55,13 +55,14 @@ export async function diagnose(root, { dataRoot = root, externalOnebot = false, 
   catch (error) { add('对话模型配置', false, error.message, true, 'BOT_CHAT_MODE'); }
   const exists = async path => access(path).then(() => true, () => false);
   const managed = await installedComponent('napcat', dataRoot, root);
-  const managedSelected = Boolean(managed && await sameRuntimePath(resolve(dataRoot,env.BOT_NAPCAT_DIR || 'napcat/shell'),join(managed.directory,'napcat')));
+  const managedSelected = Boolean(managed && await sameRuntimePath(resolve(dataRoot,env.BOT_NAPCAT_DIR || 'napcat/shell'),napcatShellDirectory(managed)));
+  const windows = process.platform === 'win32';
   if (process.platform === 'win32' && env.QQBOT_LOW_INTEGRITY !== undefined) add('桌面进程完整性级别', env.QQBOT_LOW_INTEGRITY !== '1', env.QQBOT_LOW_INTEGRITY === '1' ? '请退出后运行 npm run desktop:build，重新生成普通用户级别的 EXE。' : '普通用户级别，可访问用户配置与系统托盘');
   let supportedRuntime = true;
   try { assertApplicationRuntime(); } catch { supportedRuntime = false; }
   add('Node.js 运行环境', supportedRuntime, `${process.version}；需要 ${APPLICATION_RUNTIME_REQUIREMENT}。`);
   add('机器人构建文件', await exists(join(root, 'dist/bridge.js')), '缺失时在项目目录运行 npm run build。');
-  add('DSH 启动入口', Boolean(await resolveExecutable(dataRoot, env.BOT_DSH_BIN, env)), '点击自动检测，或选择已安装 DSH 的 dsh.cmd / 可执行文件；未安装时查看安装指引。', true, 'BOT_DSH_BIN');
+  add('DSH 启动入口', Boolean(await resolveExecutable(dataRoot, env.BOT_DSH_BIN, env)), '点击自动检测，或选择已安装 DSH 的 dsh / dsh.cmd 可执行文件；未安装时查看安装指引。', true, 'BOT_DSH_BIN');
   const workspace = resolve(dataRoot, env.BOT_WORKSPACE || 'bot-workspace');
   add('机器人工作区', await stat(workspace).then(s => s.isDirectory(), () => false), '默认工作区自动初始化；自定义路径需选择已存在的目录。', true, 'BOT_WORKSPACE');
   const profile = env.BOT_DSH_PROFILE || 'acp';
@@ -69,9 +70,11 @@ export async function diagnose(root, { dataRoot = root, externalOnebot = false, 
   const profilePath = resolve(dataRoot, env.BOT_DSH_HOME || join(homedir(), '.dsh'), 'profiles', profile, 'cordis.yml');
   try { const fd = await open(profilePath, 'r+'); await fd.close(); add('DSH Profile 写入权限', true, '配置文件可写'); }
   catch (e) { add('DSH Profile 写入权限', e.code === 'ENOENT', e.code === 'ENOENT' ? '首次启动由 DSH 创建' : `无法写入 cordis.yml（${e.code}），请关闭占用程序并检查文件权限。`); }
-  add('NapCat Shell', await exists(resolve(dataRoot, env.BOT_NAPCAT_DIR || 'napcat/shell', 'napcat.mjs')), external ? '使用已有服务，无需本机 Shell。' : '按安装指引部署到数据目录的 napcat/shell；也可选择连接已有 QQ 服务。', !external, 'BOT_NAPCAT_DIR');
-  add('NapCat Node 适配库', managedSelected || await exists(join(dataRoot, 'napcat/node-runtime/QQNT.dll')), external ? '使用已有服务，无需本机适配库。' : managedSelected ? '使用已准备组件内的官方适配库。' : '按安装指引在数据目录准备官方 Node 适配库 QQNT.dll，勿使用 QQ 目录的同名文件。', !external, 'BOT_NAPCAT_DIR');
-  add('QQ 安装目录', managedSelected || !!env.BOT_QQ_DIR && await exists(resolve(dataRoot, env.BOT_QQ_DIR, 'versions/config.json')), external ? '使用已有服务，无需本机 QQ 目录。' : managedSelected ? '使用已准备的 QQ 运行文件，无需选择系统 QQ。' : '点击自动检测，或选择 QQ.exe 所在文件夹。', !external && !managedSelected, 'BOT_QQ_DIR');
+  const shellDirectory = resolve(dataRoot, env.BOT_NAPCAT_DIR || 'napcat/shell');
+  add('NapCat Shell', await exists(resolve(shellDirectory, windows ? 'napcat.mjs' : 'AppRun')), external ? '使用已有服务，无需本机 Shell。' : windows ? '按安装指引部署到数据目录的 napcat/shell；也可选择连接已有 QQ 服务。' : '请先在组件页准备 QQ 接入组件；也可选择连接已有 QQ 服务。', !external, 'BOT_NAPCAT_DIR');
+  add('NapCat Node 适配库', windows ? managedSelected || await exists(join(dataRoot, 'napcat/node-runtime/QQNT.dll')) : await exists(join(shellDirectory, 'napcat/napcat.mjs')), external ? '使用已有服务，无需本机适配库。' : managedSelected ? '使用已准备组件内的官方适配库。' : windows ? '按安装指引在数据目录准备官方 Node 适配库 QQNT.dll，勿使用 QQ 目录的同名文件。' : 'Linux 由 AppImage 内置运行环境提供；请准备受管 QQ 组件。', !external, 'BOT_NAPCAT_DIR');
+  if (!windows) add('NapCat 无桌面运行', await exists('/usr/bin/xvfb-run') || await exists('/usr/local/bin/xvfb-run'), 'Linux 通过 Xvfb 无桌面运行 QQ；缺少时执行 sudo apt install xvfb。', !external);
+  add('QQ 安装目录', windows ? managedSelected || !!env.BOT_QQ_DIR && await exists(resolve(dataRoot, env.BOT_QQ_DIR, 'versions/config.json')) : true, external ? '使用已有服务，无需本机 QQ 目录。' : !windows ? 'Linux 使用受管 QQ 组件，无需系统 QQ 目录。' : managedSelected ? '使用已准备的 QQ 运行文件，无需选择系统 QQ。' : '点击自动检测，或选择 QQ.exe 所在文件夹。', !external && !managedSelected && windows, 'BOT_QQ_DIR');
   for (const [key, protocols, fallback] of [['ONEBOT_HTTP_URL', ['http:', 'https:'], 'http://127.0.0.1:3000'], ['ONEBOT_WS_URL', ['ws:', 'wss:'], 'ws://127.0.0.1:3001']]) {
     let ok = false; try { const url = new URL(env[key] || fallback); ok = protocols.includes(url.protocol) && !url.username && !url.password && !url.hash; } catch {}
     add(key === 'ONEBOT_HTTP_URL' ? 'QQ HTTP 地址' : 'QQ WebSocket 地址', ok, '本机默认端口为 3000 / 3001；须与 NapCat 设置一致。', true, key);

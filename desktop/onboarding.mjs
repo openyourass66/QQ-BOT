@@ -3,7 +3,7 @@ import { dirname, join, resolve, parse } from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { diagnose, environment, onebotOnline } from './diagnostics.mjs';
-import { installedComponent } from '../scripts/component-paths.mjs';
+import { installedComponent, programRoot } from '../scripts/component-paths.mjs';
 import { resolveCredentialEnv } from '../scripts/credentials.mjs';
 
 const execute = promisify(execFile);
@@ -11,7 +11,7 @@ const isFile = path => stat(path).then(s => s.isFile(), () => false);
 const isQQ = path => isFile(join(path, 'versions/config.json'));
 
 // Search known locations and running application paths, never disk-wide or online.
-export async function detectEnvironment(root, env, { runningPaths, platform = process.platform } = {}) {
+export async function detectEnvironment(root, env, { runningPaths, platform = process.platform, programRoot: catalogRoot = programRoot } = {}) {
   if (!runningPaths) {
     runningPaths = [];
     if (platform === 'win32') {
@@ -23,13 +23,13 @@ export async function detectEnvironment(root, env, { runningPaths, platform = pr
     }
   }
   const drive = parse(resolve(root)).root;
-  const bases = [env.LOCALAPPDATA && join(env.LOCALAPPDATA, 'Programs'), env.ProgramFiles, env['ProgramFiles(x86)'], drive].filter(Boolean);
+  const bases = platform === 'win32' ? [env.LOCALAPPDATA && join(env.LOCALAPPDATA, 'Programs'), env.ProgramFiles, env['ProgramFiles(x86)'], drive].filter(Boolean) : [];
   const dsh = [env.BOT_DSH_BIN && resolve(root, env.BOT_DSH_BIN), ...(env.PATH || env.Path || '').split(platform === 'win32' ? ';' : ':').filter(Boolean).map(p => join(p.replace(/^"|"$/g, ''), platform === 'win32' ? 'dsh.cmd' : 'dsh')),
     ...bases.map(p => join(p, 'DeepSeek Harness', 'resources/runtime/cli/bin/dsh.cmd')),
     ...runningPaths.filter(p => typeof p === 'string' && /harness/i.test(p)).map(p => join(dirname(p), 'resources/runtime/cli/bin/dsh.cmd'))];
   const qq = [env.BOT_QQ_DIR && resolve(root, env.BOT_QQ_DIR), ...runningPaths.filter(p => typeof p === 'string' && /[\\/]QQ\.exe$/i.test(p)).map(p => dirname(p)), ...bases.flatMap(p => [join(p, 'Tencent/QQ'), join(p, 'QQ')])];
-  const managed = await installedComponent('dsh', root);
-  if (managed) dsh.splice(1,0,join(managed.directory,'dsh.cmd'));
+  const managed = await installedComponent('dsh', root, catalogRoot, platform);
+  if (managed) dsh.splice(1,0,join(managed.directory, platform === 'win32' ? 'dsh.cmd' : 'dsh'));
   const suggestions = [];
   for (const [key, candidates, check] of [['BOT_DSH_BIN', dsh, isFile], ['BOT_QQ_DIR', qq, isQQ]]) {
     for (const path of [...new Set(candidates.filter(Boolean))]) {

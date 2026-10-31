@@ -264,16 +264,45 @@ export async function recoverMaintenance({dataRoot,...options}){
 }
 export async function maintenanceStatus(dataRoot){const kind=pendingMaintenanceKind(dataRoot);return {operation:'status',recoveryPending:Boolean(kind),recoveryKind:kind??null};}
 
-export async function restoreBackup({dataRoot,file,password:secret,...options}){
-  password(secret);
-  const borrowed=options[heldContext],ctx=borrowed??await context(dataRoot,options);let archive,journal,recoveryPoint;const preparedStages=[];
+// 迁移只放宽“原实例路径”绑定；数据布局、配置路径与摘要校验仍按恢复流程执行。
+const layoutShape=specs=>JSON.stringify(specs.map(spec=>({id:spec.id,kind:spec.kind,sqlite:Boolean(spec.sqlite),transient:Boolean(spec.transient)})));
+// 受管组件路径由本机组件准备重新填写；其余指向原实例的绝对路径随迁移改写到新数据目录。
+const managedComponentKeys={BOT_DSH_BIN:'',BOT_DSH_HOME:'',BOT_QQ_DIR:'',BOT_NAPCAT_DIR:'napcat/shell'};
+function migrateEnv(text,sourceRoot,targetRoot){
+  if(!isAbsolute(sourceRoot)||dirname(resolve(sourceRoot))===resolve(sourceRoot))return null;
+  const source=resolve(sourceRoot),target=process.platform==='win32'?targetRoot:targetRoot.split('\\').join('/'),separator=process.platform==='win32'?'\\':'/',windows=/^[A-Za-z]:[\\/]/.test(source);
+  const variants=[source,source.replace(/\\/g,'/'),source.replace(/\//g,'\\')];
+  const remap=value=>{
+    const quote=value.length>=2&&['"',"'"].includes(value[0])&&value[value.length-1]===value[0]?value[0]:'',inner=quote?value.slice(1,-1):value,match=windows?inner.toLowerCase():inner;
+    for(const prefix of variants){
+      const probe=windows?prefix.toLowerCase():prefix;let rest;
+      if(match===probe)rest='';else if(match.startsWith(probe+'/')||match.startsWith(probe+'\\'))rest=inner.slice(prefix.length);else continue;
+      return quote+target+rest.split(/[\\/]+/).filter(Boolean).map(part=>separator+part).join('')+quote;
+    }
+    return null;
+  };
+  let changed=false;const lines=text.split('\n').map(line=>{
+    const match=/^([A-Za-z_][A-Za-z0-9_]*)=(.*)$/.exec(line);if(!match)return line;
+    const remapped=remap(match[2]);if(remapped===null)return line;changed=true;
+    return Object.hasOwn(managedComponentKeys,match[1])?match[1]+'='+managedComponentKeys[match[1]]:match[1]+'='+remapped;
+  });
+  return changed?lines.join('\n'):null;
+}
+async function restoreArchive(ctx,file,secret,migrate,options){
+  let archive,journal,recoveryPoint;const preparedStages=[];
   try{
     const input=await safePath(resolve(file));
     if(ctx.specs.some(spec=>canonical(spec.path)===canonical(input)||spec.kind==='directory'&&inside(canonical(spec.path),canonical(input))))throw fail('请将备份文件移到待恢复数据目录之外，再执行恢复。');
     progress(options,'verifying');archive=await decodeArchive(file,secret,options);
-    if(canonical(archive.manifest.instance)!==canonical(ctx.dataRoot)||JSON.stringify(archive.manifest.layout)!==JSON.stringify(ctx.specs))throw fail('本备份仅能恢复到原实例及相同数据路径；跨目录或跨机器搬迁需另行迁移。');
+    if(migrate){
+      if(layoutShape(archive.manifest.layout)!==layoutShape(ctx.specs))throw fail('备份的数据布局与当前程序版本不一致，请在相同版本的服务器上迁移。');
+    }else if(canonical(archive.manifest.instance)!==canonical(ctx.dataRoot)||JSON.stringify(archive.manifest.layout)!==JSON.stringify(ctx.specs))throw fail('本备份仅能恢复到原实例及相同数据路径；跨目录或跨机器搬迁需另行迁移。');
+    if(migrate){
+      const text=await readFile(archive.parsed.env.staged,'utf8'),remapped=migrateEnv(text,archive.manifest.instance,ctx.dataRoot);
+      if(remapped!==null)await writeFile(archive.parsed.env.staged,remapped,'utf8');
+    }
     const restoredEnv=await readFile(archive.parsed.env.staged,'utf8'),restoredLayout=await layout(ctx.dataRoot,restoredEnv);
-    if(JSON.stringify(restoredLayout.specs)!==JSON.stringify(ctx.specs))throw fail('备份配置中的数据路径与当前实例不一致。');
+    if(JSON.stringify(restoredLayout.specs)!==JSON.stringify(ctx.specs))throw fail(migrate?'备份与当前实例的数据路径布局不一致；请让两边使用相同的相对路径配置（如 bot-workspace、data）后重试。':'备份配置中的数据路径与当前实例不一致。');
     await validateSnapshot(archive);
     recoveryPoint=join(ctx.dataRoot,'backups','before-restore-'+Date.now()+'-'+randomUUID()+'.wwbackup');
     progress(options,'recovery-point');await backupLocked(ctx,recoveryPoint,secret,{...options,preserveInvalid:true,onProgress:event=>options.onProgress?.({...event,stage:'recovery-point'})});
@@ -296,16 +325,26 @@ export async function restoreBackup({dataRoot,file,password:secret,...options}){
       if(entry.next!==null)await rename(entry.staged,entry.target);options.checkpoint?.('installed',entry.id);
     }
     await journalWrite(ctx,{...journal,state:'committed'});journal.state='committed';options.checkpoint?.('committed');await finishJournal(ctx,journal);
-    progress(options,'complete',archive.files,archive.bytes);return {operation:'restore',files:archive.files,bytes:archive.bytes,recoveryPoint,restartRequired:true};
+    progress(options,'complete',archive.files,archive.bytes);return {operation:migrate?'migrate':'restore',files:archive.files,bytes:archive.bytes,recoveryPoint,restartRequired:true};
   }catch(error){
     if(journal&&await optional(join(ctx.dataRoot,journalName))){try{await finishJournal(ctx,journal);}catch{throw fail('恢复未收尾，已保留恢复点；请使用“处理上次中断”，完成前不能启动机器人。','MAINTENANCE_RECOVERY_REQUIRED');}}
     throw error;
   }finally{
     try{
       if(!await optional(join(ctx.dataRoot,journalName)))for(const item of preparedStages){const entry=journal?.entries.find(entry=>entry.staged===item.path);await removeOwned(item.path,entry?.next,item.kind);}
-      await archive?.scratch.remove();
-    }finally{if(!borrowed)ctx.lease.release();}
+    }finally{await archive?.scratch.remove();}
   }
+}
+export async function restoreBackup({dataRoot,file,password:secret,...options}){
+  password(secret);
+  const borrowed=options[heldContext],ctx=borrowed??await context(dataRoot,options);
+  try{return await restoreArchive(ctx,file,secret,false,options);}finally{if(!borrowed)ctx.lease.release();}
+}
+/** 将加密备份迁移到另一个数据目录或另一台机器：仍校验数据布局、配置路径与文件摘要。 */
+export async function migrateBackup({dataRoot,file,password:secret,...options}){
+  password(secret);
+  const borrowed=options[heldContext],ctx=borrowed??await context(dataRoot,options);
+  try{return await restoreArchive(ctx,file,secret,true,options);}finally{if(!borrowed)ctx.lease.release();}
 }
 
 /** Keep all data locks across an install transaction; the context token never crosses IPC. */

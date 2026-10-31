@@ -15,18 +15,19 @@ partial class App
     static bool componentBusy;
     static readonly List<Button> componentActions = new List<Button>();
     static Dictionary<string,string> componentBaseline = new Dictionary<string,string>();
+    static string componentRemoteUpload;
     static void OpenComponents(bool preview = false) {
         if(componentDialog!=null) {componentDialog.Activate();return;}
         componentDialog=new Window {Title="准备运行组件",Owner=window,Width=590,Height=520,MinWidth=500,MinHeight=400,WindowStartupLocation=WindowStartupLocation.CenterOwner,Resources=window.Resources,Background=window.Background,Foreground=window.Foreground,FontFamily=window.FontFamily,FontSize=13};
         var layout=new Grid {Background=window.Background};
         layout.RowDefinitions.Add(new RowDefinition {Height=GridLength.Auto});layout.RowDefinitions.Add(new RowDefinition());layout.RowDefinitions.Add(new RowDefinition {Height=GridLength.Auto});
-        layout.Children.Add(new TextBlock {Text="从官方来源准备固定版本。模型组件首次准备可能需要几分钟；QQ 组件约 118 MB。完成后补全路径草稿，保存后生效。",TextWrapping=TextWrapping.Wrap,LineHeight=21,Margin=new Thickness(0,0,0,18)});
+        layout.Children.Add(new TextBlock {Text="从官方来源准备固定版本。模型组件首次准备可能需要几分钟；QQ 组件约 120–300 MB，视平台而定。完成后补全路径草稿，保存后生效。",TextWrapping=TextWrapping.Wrap,LineHeight=21,Margin=new Thickness(0,0,0,18)});
         componentRows=new StackPanel();var scroll=new ScrollViewer {Content=componentRows,VerticalScrollBarVisibility=ScrollBarVisibility.Auto};Grid.SetRow(scroll,1);layout.Children.Add(scroll);
         var footer=new StackPanel {Margin=new Thickness(0,16,0,0)};Grid.SetRow(footer,2);layout.Children.Add(footer);
         componentStatus=new TextBlock {Text="正在读取组件状态…",TextWrapping=TextWrapping.Wrap,LineHeight=20,Margin=new Thickness(0,0,0,10)};
         System.Windows.Automation.AutomationProperties.SetAutomationId(componentStatus,"ComponentStatus");footer.Children.Add(componentStatus);
         componentProgress=new ProgressBar {Height=5,Visibility=Visibility.Collapsed,Margin=new Thickness(0,0,0,12)};footer.Children.Add(componentProgress);
-        componentCancel=new Button {Content="取消准备",HorizontalAlignment=HorizontalAlignment.Left,Visibility=Visibility.Collapsed};componentCancel.Click+=(s,e)=>{componentCancel.IsEnabled=false;componentStatus.Text="正在取消并清理临时文件…";Send("components-cancel");};footer.Children.Add(componentCancel);
+        componentCancel=new Button {Content="取消准备",HorizontalAlignment=HorizontalAlignment.Left,Visibility=Visibility.Collapsed};componentCancel.Click+=(s,e)=>{componentCancel.IsEnabled=false;componentStatus.Text="正在取消并清理临时文件…";CancelRemoteTransfer();Send("components-cancel");};footer.Children.Add(componentCancel);
         componentDialog.Content=new Border {Padding=new Thickness(24),Background=window.Background,Child=layout};
         componentDialog.Closed+=(s,e)=>{if(componentBusy)Send("components-cancel");componentDialog=null;};
         if(preview){componentDialog.Show();return;}
@@ -35,7 +36,24 @@ partial class App
     static void PrepareComponent(string id, bool local) {
         if(componentBusy)return;
         string archive=null;
-        if(local) {var picker=new Microsoft.Win32.OpenFileDialog {Title="选择官方 QQ 组件包",Filter="官方组件 ZIP|*.zip"};if(picker.ShowDialog(componentDialog)!=true)return;archive=picker.FileName;}
+        if(local) {
+            var picker=new Microsoft.Win32.OpenFileDialog {Title="选择官方 QQ 组件包",Filter="官方组件 ZIP|*.zip"};if(picker.ShowDialog(componentDialog)!=true)return;archive=picker.FileName;
+            var profile=RemoteModeActive()?ActiveRemoteProfile():null;
+            if(profile!=null) {
+                string directory=RemoteStagingDirectory(profile),error;
+                if(!EnsureRemoteDirectory(profile,directory,out error)){ComponentError("无法准备服务器暂存目录："+error);return;}
+                string remote=directory+"/"+RemoteFileName("napcat-import",".zip");componentRemoteUpload=remote;
+                componentBaseline=runtimeInputs.ToDictionary(pair=>pair.Key,pair=>RuntimeValue(pair.Key));
+                componentBusy=true;componentStatus.Text="正在上传组件包到服务器…";componentProgress.IsIndeterminate=true;componentProgress.Visibility=Visibility.Visible;
+                componentCancel.Visibility=Visibility.Visible;componentCancel.IsEnabled=true;foreach(var button in componentActions)button.IsEnabled=false;
+                BeginRemoteTransfer(profile,true,archive,remote,(ok,message)=>{
+                    if(!ok){if(componentRemoteUpload!=null){DeleteRemoteFileQuiet(profile,componentRemoteUpload);componentRemoteUpload=null;}ComponentError("上传组件包失败："+message);return;}
+                    componentStatus.Text="正在服务器上准备组件，请保持工作台打开。";
+                    Send("components",new {operation="install",id=id,archivePath=remote});
+                });
+                return;
+            }
+        }
         componentBaseline=runtimeInputs.ToDictionary(pair=>pair.Key,pair=>RuntimeValue(pair.Key));
         componentBusy=true;componentStatus.Text="正在准备，请保持工作台打开。";componentProgress.IsIndeterminate=true;componentProgress.Visibility=Visibility.Visible;
         componentCancel.Visibility=Visibility.Visible;componentCancel.IsEnabled=true;foreach(var button in componentActions)button.IsEnabled=false;
@@ -43,6 +61,7 @@ partial class App
     }
     static void RenderComponents(Dictionary<string,object> message) {
         componentBusy=false;
+        if(componentRemoteUpload!=null){DeleteRemoteFileQuiet(ActiveRemoteProfile(),componentRemoteUpload);componentRemoteUpload=null;}
         if(componentDialog==null)return;
         componentRows.Children.Clear();componentActions.Clear();
         foreach(Dictionary<string,object> row in (IEnumerable)message["rows"]) {
@@ -77,6 +96,7 @@ partial class App
     }
     static void ComponentError(string text) {
         componentBusy=false;
+        if(componentRemoteUpload!=null){DeleteRemoteFileQuiet(ActiveRemoteProfile(),componentRemoteUpload);componentRemoteUpload=null;}
         if(componentDialog==null)return;
         componentStatus.Text=text;componentProgress.Visibility=Visibility.Collapsed;componentCancel.Visibility=Visibility.Collapsed;foreach(var button in componentActions)button.IsEnabled=true;
     }
