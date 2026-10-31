@@ -4,7 +4,7 @@
 
 当前为 **0.2.0 开发版本**，交付平台为 Windows 10/11 x64，并新增 Linux 服务器部署与 Windows 远程控制台。此前候选已完成真实 QQ 登录和私聊回复；本分支全量隔离回归 **534 项（532 通过、2 项 Linux 专用跳过）**（本轮未启用真实 FFmpeg）；停机加密备份与原实例恢复已接入桌面，脱敏诊断、停机清理和用户级安装/升级/修复/回退已实现；Linux 侧在 Ubuntu 24.04 虚拟机完成守护进程、SSH 远程控制、签名安装升级回退与备份迁移验收。正式签名材料、干净系统、72 小时负载及新用户试用仍待补齐。本机故障矩阵与性能执行方案见[故障矩阵](docs/local-failure-matrix.md)和[性能方案](docs/performance-execution-plan.md)。实施范围见[精简改造方案](docs/product-readiness-plan.md)，实际结果见[实施进展](docs/implementation-status.md)。
 
-最新 `rc8` 内部候选来源为 `ec33430`，包含登录恢复、停机备份与清理、脱敏诊断及安装升级工具；包内 Node 的 48 项专项通过，ZIP 全文件摘要与独立测试公钥校验通过，原生安装工具已完成签名校验、首次安装、升级、回退、损坏程序修复和保留数据卸载六步演练。临时测试签名不代表正式发布身份，本包尚未进行真实 QQ 收发或长时验收。候选摘要见[验证记录](docs/validation/release-candidate-rc8-2026-10-30.json)。Linux 服务器部署与本地远程控制台已完成内部验证，见[云部署与远程控制台方案](docs/linux-remote-console-plan.md)。
+最新内部标记为 `v0.2.0-rc9`，覆盖 Linux 守护进程、Windows 远程控制台与网页正文抓取修正，仅提供源码标签，不含签名发行包。上一份 `rc8` 内部候选来源为 `ec33430`，包含登录恢复、停机备份与清理、脱敏诊断及安装升级工具；包内 Node 的 48 项专项通过，ZIP 全文件摘要与独立测试公钥校验通过，原生安装工具已完成签名校验、首次安装、升级、回退、损坏程序修复和保留数据卸载六步演练。临时测试签名不代表正式发布身份，本包尚未进行真实 QQ 收发或长时验收。候选摘要见[验证记录](docs/validation/release-candidate-rc8-2026-10-30.json)。Linux 服务器部署与本地远程控制台已完成内部验证，见[云部署与远程控制台方案](docs/linux-remote-console-plan.md)。
 
 ```text
 QQ ↔ NapCat / OneBot 11 ↔ bridge ↔ DSH（ACP）
