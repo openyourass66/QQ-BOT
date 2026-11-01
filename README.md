@@ -1,15 +1,51 @@
 # QQ-BOT · 小鲸工作台
 
-基于 DSH（ACP）与 NapCat（OneBot 11）的 QQ 机器人，提供 Windows 原生 WPF 控制台，支持私聊、群聊、人设、长期记忆和受权限与额度约束的 QQ 操作。机器人既可本机直连，也可部署在 Linux 服务器由 `whaled` 守护，Windows 控制台通过 SSH 远程管理。
-
-当前为 **0.2.0 开发版本**，交付平台为 Windows 10/11 x64，并新增 Linux 服务器部署与 Windows 远程控制台。此前候选已完成真实 QQ 登录和私聊回复；本分支全量隔离回归 **534 项（532 通过、2 项 Linux 专用跳过）**（本轮未启用真实 FFmpeg）；停机加密备份与原实例恢复已接入桌面，脱敏诊断、停机清理和用户级安装/升级/修复/回退已实现；Linux 侧在 Ubuntu 24.04 虚拟机完成守护进程、SSH 远程控制、签名安装升级回退与备份迁移验收，并在公网 Linux 实例完成部署、配置与聊天数据迁移及断线重连验证；真实 QQ 扫码登录与收发仍待完成。正式签名材料、干净系统、72 小时负载及新用户试用仍待补齐。本机故障矩阵与性能执行方案见[故障矩阵](docs/local-failure-matrix.md)和[性能方案](docs/performance-execution-plan.md)。实施范围见[精简改造方案](docs/product-readiness-plan.md)，实际结果见[实施进展](docs/implementation-status.md)。
-
-最新内部标记为 `v0.2.0-rc9`，覆盖 Linux 守护进程、Windows 远程控制台与网页正文抓取修正，仅提供源码标签，不含签名发行包。上一份 `rc8` 内部候选来源为 `ec33430`，包含登录恢复、停机备份与清理、脱敏诊断及安装升级工具；包内 Node 的 48 项专项通过，ZIP 全文件摘要与独立测试公钥校验通过，原生安装工具已完成签名校验、首次安装、升级、回退、损坏程序修复和保留数据卸载六步演练。临时测试签名不代表正式发布身份，本包尚未进行真实 QQ 收发或长时验收。候选摘要见[验证记录](docs/validation/release-candidate-rc8-2026-10-30.json)。Linux 服务器部署与本地远程控制台已完成内部验证，见[云部署与远程控制台方案](docs/linux-remote-console-plan.md)。
+基于 DSH（ACP）与 NapCat（OneBot 11）的 QQ 机器人，提供 Windows 原生控制台，支持私聊、群聊、人设、长期记忆和受权限与额度约束的 QQ 操作。机器人可以运行在本机，也可以部署在 Linux 服务器由 `whaled` 守护，Windows 控制台通过 SSH 远程管理。
 
 ```text
 QQ ↔ NapCat / OneBot 11 ↔ bridge ↔ DSH（ACP）
                             └── QQ MCP 工具与后台资料整理
 ```
+
+## 下载与安装
+
+发行包放在 [Releases](https://github.com/openyourass66/QQ-BOT/releases)，当前版本 **0.2.1**，提供 Windows x64 与 Linux x64 两种布局。
+
+### Windows 10/11 x64
+
+1. 下载 `WhaleWorkbench-0.2.1-win-x64.zip` 和对应的 `.sha256`，校验摘要后**完整解压**。
+2. 双击 `WhaleSetup.exe` 安装或升级；已有安装也可从工作台“安装、升级与回退”入口打开。
+3. 安装完成后从开始菜单“小鲸工作台”或程序目录的 `WhaleLauncher.exe` 启动。
+4. 只想试用时，可直接双击包内“开始使用.cmd”，数据保存在包旁的 `user-data/`。
+
+不要单独复制 EXE，必须保留 `runtime/`、`desktop/`、`dist/`、生产依赖和发行清单。安装与回退细节见[安装与升级说明](docs/install-and-upgrade.md)。
+
+### Linux x64 服务器
+
+```bash
+sha256sum -c WhaleWorkbench-0.2.1-linux-x64.tar.gz.sha256
+tar -xzf WhaleWorkbench-0.2.1-linux-x64.tar.gz -C /tmp
+```
+
+首次安装先写入 systemd 单元，再用发行目录执行安装；后续升级只替换程序文件，不改写数据：
+
+```bash
+sudo node /tmp/WhaleWorkbench-0.2.1-linux-x64/scripts/whaled-install.mjs \
+  --data-dir /var/lib/whaleworkbench \
+  --program /opt/whaleworkbench/current \
+  --node /opt/whaleworkbench/current/runtime/bin/node \
+  --service whaled.service --no-start
+
+sudo node /tmp/WhaleWorkbench-0.2.1-linux-x64/scripts/whaled-upgrade.mjs \
+  --package /tmp/WhaleWorkbench-0.2.1-linux-x64 \
+  --install-root /opt/whaleworkbench \
+  --data-dir /var/lib/whaleworkbench \
+  --trust /tmp/WhaleWorkbench-0.2.1-linux-x64/components/release-trust.json
+```
+
+已有安装会自动使用 `/opt/whaleworkbench/trust.json`，可省略 `--trust`。`--dry-run` 只校验不切换，`--rollback` 回到上一版，`--recover` 处理上次中断的升级。完整步骤见[安装与升级说明](docs/install-and-upgrade.md#linux-服务器部署分支)。
+
+> 当前发行包使用内部验证签名通道（`internal-validation`），会校验发行清单和全部文件，但不代表正式发布者身份。
 
 ## 功能
 
@@ -21,89 +57,61 @@ QQ ↔ NapCat / OneBot 11 ↔ bridge ↔ DSH（ACP）
 | 联网核实 | 使用 DSH / DeepSeek 原生搜索与网页读取，回答附实际来源链接 |
 | QQ 操作 | 消息、联系人、表情、图片、语音、文件、提醒、资料、点赞与空间工具 |
 | 空间互动 | 复用 NapCat 登录浏览自己或好友说说、发表评论与回复；独立开关、额度及正文确认 |
-| 自主行为 | 独立调度聊天、表情收藏、空间创作与好友空间互动；无需新指令，可自然选择文字、表情或语音，受安静时段和额度约束 |
+| 自主行为 | 独立调度聊天、表情收藏、空间创作与好友空间互动；受安静时段和额度约束 |
 | 上下文管理 | 群背景、记忆和用语字数预算；QQ 工具次数限制、条件挂载与可选会话换代 |
-| 桌面管理 | 四步快速配置、环境检测、安装指引、启停与模型重连、动态设置、QQ 活动、日志、诊断与托盘；可远程连接 Linux 服务器并自动重连 |
-| 权限与凭据 | 真实主人身份及操作内容确认、模型工具守卫、请求与 QQ 动作预算；Windows 普通发行布局使用加密凭据 |
-| 数据与恢复 | 四类 SQLite 仓储、迁移保护、入站去重、事务额度及动作记录、资源锁与进程恢复；停机加密备份、校验、恢复及中断处理 |
-| 媒体维护 | 容量与引用索引、有界视频抽帧、图形化停机预览与确认清理；保护收藏、任务和未知动作依赖 |
+| 桌面管理 | 四步快速配置、环境检测、安装指引、启停与模型重连、动态设置、QQ 活动、日志、诊断与托盘 |
+| 远程管理 | Windows 控制台通过 SSH 连接 Linux 实例，断线后自动重连 |
+| 权限与凭据 | 真实主人身份及操作内容确认、模型工具守卫、请求与 QQ 动作预算；Windows 发行布局使用加密凭据 |
+| 数据与恢复 | SQLite 存储、迁移保护、入站去重、事务额度与动作记录；停机加密备份、校验、恢复及中断处理 |
+| 媒体维护 | 容量与引用索引、有界视频抽帧、图形化停机预览与确认清理 |
 
 后台记忆和用语学习默认关闭；启用后还需指定允许学习的会话。真实 QQ、搜索、媒体和空间能力取决于所连接的协议端与服务。配置方法和边界见[使用指南](docs/usage.md)。
 
-## 环境要求
+## 首次使用
 
-以下为源码运行要求。完整候选包内置应用 Node 和生产依赖，无需另装开发工具；首次使用仍需联网准备 QQ/DSH 组件并配置模型，详见[组件与打包](docs/components-and-packaging.md)。
+首次打开控制台会补建缺失配置与默认人设；未配置 DSH 或尚未选择联系范围时自动进入「快速配置」：
 
-- Node.js **22.20–22.x，或 24 及以上**，以及 npm。旧 Node 22.13 已复现数据库原生崩溃，不作为应用运行环境；QQ 组件仍使用固定包内独立运行库。
-- 模型凭据和网络；DSH 可在工作台中准备，也可使用自行维护的配置。
-- 原生桌面端需要 Windows 10/11 与 .NET Framework 4.8，无需 Electron 或 .NET SDK。
-- QQ 账号；可在工作台准备固定 NapCat 组件并扫码，也可连接已有 OneBot 服务。
+1. **检测环境**：准备 DSH 与 QQ 运行组件，或检测已有安装；也可以连接已经运行的 OneBot 服务。
+2. **选择模型**：复用已有 DSH 配置，或填写本项目 API Key 并测试实际回复。
+3. **连接 QQ**：受管组件点击「配置并登录 QQ」，按手机提示扫码；外部服务填写 HTTP / WebSocket 地址与令牌。
+4. **选择范围并启动**：选择机器人主人及允许聊天的好友和群，检查后保存并启动。
 
-## 快速开始
+新实例默认只开放明确选择的会话，关闭后台自主判断、自动收藏与空间创作。快速配置与全部连接设置共用同一份草稿，切换不会丢失输入。详细步骤见[使用指南](docs/usage.md#首次配置与组件安装)。
 
-在项目根目录运行：
+测试模型连接会发送一条真实请求，可能产生少量费用。首次准备组件需要联网，组件来源、版本和校验方式见[组件与打包](docs/components-and-packaging.md)。
 
-```powershell
-npm ci
-npm run setup
-npm run desktop:build
-npm run desktop
-```
-
-`setup` 只补建缺失的 `.env` 和默认 `bot-workspace/AGENTS.md`，不会覆盖已有配置或人设。自定义工作区需自行准备并在连接设置中选择。
-
-首次打开控制台会补建缺失的配置与默认人设；未配置 DSH 或新实例尚未选择联系范围时自动进入「快速配置」，也可从工作总览随时打开：
-
-1. **检测环境**：可先点击「准备运行组件」，或检测已安装的 DSH、QQ 路径，选择本机启动 NapCat 或连接已有 QQ 服务。
-2. **选择模型**：已有 DSH 配置或账号可直接复用；新用户可选择本项目 API Key，填写密钥并测试实际回复。
-3. **连接 QQ**：受管组件点击「配置并登录 QQ」，自动建立本机安全连接并显示二维码，按手机提示完成登录。外部服务填写 HTTP / 正向 WebSocket 地址与令牌；受管端口由程序选择，账号以实际登录结果核对。
-4. **选择范围并启动**：读取已登录 QQ 的好友和群，选择机器人主人及允许聊天的对象，再检查并保存启动。可以暂不设置主人，也可仅保存配置。
-
-新实例默认只开放明确选择的会话，关闭后台自主判断、自动收藏与空间创作；主人自动加入允许私聊名单。未设置主人时，账号管理与需要主人确认的操作不可用。已有配置保留原设置；使用范围草稿与连接一同保存，读取联系人不会发送消息或调用模型。
-
-快速配置与全部连接设置共用同一份草稿，切换不会丢失输入。自动检测只补全空白或默认路径，不覆盖手填内容；检查不调用对话模型、不发送 QQ 消息。更改输入后需重新检查。媒体、搜索、人设及管理员等行为参数可在基础聊天启动后再配置，详见[首次配置与组件安装](docs/usage.md#首次配置与组件安装)。
-
-测试模型连接会发送一条真实请求，可能产生少量费用。更换工作区后重新打开控制台，加载对应的人设与记忆。
-
-### 选择 QQ 接入方式
+### QQ 接入方式
 
 | 选择 | 适合的情况 | 需要准备 |
 | --- | --- | --- |
 | 自动连接（默认） | 已有服务优先，不可用时启动本机 NapCat | 可连接的 OneBot，或已部署的本机运行组件 |
 | 工作台启动本机 NapCat | 希望工作台负责组件准备、扫码与进程启停 | 工作台内准备固定组件；手工 Shell 模式另需 QQ 安装目录和适配库 |
-| 连接已运行的 QQ 服务 | 已用其他方式启动 NapCat，或使用远程服务 | HTTP / 正向 WebSocket 地址与令牌，无需本机 QQ 与 NapCat |
+| 连接已运行的 QQ 服务 | 已用其他方式启动 NapCat，或使用远程服务 | HTTP / 正向 WebSocket 地址与令牌 |
 
-选择已有服务后，即使服务暂时离线，也不会误启动本机 QQ。依赖检查中的「可跳过」不会阻止启动；「需处理」可点击定位。基础检查通过后，还需等待工作总览显示 QQ 在线、模型就绪，再发私聊或 @ 消息验证。
+选择已有服务后，即使服务暂时离线，也不会误启动本机 QQ。登录失效后仍可能需要按官方流程重新扫码；更新启动脚本须点击「重新启动」。详见[QQ 登录与隔离](docs/qq-login.md)。
 
-本机 NapCat 的登录 Worker 支持重建，受管模式的每代进程都先安装独立账号目录适配。登录失效后仍可能需要按官方流程重新扫码；更新启动脚本须点击「重新启动」，仅「重连模型」不会更新 QQ 进程。详见[QQ 登录与隔离](docs/qq-login.md)。
-
-### Linux 服务器与远程控制台
-
-机器人可以运行在 Linux x64 服务器，由 systemd 托管的 `whaled` 常驻进程管理；Windows 控制台留在本机，通过 SSH 连接远程实例。
+## Linux 服务器与远程控制台
 
 - 服务器侧：`whaled` 持有单实例锁与子进程，负责启停、维护、备份和开机恢复；关闭控制台、退出 SSH 或网络中断都不会停止机器人。管理接口只走数据目录下的 unix socket，公网只需开放 SSH。
-- 控制台侧：在「连接与运行 → 服务器连接」新建配置，填写主机、SSH 端口、用户名、私钥、服务器上的 Node、程序目录和数据目录。首次连接会显示主机密钥 SHA256 指纹并要求确认，之后变更必须再次确认。服务器重启、SSH 中断或网络恢复后，控制台按退避间隔自动重连；手动选择「断开服务器连接」后不再重连。
-- 远程文件：备份、恢复、迁移、诊断、组件导入和日志下载通过服务器暂存目录与 scp 传输，操作完成后清理暂存文件；记忆和工作区文件在页面内直接读写服务器内容。
-- 安装与升级：在服务器上用签名的 Linux 发行目录执行 `whaled-install.mjs` 和 `whaled-upgrade.mjs`；升级只替换程序，不改写数据目录，检查或启动失败会自动切回上一版。升级成功后才清理历史程序，默认保留最近 5 个版本（`--keep` 可设 2–50），当前版与上一版不会自动删除；安装器默认把 journald 日志限制为 256 MiB（`--journal-max` 可改）。步骤见[安装与升级说明](docs/install-and-upgrade.md#linux-服务器部署分支)。
-- 实例迁移：停止原实例与服务器机器人后，可把 `data/`、`bot.config.json`、`.env` 和机器人工作区复制到服务器数据目录，并把 DSH、NapCat 等路径改为服务器位置，聊天、记忆与媒体可直接继续使用。QQ 登录态不能迁移，需在服务器重新扫码；Windows 安装布局的 DPAPI 凭据需重新录入。
-- 已知边界：远程模式隐藏 Windows 专属的安装、注册表和开始菜单入口。
+- 控制台侧：在「连接与运行 → 服务器连接」新建配置，填写主机、SSH 端口、用户名、私钥、服务器上的 Node、程序目录和数据目录。首次连接会显示主机密钥指纹并要求确认，之后变更必须再次确认。
+- 远程文件：备份、恢复、迁移、诊断、组件导入和日志下载通过暂存目录与 scp 传输，操作完成后清理暂存文件。
+- 已知边界：远程模式隐藏 Windows 专属的安装、注册表和开始菜单入口；QQ 登录态不能跨机器迁移，需要在目标实例重新扫码。
 
-### 更新与运行文件
-
-程序与数据目录的启动契约已经接入，源码继续使用原目录；内部发行目录默认使用用户目录，也支持显式便携/自定义目录。安装工具及受约束的升级回退流程已实现，升级成功后才清理历史版本，默认保留最近 5 个（含当前版与上一版），可用 `--keep` 调整；操作见[安装与升级说明](docs/install-and-upgrade.md)，目录规则见[运行布局说明](docs/runtime-layout.md)。
+## 数据、备份与升级
 
 | 运行方式 | 数据位置 |
 | --- | --- |
 | 源码运行 | 当前项目目录 |
-| 完整候选包直接打开 `QQ-BOT.exe` | `%LOCALAPPDATA%/WhaleWorkbench` |
-| 完整候选包运行 `开始使用.cmd` / `--portable` | 包目录的 `user-data/` |
+| Windows 安装版直接打开 `QQ-BOT.exe` | `%LOCALAPPDATA%/WhaleWorkbench` |
+| Windows 发行包“开始使用.cmd” / `--portable` | 包目录的 `user-data/` |
 | `--data-dir 路径` | 显式指定的独立目录 |
 
-更新项目时，从托盘选择「退出并停止机器人」，再运行 `npm ci` 和 `npm run desktop:build`，随后重新打开工作台。
+- 停机维护入口在“连接与运行 → 存储与高级 → 数据备份与恢复”。备份使用密码加密，恢复前保留当前数据的加密恢复点；QQ / DSH 账号登录态不包含在备份中。
+- 升级只替换程序文件，不改写数据库、配置和凭据；Linux 升级失败会自动切回上一版。回退同样受数据库 schema 限制。
+- 同一数据资源只允许一个桥接写入，重复启动会明确拒绝；运行时不要删除 `*.qqbot-lock.sqlite` 互斥侧文件。
+- 工作台关闭窗口后隐藏到托盘。本地模式从托盘选择「退出并停止机器人」；远程模式该操作只关闭控制台，服务器上的机器人继续运行。
 
-源码构建后可以双击根目录的 `QQ-BOT.exe`，需保留完整项目目录。完整候选 ZIP 应全部解压，保留 `runtime/`、`desktop/`、`dist/`、生产依赖、脚本、清单和模板。不要单独复制 EXE；构建产物不包含在源码仓库中。
-
-停机维护入口在“连接与运行 → 存储与高级 → 数据备份与恢复”，启动诊断页也可进入。备份以密码加密，恢复前保留当前数据的加密恢复点；本版仅支持原实例、相同数据路径，QQ / DSH 账号登录态不包含在备份中。详细操作和中断处理见[存储说明](docs/storage.md#停机加密备份与恢复)。
+详细说明见[运行布局](docs/runtime-layout.md)、[存储与备份](docs/storage.md#停机加密备份与恢复)和[权限与安全](docs/security-policy.md)。
 
 ## 对话模型
 
@@ -122,98 +130,52 @@ BOT_CHAT_BASE_URL=https://api.deepseek.com/anthropic
 QQ_BOT_DEEPSEEK_API_KEY=填写自己的密钥
 ```
 
-官方根地址及其 `/v1` 地址会自动转换到 `/anthropic`；自定义服务需兼容 Messages 协议。源码及便携配置按所选数据目录保存；Windows 普通发行布局通过 DPAPI 保护受管凭据。换 Windows 用户或机器后须按提示重新输入凭据。仅修改对话模型时可重连桥接并保留 QQ 登录。边界见[安全说明](docs/security-policy.md)。
+官方根地址及其 `/v1` 地址会自动转换到 `/anthropic`；自定义服务需兼容 Messages 协议。Windows 普通发行布局通过 DPAPI 保护受管凭据，换 Windows 用户或机器后须重新输入。仅修改对话模型时可重连桥接并保留 QQ 登录。
 
-## 工程目录
+## 从源码运行
 
-```text
-src/
-  bridge.ts             桥接启动入口，构建后仍为 dist/bridge.js
-  mcp-qq.ts             MCP 启动入口，构建后仍为 dist/mcp-qq.js
-  core/                 配置、会话存储、队列、消息处理、审批与额度
-  app/                  会话生命周期、可信动作分派与事务执行
-  storage/              SQLite Worker、迁移、去重、任务领取与媒体索引
-  security/             权限矩阵、模型工具守卫与实际请求预算
-  qq/                   OneBot、群记录、QQ 动作、社交记录与工具
-  agent/                模型选择、记忆整理、群内用语、自主行为与上下文
-  services/             媒体、空间、内部动作 HTTP 服务与客户端
-desktop/                原生 WPF 界面、Node 配置与进程管理
-scripts/                运行布局、组件准备、进程保护、离线维护与发行
-  dev/                  假 OneBot 等开发工具
-templates/              可提交的默认人设
-tests/                  单元与集成测试、隔离夹具、原生窗口测试
-docs/                   使用指南与开发说明
-components/             固定组件来源、依赖锁及许可
-packaging/              Linux systemd 服务单元与发行打包输入
-server/、web/            私有浏览器管理的源码验证入口
-bot-workspace/          本机人设、记忆与输出（Git 忽略）
-data/                   本机会话、聊天、媒体与日志（Git 忽略）
-napcat/                 本机协议运行环境与账号配置（Git 忽略）
-remote/                 远程控制台的本地连接配置与主机指纹（Git 忽略）
-dist/                   自动生成的 JavaScript 与调试映射（Git 忽略）
+源码运行需要 Node.js **22.20–22.x，或 24 及以上**，以及 npm。原生桌面端需要 Windows 10/11 与 .NET Framework 4.8，无需 Electron 或 .NET SDK。旧 Node 22.13 已复现数据库原生崩溃，不作为应用运行环境。
+
+```powershell
+npm ci
+npm run setup
+npm run desktop:build
+npm run desktop
 ```
 
-构建成功后会清理已删除或移动模块的旧 JavaScript 和映射，避免目录调整留下重复产物。联网统一使用 DSH 原生搜索与网页读取工具。
-
-## 常用命令
+`setup` 只补建缺失的 `.env` 和默认 `bot-workspace/AGENTS.md`，不会覆盖已有配置或人设。构建产物不包含在源码仓库中，需保留完整项目目录。
 
 | 命令 | 用途 |
 | --- | --- |
 | `npm run setup` | 初始化缺失的本地配置与默认人设 |
-| `npm run build` | 编译桥接与 MCP，清理过期构建文件 |
-| `npm run desktop:build` | 编译桥接并生成 Windows EXE |
+| `npm run desktop:build` | 编译桥接与 MCP，生成 Windows EXE |
 | `npm run desktop` | 打开工作台；缺少 EXE 时自动构建 |
 | `npm start` | 使用 `.env` 启动已构建的桥接 |
 | `npm run napcat` | 启动已部署的 NapCat Node 环境 |
+| `npm run components` | 固定组件的准备与核对入口 |
 | `npm run typecheck` | TypeScript 类型检查 |
-| `npm test` | 在当前目录构建并运行自动测试 |
-| `npm run test:isolated` | 在临时检出副本编译测试，保护本机 `dist/` |
-| `npm run benchmark:store` | 使用合成消息测量 JSON 存储开销 |
-| `npm run components` | 固定组件的准备与核对入口，具体参数见组件说明 |
-| `npm run package:dir -- --output release/候选目录 --zip` | 从已提交的发行输入生成完整目录、ZIP 与摘要 |
-| `npm run whaled` | 在 Linux 服务器启动受管守护进程（Windows 下拒绝运行） |
-| `npm run whaled:install -- --program 程序目录 --data-dir 数据目录 --node 程序目录/runtime/bin/node` | 安装签名 Linux 发行目录并注册 systemd 服务 |
-| `npm run remote-host` | SSH 调用的远程主机桥接入口，由控制台自动启动，一般无需手动运行 |
+| `npm test` | 构建并运行自动测试 |
+| `npm run test:isolated` | 在临时副本中编译测试，保护本机 `dist/` |
+| `npm run package:dir -- --output release/候选目录 --zip` | 生成 Windows 发行目录、ZIP 与摘要 |
 | `npm run package:linux -- --output release/linux目录 --zip` | 生成 Linux x64 发行目录与 ZIP |
-| `npm run web:build` | 编译可选私有网页控制台，不是 Windows 桌面启动前置 |
+| `npm run whaled` | 在 Linux 服务器启动受管守护进程 |
 
-假 OneBot 联调、原生窗口测试和维护方法见[开发说明](docs/development.md)。单独运行 `npm run mcp` 可发现工具，实际受管操作需桥接自动传入的连接凭据。
+模块边界、原生窗口测试和维护方法见[开发说明](docs/development.md)。
 
-## 本地数据与 Git
+## 文档
 
-仓库只保存源码、测试、模板和无密钥示例。个人工作区已取消跟踪，`.gitignore` 排除整个 `bot-workspace/`，本地人设原样保留。
-
-依赖、编译输出、生成的 EXE、运行库、`release/` 候选和验证产物、根目录界面截图、日志、凭据和资源锁侧文件同样排除；`desktop/assets/` 的源素材、`templates/`、`.env.example`、无密钥测试夹具、固定组件清单和依赖锁继续提交。被忽略不代表可以删除：实际数据、配置、组件和迁移备份按用途保留。
-
-| 内容 | 默认位置 |
+| 文档 | 内容 |
 | --- | --- |
-| 连接、模型和密钥 | `.env` |
-| 动态机器人设置 | `bot.config.json` |
-| SQLite 会话、群上下文、额度、社交记录、媒体与日志 | `data/`，支持各项自定义路径 |
-| 全局人设 | `bot-workspace/AGENTS.md` |
-| 命名人设库 / 文本记忆 | `bot-workspace/.whale/` / `bot-workspace/memory/` |
-| NapCat 运行库、登录与账号配置 | `napcat/` |
-| 固定组件与受管 DSH 的个人配置 | 所选数据目录的 `components/<组件>/<版本>/`、`dsh/` |
+| [使用指南](docs/usage.md) | 首次配置、组件安装、日常操作与能力边界 |
+| [QQ 登录与隔离](docs/qq-login.md) | 受管 QQ 配置、扫码、登录失效与账号目录隔离 |
+| [安装与升级](docs/install-and-upgrade.md) | Windows / Linux 安装、升级、回退、修复与卸载 |
+| [运行布局](docs/runtime-layout.md) | 程序目录、数据目录、便携模式与启动入口 |
+| [存储与备份](docs/storage.md) | SQLite 存储、迁移、停机加密备份与恢复 |
+| [权限与安全](docs/security-policy.md) | 主人身份、操作确认、工具守卫与凭据保护 |
+| [组件与打包](docs/components-and-packaging.md) | 固定组件来源、准备流程与发行目录构建 |
+| [浏览器控制台](docs/cloud-console.md) | 可选私有网页控制台的预览与使用 |
+| [开发说明](docs/development.md) | 模块边界、测试、构建与原生窗口验证 |
 
-自定义数据目录位于仓库内时须补充忽略规则。迁移前先停止旧实例并保留完整数据副本；新版会保护原 JSON 和迁移备份，旧版不能直接读取新数据库，也不能与新版同时写同一份数据。备份前须停止桥接和受管 QQ，加密备份与原实例恢复入口见上文。现有 `export` 只导出社交库，不是整个实例的恢复包。
+## 许可
 
-停机核对和媒体清理入口如下；先查阅[存储与维护说明](docs/storage.md)，确认操作的是目标数据目录：
-
-```powershell
-node scripts/storage.mjs verify --data-dir 'D:\机器人数据'
-node scripts/storage.mjs cleanup-media --data-dir 'D:\机器人数据' --dry-run
-```
-
-清理默认保留三十天的无引用缓存，预览不会删除媒体，但会维护索引。实际清理需在核对预览后去掉 `--dry-run`；运行实例占用数据时拒绝执行。
-
-## 运行说明
-
-- 「保存机器人设置」保存行为配置；「保存连接与媒体」保存该页内容，两者不会携带另一页未保存的草稿。
-- `bot.config.json` 的显式值优先于环境默认值，保存后热更新；连接地址与凭据修改通常需要重启。
-- 工作台关闭窗口后隐藏到托盘；本地模式下从托盘选择「退出并停止机器人」才停止受管进程。外部启动的 OneBot 不会被工作台结束。远程模式下该操作显示为「退出控制台」，只关闭控制台并断开 SSH，服务器上的机器人与 `whaled` 守护进程继续运行，下次打开控制台会自动重连；需要停止服务器上的机器人时，先选择「停止机器人」。
-- 同一数据资源只允许一个桥接写入，重复启动会明确拒绝。首次升级前先停止所有旧桥接；运行时不要删除 `*.qqbot-lock.sqlite` 互斥侧文件。超时、损坏数据、权限或服务不可用时，先看工作日志和启动诊断。
-- 自动测试使用隔离数据与模拟服务；不能据此判断真实 QQ 接口、付费服务可达性或模型理解质量。
-
-项目代码采用 [MIT 许可证](LICENSE)。第三方组件与依赖继续遵守各自许可，NapCat 的个人非商业使用与组件获取方式见[组件说明](docs/components-and-packaging.md)。
-
-服务器运行与浏览器管理见[云端控制台方案](docs/cloud-console-plan.md)，私有只读预览见[当前使用说明](docs/cloud-console.md)。Linux 发行与远程控制台已完成内部验证，正式签名材料、干净系统、72 小时负载及新用户试用仍待补齐。
+项目代码采用 [MIT 许可证](LICENSE)。第三方组件与依赖继续遵守各自许可，NapCat 的个人非商业使用与组件获取方式见[组件说明](docs/components-and-packaging.md)。发行包不包含个人配置、聊天记录或登录资料。

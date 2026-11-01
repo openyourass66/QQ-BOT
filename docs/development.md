@@ -1,10 +1,8 @@
 # 开发与维护
 
-面向普通 Windows 用户的发行、权限、存储、恢复与验收工作，见[产品化优化方案](product-readiness-plan.md)。该文档描述待实施范围与发布门槛，不代表相关改造已经完成。
+用户侧的使用、安装、备份与权限说明见[使用指南](usage.md)、[安装与升级](install-and-upgrade.md)和[执行权限](security-policy.md)。
 
-当前已实现范围及验证结果见[实施进展](implementation-status.md)。
-
-固定组件、隔离准备器与内部发行目录构建见[组件与打包](components-and-packaging.md)。`npm run package:dir` 生成内置运行环境的验证目录，不代表完成正式安装器和发布验收。
+固定组件、隔离准备器与发行目录构建见[组件与打包](components-and-packaging.md)。`npm run package:dir` 生成内置运行环境的验证目录，不代表完成正式安装器和发布验收。
 
 桌面与正式命令行入口使用 `scripts/app-paths.mjs`、`scripts/run.mjs` 统一运行布局；程序资源从安装目录读取，用户配置与运行文件按选定数据目录解析。入口参数和兼容规则见[运行布局说明](runtime-layout.md)。
 

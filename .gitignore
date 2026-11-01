@@ -97,3 +97,18 @@ Desktop.ini
 /coverage/
 /.nyc_output/
 /.tmp/
+
+# 内部计划、进度、基准与候选记录：只在本地保留，不进入公开仓库
+/docs/benchmarks/
+/docs/implementation-status.md
+/docs/product-readiness-plan.md
+/docs/product-readiness-plan-full-*.md
+/docs/local-completion-checklist.md
+/docs/local-failure-matrix.md
+/docs/performance-execution-plan.md
+/docs/cloud-console-plan.md
+/docs/cloud-deployment.md
+/docs/dependency-security.md
+/docs/linux-remote-console-plan.md
+/docs/项目进度与后续实施方案-*.md
+/docs/validation/release-candidate-*.json
