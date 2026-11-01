@@ -1,11 +1,14 @@
 import { spawn } from 'node:child_process';
-import { chmod, mkdir, readFile, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { resolve, join, dirname, isAbsolute } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const UNIT_DIR = '/etc/systemd/system';
+const JOURNAL_CONF = '/etc/systemd/journald.conf';
+const JOURNAL_DROPIN_DIR = '/etc/systemd/journald.conf.d';
+const JOURNAL_DROPIN = join(JOURNAL_DROPIN_DIR, 'whale-workbench.conf');
 
 function usage() {
   return [
@@ -15,6 +18,8 @@ function usage() {
     '  --node <路径>      固定 Node 可执行文件，默认程序目录的 runtime/bin/node',
     '  --program <路径>   程序目录，默认当前脚本所在目录',
     '  --service <名称>   systemd 单元名，默认 whaled.service',
+    '  --journal-max <大小> 未配置时写入 journald 容量上限，默认 256M（仅在没有现成 SystemMaxUse 时）',
+    '  --no-journal-cap   不修改 journald 容量设置',
     '  --no-start         只安装并设为开机启动，不立即启动',
     '  --dry-run          只打印将写入的单元与执行的命令',
   ].join('\n');
@@ -36,19 +41,58 @@ function userExists(user) {
   });
 }
 
+/** 已有 SystemMaxUse 时不覆盖管理员的全局 journald 设置。 */
+async function journalConfigured() {
+  const files = [JOURNAL_CONF];
+  try {
+    for (const name of (await readdir(JOURNAL_DROPIN_DIR)).filter(name => name.endsWith('.conf')).sort()) files.push(join(JOURNAL_DROPIN_DIR, name));
+  } catch (error) { if (error.code !== 'ENOENT') throw error; }
+  for (const file of files) {
+    let text;
+    try { text = await readFile(file, 'utf8'); } catch (error) { if (error.code !== 'ENOENT') throw error; continue; }
+    if (/^\s*SystemMaxUse\s*=/m.test(text)) return file;
+  }
+  return undefined;
+}
+
+function journalDropin(max) {
+  return `# 由小鲸工作台安装器写入；删除此文件可恢复 journald 默认容量。\n[Journal]\nSystemMaxUse=${max}\n`;
+}
+
+async function configureJournal(values) {
+  if (values['no-journal-cap']) return;
+  const existing = await journalConfigured();
+  if (existing) { console.log(`journald 容量已由 ${existing} 配置，未覆盖。`); return; }
+  const content = journalDropin(values['journal-max']);
+  let current = '';
+  try { current = await readFile(JOURNAL_DROPIN, 'utf8'); } catch (error) { if (error.code !== 'ENOENT') throw error; }
+  if (current === content) return;
+  await mkdir(JOURNAL_DROPIN_DIR, { recursive: true, mode: 0o755 });
+  await writeFile(JOURNAL_DROPIN, content, { mode: 0o644 });
+  console.log(`已写入 ${JOURNAL_DROPIN}（SystemMaxUse=${values['journal-max']}）。`);
+  try {
+    await run('systemctl', ['restart', 'systemd-journald']);
+    console.log(`现有日志可用 journalctl --vacuum-size=${values['journal-max']} 收缩。`);
+  } catch (error) {
+    console.warn(`journald 容量配置已写入，但重新加载失败：${error.message}`);
+  }
+}
+
 async function main() {
-  const values = { 'data-dir': '/var/lib/whaleworkbench', user: 'whaleworkbench', node: '', program: root, service: 'whaled.service', start: true, 'dry-run': false };
+  const values = { 'data-dir': '/var/lib/whaleworkbench', user: 'whaleworkbench', node: '', program: root, service: 'whaled.service', 'journal-max': '256M', 'no-journal-cap': false, start: true, 'dry-run': false };
   const args = process.argv.slice(2);
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
     if (arg === '--no-start') values.start = false;
     else if (arg === '--dry-run') values['dry-run'] = true;
-    else if (['--data-dir', '--user', '--node', '--program', '--service'].includes(arg)) {
+    else if (arg === '--no-journal-cap') values['no-journal-cap'] = true;
+    else if (['--data-dir', '--user', '--node', '--program', '--service', '--journal-max'].includes(arg)) {
       const value = args[++i];
       if (!value || value.startsWith('--')) throw new Error(`${arg} 需要一个参数。\n${usage()}`);
       values[arg.slice(2)] = value;
     } else throw new Error(`未知参数：${arg}\n${usage()}`);
   }
+  if (!/^[1-9]\d{0,5}[KMGT]$/.test(values['journal-max'])) throw new Error('--journal-max 需形如 256M、1G。');
 
   const safePath = value => value !== '/' && isAbsolute(value) && /^[\w@.+/-]+$/.test(value);
   if (!safePath(values['data-dir'])) throw new Error('数据目录必须是绝对路径，且只包含字母、数字、点、下划线、短横线和斜杠。');
@@ -71,6 +115,10 @@ async function main() {
   if (values['dry-run']) {
     console.log(`# 将写入 ${unitTarget}`);
     console.log(unit);
+    if (!values['no-journal-cap'] && !await journalConfigured()) {
+      console.log(`# 将写入 ${JOURNAL_DROPIN} 并重启 systemd-journald`);
+      console.log(journalDropin(values['journal-max']));
+    }
     console.log(`# 将创建系统账户 ${values.user}（如不存在）、目录 ${values['data-dir']}，随后执行`);
     console.log('systemctl daemon-reload');
     console.log(`systemctl enable ${values.service}`);
@@ -89,6 +137,7 @@ async function main() {
   await run('chown', ['-R', `${values.user}:${values.user}`, values['data-dir']]);
   await writeFile(unitTarget, unit, { mode: 0o644 });
   console.log(`已写入 ${unitTarget}`);
+  await configureJournal(values);
   await run('systemctl', ['daemon-reload']);
   await run('systemctl', ['enable', values.service]);
   if (values.start) await run('systemctl', ['restart', values.service]);

@@ -27,6 +27,7 @@ function usage(){return [
   '  --trust <文件>         发布公钥清单；首次安装必填，之后默认使用安装目录中的副本',
   '  --service <名称>       systemd 单元名，默认 whaled.service',
   '  --node <路径>          使用指定 Node 可执行文件；默认发行包内 runtime/bin/node',
+  '  --keep <数量>          升级成功后保留的程序版本数（含当前与上一版），默认 5，范围 2–50',
   '  --rollback             回退到上次升级前的版本（仅程序文件）',
   '  --recover              处理上次中断的升级',
   '  --dry-run              只校验并打印计划，不切换程序或重启服务',
@@ -131,6 +132,26 @@ function compareVersion(left,right){
   for(let i=0;i<3;i++){const order=Math.sign(a[i]-b[i]);if(order)return order;}return 0;
 }
 
+/** 升级成功后只保留最近的版本目录；当前版与上一版永不删除。 */
+async function pruneReleases(installRoot,state,keep){
+  const releaseRoot=join(installRoot,'releases'),entries=[];
+  for(const name of await readdir(releaseRoot)){
+    if(!uuid.test(name))continue;
+    const info=await lstat(join(releaseRoot,name)).catch(()=>undefined);
+    if(!info?.isDirectory()||info.isSymbolicLink())continue;
+    entries.push({name,mtime:info.mtimeMs});
+  }
+  const kept=new Set([state?.current?.id,state?.previous?.id].filter(Boolean));
+  const removable=entries.filter(entry=>!kept.has(entry.name)).sort((a,b)=>a.mtime-b.mtime);
+  let excess=Math.max(0,entries.length-keep),removed=0;
+  for(const entry of removable){
+    if(excess<=0)break;
+    try{await rm(join(releaseRoot,entry.name),{recursive:true,force:true});removed++;excess--;}
+    catch(error){console.warn(`未清理旧版本 ${entry.name}：${error.message}`);}
+  }
+  return removed;
+}
+
 async function prepare(values){
   if(process.platform!=='linux')throw fail('本脚本用于 Linux 服务器；Windows 请使用桌面安装升级工具。');
   if(process.getuid?.()!==0)throw fail('安装升级需要 root 权限，请使用 sudo 运行。');
@@ -162,7 +183,6 @@ async function install(values){
   const {installRoot,dataRoot,packageRoot,trustFile,state,checked}=await prepare(values);
   if(await optional(join(installRoot,journalName)))throw fail('上次升级未收尾，请先运行 --recover。','UPGRADE_RECOVERY_REQUIRED');
   const releaseRoot=join(installRoot,'releases');await mkdir(releaseRoot,{recursive:true});
-  if((await readdir(releaseRoot)).length>=20)throw fail('保留的版本目录已达 20 个，请核对后整理。');
   const files=checked.manifest.files;const needed=files.reduce((sum,file)=>sum+file.size,0),space=await statfs(installRoot);
   if(space.bavail*space.bsize<needed+64*1024*1024)throw fail('程序磁盘空间不足，旧版未切换。','ENOSPC');
   const id=randomUUID(),directory=join(releaseRoot,id);
@@ -195,8 +215,10 @@ async function install(values){
       throw fail(`升级失败，已切回上一版本并恢复服务：${error.message}`);
     }
     await writeFile(join(installRoot,'trust.json'),await readFile(trustFile),{mode:0o600});
-    await atomicJson(join(installRoot,stateName),{formatVersion:1,appId:'whale-workbench',installationId:journal.installationId,dataRoot,current:next,previous:state?.current??null,updatedAt:new Date().toISOString()});
+    const nextState={formatVersion:1,appId:'whale-workbench',installationId:journal.installationId,dataRoot,current:next,previous:state?.current??null,updatedAt:new Date().toISOString()};
+    await atomicJson(join(installRoot,stateName),nextState);
     await rm(join(installRoot,journalName),{force:true});
+    if(values.keep)try{const removed=await pruneReleases(installRoot,nextState,values.keep);if(removed)console.log(`已清理 ${removed} 个旧版本目录，保留最近 ${values.keep} 个。`);}catch(error){console.warn(`清理旧版本失败，请手工核对 ${releaseRoot}：${error.message}`);}
     console.log(`已切换到 ${next.version}；上一版本${state?.current?` ${state.current.version} 可用于 --rollback`:'保留为空'}。`);
     return {operation:'install',version:next.version,installRoot,dataRoot,previous:state?.current??null};
   }finally{await unlock();}
@@ -264,9 +286,10 @@ async function recover(values){
 async function main(){
   let values;try{({values}=parseArgs({options:{
     package:{type:'string'},'install-root':{type:'string'},'data-dir':{type:'string'},trust:{type:'string'},
-    service:{type:'string',default:'whaled.service'},node:{type:'string'},
+    service:{type:'string',default:'whaled.service'},node:{type:'string'},keep:{type:'string',default:'5'},
     rollback:{type:'boolean',default:false},recover:{type:'boolean',default:false},'dry-run':{type:'boolean',default:false}
   }}));}catch{throw fail(usage());}
+  values.keep=Number(values.keep);if(!Number.isInteger(values.keep)||values.keep<2||values.keep>50)throw fail('--keep 必须是 2–50 的整数。');
   if(values.recover)return recover(values);
   if(!values['install-root']||!values['data-dir'])throw fail(usage());
   if(values.rollback)return rollback(values);
