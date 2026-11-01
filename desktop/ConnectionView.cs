@@ -281,12 +281,14 @@ partial class App
             if (error != null) {
                 remoteStatus = "配置需要处理";
                 SetRemoteBadge("服务器未连接", error);
+                SetOverviewUnavailable("服务器连接尚未就绪。", "请打开「服务器连接」完成配置后再操作。");
                 Feedback("服务器连接配置需要处理：" + error);
                 return;
             }
             if (!HostKeyPinned(profile)) {
                 remoteStatus = "尚未确认主机密钥";
                 SetRemoteBadge("服务器未连接", "请打开「服务器连接」确认服务器主机密钥。");
+                SetOverviewUnavailable("服务器连接尚未就绪。", "请打开「服务器连接」确认主机密钥后再操作。");
                 Feedback("尚未确认服务器主机密钥，请打开「服务器连接」继续。");
                 return;
             }
@@ -314,10 +316,19 @@ partial class App
         var info = new ProcessStartInfo(SshTool("ssh"), RemoteSshArguments(profile)) { WorkingDirectory = launchDirectory, UseShellExecute = false, CreateNoWindow = true, RedirectStandardInput = true, RedirectStandardOutput = true, RedirectStandardError = true, StandardOutputEncoding = Encoding.UTF8, StandardErrorEncoding = Encoding.UTF8 };
         StartHostProcess(info, true);
         remoteConnecting = true;
-        UpdateConnectionStatus();
+        string syncing = reconnect ? "正在重新连接服务器并同步运行状态…" : "正在连接服务器并同步运行状态…";
+        SetRemoteBadge(reconnect ? "正在重新连接服务器" : "正在连接服务器", syncing);
+        SetOverviewUnavailable(syncing, "正在读取服务器上的运行状态，完成后即可直接操作。");
         // 连接建立后 remote-host 会缓冲这两条请求，重连时也重新同步服务器状态与诊断。
         Send("load");
         Send("diagnose");
+    }
+
+    /** 远程连接尚未就绪或已断开时，概览页不能提供启停操作，避免把“连接中”当成“未启动”。 */
+    static void SetOverviewUnavailable(string state, string stats) {
+        var label = Find<TextBlock>("State"); if (label != null) label.Text = state;
+        var detail = Find<TextBlock>("Stats"); if (detail != null) detail.Text = stats;
+        foreach (var name in new[] { "Start", "Stop", "Restart", "RestartBot" }) { var button = Find<Button>(name); if (button != null) button.IsEnabled = false; }
     }
 
     static void StartHostProcess(ProcessStartInfo info, bool remote) {
@@ -384,8 +395,8 @@ partial class App
         remoteStatus = "已断开";
         StopHostQuietly();
         SetRemoteBadge("服务器未连接", "已断开服务器连接；机器人仍在服务器上运行。");
+        SetOverviewUnavailable("已断开服务器连接；机器人仍在服务器上运行。", "机器人仍在服务器上运行；重新连接后可继续控制。");
         Feedback("已断开服务器连接；机器人仍在服务器上运行。");
-        UpdateConnectionStatus();
     }
 
     static void NoteRemoteEvent() {
@@ -405,8 +416,8 @@ partial class App
         remoteReconnectAt = DateTime.UtcNow.AddSeconds(delay);
         remoteStatus = "连接中断，将在 " + delay + " 秒后重连";
         SetRemoteBadge("服务器连接中断", "与服务器的连接已断开，正在等待自动重连。");
+        SetOverviewUnavailable("与服务器的连接已断开，正在等待自动重连。", "暂时无法控制服务器上的机器人；重连后恢复。");
         Feedback("与服务器的连接已断开，" + delay + " 秒后自动重连；可打开「服务器连接」取消。");
-        UpdateConnectionStatus();
     }
 
     static void ReportRemoteExit() {
@@ -429,6 +440,7 @@ partial class App
                 else {
                     remoteStatus = "连接已断开";
                     SetRemoteBadge("服务器未连接", "与服务器的连接已断开；机器人不受本控制台影响。");
+                    SetOverviewUnavailable("与服务器的连接已断开；机器人不受本控制台影响。", "服务器上的机器人可能仍在运行；重新连接后恢复控制。");
                     ReportRemoteExit();
                 }
             }
@@ -467,6 +479,8 @@ partial class App
         }
         var button = Find<Button>("ServerConnection");
         if (button != null) button.ToolTip = remote ? "查看或更改服务器连接" : "连接远程服务器";
+        var start = Find<Button>("Start");
+        if (start != null && !remote) { start.Content = "启动机器人"; start.ToolTip = null; }
         var logs = Find<Button>("OpenLogs");
         if (logs != null) { logs.Visibility = Visibility.Visible; logs.Content = remote ? "下载服务器日志" : "打开日志目录"; }
         var memory = Find<Button>("Memory");

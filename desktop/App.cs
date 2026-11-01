@@ -42,8 +42,7 @@ partial class App
     static Dictionary<string, Control> runtimeInputs = new Dictionary<string, Control>();
     static Dictionary<string, object> settings;
     static Queue<string> logs = new Queue<string>();
-    static bool exiting, remoteExitPending, remoteExitReady, paused, dirty, loading, hostFailed;
-    static DateTime remoteExitDeadline;
+    static bool exiting, paused, dirty, loading, hostFailed;
     static string runtimePhase="stopped", runtimeFailure="";
     static HashSet<string> dirtySections = new HashSet<string>();
     static string personaPath;
@@ -164,27 +163,22 @@ partial class App
     static void Exit() {
         if (exiting) return;
         if (dirty && MessageBox.Show(window, "有尚未保存的编辑，仍要退出吗？", "小鲸提醒", MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes) return;
-        if (connectionMode == "remote" && (host == null || host.HasExited)) {
-            exiting = true; Feedback("已退出控制台；服务器上的机器人继续运行。");
-            window.Close(); return;
-        }
-        window.Show();
+        exiting = true;
         if (connectionMode == "remote") {
-            // 远程模式只停止机器人，守护进程保持运行，便于之后直接重连。
-            exiting = true; Feedback("正在请求服务器停止机器人，控制台随后退出；服务器守护进程保持运行…");
-            window.IsEnabled = false;
-            remoteExitPending = true; remoteExitReady = false; remoteExitDeadline = DateTime.UtcNow.AddSeconds(15);
-            Send("stop");
+            // 远程模式只关闭控制台：断开 SSH 不影响服务器上的机器人与守护进程。
+            remoteDesired = false;
+            StopHostQuietly();
+            window.Close();
             return;
         }
-        exiting = true; Feedback("正在保存运行数据并停止机器人，请稍候…");
+        window.Show();
+        Feedback("正在保存运行数据并停止机器人，请稍候…");
         window.IsEnabled = false; Send("quit");
     }
     static void Event(string line) {
         var message = json.Deserialize<Dictionary<string, object>>(line);
         if (connectionMode == "remote") NoteRemoteEvent();
         string type = (string)message["type"];
-        if (type == "control" && remoteExitPending && message.ContainsKey("action") && (string)message["action"] == "stop") { remoteExitReady = true; return; }
         if(type=="maintenance"){RenderMaintenance(message);return;}
         if(type=="maintenance-progress"){RenderMaintenanceProgress(message);return;}
         if(type=="error"&&message.ContainsKey("action")&&(string)message["action"]=="maintenance")MaintenanceError((string)message["text"]);
@@ -264,7 +258,11 @@ partial class App
             Find<TextBlock>("State").Text = busy ? "小鲸正在安排工作…" : bridge && napcat ? "小鲸已出发，等待连接就绪" : bridge || napcat ? "部分进程运行中，请查看日志" : "小鲸休息中，随时可以出发";
             if(recoveryPending&&!busy)Find<TextBlock>("State").Text=upgradePending?"安装升级尚未收尾，请在安装工具处理中断":"数据恢复尚未收尾，请在数据维护处理中断";
             runtimeBusy=busy;
-            Find<Button>("Start").IsEnabled = !busy && !recoveryPending && !(bridge && napcat) && runtimePhase!="recovering"; Find<Button>("Stop").IsEnabled = !busy && (bridge || napcat || runtimePhase=="recovering"); Find<Button>("Restart").IsEnabled = !busy&&!recoveryPending; Find<Button>("RestartBot").IsEnabled = !busy&&!recoveryPending && (bridge || napcat || runtimePhase=="needs_attention"); Find<Button>("RestartBot").Content=busy?"正在处理…":"重新启动";UpdateConnectionEditing();
+            Find<Button>("Start").IsEnabled = !busy && !recoveryPending && !(bridge && napcat) && runtimePhase!="recovering"; Find<Button>("Stop").IsEnabled = !busy && (bridge || napcat || runtimePhase=="recovering"); Find<Button>("Restart").IsEnabled = !busy&&!recoveryPending; Find<Button>("RestartBot").IsEnabled = !busy&&!recoveryPending && (bridge || napcat || runtimePhase=="needs_attention"); Find<Button>("RestartBot").Content=busy?"正在处理…":"重新启动";
+            bool remoteRunning = connectionMode == "remote" && bridge && napcat;
+            Find<Button>("Start").Content = remoteRunning ? "已在服务器运行" : "启动机器人";
+            Find<Button>("Start").ToolTip = remoteRunning ? "机器人正在服务器上运行；关闭控制台不会停止它。" : null;
+            UpdateConnectionEditing();
             if (!bridge) Find<TextBlock>("Stats").Text = "桥接已停止 · NapCat " + (napcat ? "运行中" : "已停止");
             Find<TextBlock>("NapcatState").Text = napcat ? (message.ContainsKey("externalNapcat") && (bool)message["externalNapcat"] ? "复用外部 NapCat" : "NapCat 运行中") : "NapCat 等待启动";
             if (!bridge) { Find<TextBlock>("ModelState").Text = "未连接"; Find<TextBlock>("QqState").Text = napcat ? "等待桥接" : "未连接"; }
@@ -420,7 +418,7 @@ partial class App
         }
         tray.Click += Restore; tray.ContextMenu += () => {
             bool remoteConnected = connectionMode == "remote" && host != null && !host.HasExited;
-            if (trayQuit != null) trayQuit.Header = connectionMode == "remote" && !remoteConnected ? "退出控制台" : "退出并停止机器人";
+            if (trayQuit != null) trayQuit.Header = connectionMode == "remote" ? "退出控制台" : "退出并停止机器人";
             if (trayDisconnect != null) trayDisconnect.Visibility = remoteConnected ? Visibility.Visible : Visibility.Collapsed;
             menu.Placement = System.Windows.Controls.Primitives.PlacementMode.MousePoint; menu.IsOpen = true;
         };
@@ -451,7 +449,6 @@ partial class App
             RefreshLogs();
             if (++ticks % 25 == 0) tray.Ensure();
             if (host != null && host.HasExited) HandleHostExit(timer);
-            if (remoteExitPending && (remoteExitReady || DateTime.UtcNow > remoteExitDeadline)) { remoteExitPending = false; window.Close(); }
             if (smoke && !exiting) {
                 if (DateTime.UtcNow > smokeDeadline) { Environment.ExitCode = 1; File.WriteAllText(Path.Combine(root, "smoke-result.txt"), "FAIL: lifecycle timeout at step "+smokeStep+", socialBusy="+socialBusy+", knowledgeBusy="+knowledgeBusy+", rows="+Find<ListView>("SocialList").Items.Count+", feedback="+Find<TextBlock>("Feedback").Text); exiting = true; Send("quit"); return; }
                 if (smokeStep == 0 && settings != null) {
