@@ -26,10 +26,16 @@ if (process.platform === 'linux') {
   await mkdir(join(runtime,'config'),{recursive:true,mode:0o700});
   try { await writeFile(join(runtime,'config/webui.json'),JSON.stringify({host:'127.0.0.1',port:6099,token:randomBytes(24).toString('hex'),loginRate:10},null,2)+'\n',{flag:'wx',mode:0o600}); }
   catch(error){if(error.code!=='EEXIST')throw error;}
-  try { await access('/usr/bin/xvfb-run'); }
-  catch { try { await access('/usr/local/bin/xvfb-run'); } catch { throw new Error('缺少无桌面运行组件 xvfb-run，请先安装 xvfb（sudo apt install xvfb）'); } }
+  let xvfb;
+  for (const candidate of ['/usr/bin/xvfb-run','/usr/local/bin/xvfb-run']) {
+    try { await access(candidate); xvfb = candidate; break; }
+    catch {}
+  }
+  if (!xvfb) throw new Error('缺少无桌面运行组件 xvfb-run，请先安装 xvfb（sudo apt install xvfb）');
   console.log('正在启动受管 QQ 组件（无桌面模式），首次使用请按官方流程登录。');
-  const child = spawn(join(managed.directory,'AppRun'),[],{cwd:runtime,env:{...process.env,NAPCAT_WORKDIR:runtime},stdio:'inherit'});
+  // 不经过发行包自带的 AppRun：它把组件内的 usr/lib 注入 LD_LIBRARY_PATH，
+  // 在较新的发行版上会与系统库冲突，使 Electron 不打印任何日志却以 1 退出。
+  const child = spawn(xvfb,['-a',join(managed.directory,'qq'),'--no-sandbox'],{cwd:runtime,env:{...process.env,NAPCAT_WORKDIR:runtime},stdio:'inherit'});
   child.once('error',error=>{console.error(`QQ 组件启动失败：${error.message}`);console.error('请确认已安装 xvfb 与 Electron 运行库（libgtk-3-0、libnss3 等）。');process.exitCode=1;});
   child.once('close',code=>{process.exitCode=code??1;});
   const forward=signal=>{try{child.kill(signal);}catch{}};
