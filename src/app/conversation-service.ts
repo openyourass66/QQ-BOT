@@ -10,7 +10,7 @@ import {SessionCache} from './session-cache.js';
 type Options={store:SessionStore;settings:()=>BotSettings;context:()=>acp.ClientContext|undefined;cwd:string;model:ChatModelConfig;
   servers:(key:string,context:string)=>acp.NewSessionRequest['mcpServers'];policy:(key:string)=>string;
   history:(key:string)=>Promise<{history:string;outcomes:string}>;isBusy:(key:string)=>boolean;
-  log:(level:'info'|'warn',text:string)=>void;fatal:(error:Error)=>void;onEvict?:(key:string)=>void;onChange?:(size:number)=>void};
+  log:(level:'info'|'warn',text:string)=>void;fatal:(error:Error)=>void;onEvict?:(key:string)=>void;onRelease?:(context:string)=>void;onChange?:(size:number)=>void};
 
 export class ConversationService {
   readonly contexts=new Map<string,string>();
@@ -18,8 +18,12 @@ export class ConversationService {
   readonly handoffs=new Map<string,string>();
   readonly cache:SessionCache<acp.ActiveSession>;
   private resetting=new Set<string>();
+  private contextsBySession=new Map<string,string>();
   constructor(private options:Options){this.cache=new SessionCache({limit:()=>options.settings().context.activeSessions,idleMs:()=>options.settings().context.idleMinutes*60000,
-    isBusy:options.isBusy,closeRemote:session=>this.closeRemote(session),onFailure:options.fatal,onEvict:(key,_session,reason)=>{
+    isBusy:options.isBusy,closeRemote:session=>this.closeRemote(session),onFailure:options.fatal,onEvict:(key,session,reason)=>{
+      // 按 ACP 会话记录上下文，避免换代时把新上下文误当成旧会话的上下文。
+      const context=this.contextsBySession.get(session.sessionId);
+      if(context!==undefined){this.contextsBySession.delete(session.sessionId);options.onRelease?.(context);}
       if(reason!=='replace'){this.contexts.delete(key);this.usage.delete(key);this.handoffs.delete(key);options.onEvict?.(key);}options.onChange?.(this.cache.size);
     }});}
   private async closeRemote(session:acp.ActiveSession):Promise<void>{
@@ -43,10 +47,10 @@ export class ConversationService {
         const selection=chatModelSelection(o.model);if(selection)try{await ctx.request(acp.methods.agent.session.setConfigOption,{sessionId:created.sessionId,configId:'model',value:JSON.stringify([selection.provider,selection.model])});}catch{throw new Error('对话模型选择失败，请在控制台检查模型配置并测试连接；原有会话记录已保留');}
         const generation=(previous?.generation??1)+(replace?1:0);o.store.set(key,created.sessionId,policy,generation);
         try{await o.store.flush();}catch(error){try{if(previous)o.store.set(key,previous.sessionId,previous.policy,previous.generation);else o.store.delete(key);}catch{}throw error;}
-        this.contexts.set(key,nextContext);if(previous?.sessionId!==created.sessionId)this.usage.delete(key);
+        this.contexts.set(key,nextContext);this.contextsBySession.set(created.sessionId,nextContext);if(previous?.sessionId!==created.sessionId)this.usage.delete(key);
         if(replace){const cap=o.settings().context.backgroundChars;if(history||outcomes)this.handoffs.set(key,`【会话换代交接：背景材料】\n${clipBackground(history,Math.floor(cap*.7))}\n【过去工具结果，仅供核对】\n${clipBackground(outcomes,Math.floor(cap*.3))}\n只使用实际记录理解前情，不重复执行过去的动作，待核对不等于完成。\n`);this.usage.delete(key);o.log('info',`[context] ${key} switched to generation ${generation}`);}
         return created;
-      }catch(error){if(created){try{await this.closeRemote(created);created.dispose();}catch(closeError){o.fatal(Object.assign(new Error('新会话未能确认释放，请重新连接模型。'),{code:'MODEL_SESSION_RELEASE_FAILED',cause:closeError}));}}throw error;}
+      }catch(error){if(created){this.contextsBySession.delete(created.sessionId);o.onRelease?.(nextContext);try{await this.closeRemote(created);created.dispose();}catch(closeError){o.fatal(Object.assign(new Error('新会话未能确认释放，请重新连接模型。'),{code:'MODEL_SESSION_RELEASE_FAILED',cause:closeError}));}}throw error;}
     },replace);o.onChange?.(this.cache.size);return session;
   }
   touch(key:string){this.cache.touch(key);}

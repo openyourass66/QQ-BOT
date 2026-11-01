@@ -1,7 +1,6 @@
 import { createInterface } from 'node:readline';
 import { appendFileSync } from 'node:fs';
-import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
+import { connectFixture } from '../helpers/mcp-client.mjs';
 import {installFixturePolicy,beginFixtureRequest} from './model-budget.mjs';
 installFixturePolicy();
 let sessions=0,turns=0;
@@ -23,9 +22,8 @@ createInterface({input:process.stdin}).on('line',async line=>{
     let finishBudget;try {finishBudget=await beginFixtureRequest(params.sessionId,params.prompt);
     turns++;record({kind:'prompt',sessionId:params.sessionId,text:params.prompt.map(b=>b.text??'').join('')});
     if(turns===1&&process.env.INTELLIGENCE_TEST_TOOLS==='1'){
-      const server=servers.get(params.sessionId)[0],client=new Client({name:'intelligence-fixture',version:'1'});
+      const server=servers.get(params.sessionId)[0],client=await connectFixture(server,'intelligence-fixture');
       try{
-        await client.connect(new StdioClientTransport({command:server.command,args:server.args,env:Object.fromEntries(server.env.map(e=>[e.name,e.value])),stderr:'pipe'}));
         const first=await client.callTool({name:'qq_recent_messages',arguments:{}}),second=await client.callTool({name:'qq_recent_messages',arguments:{}}),third=await client.callTool({name:'qq_recent_messages',arguments:{}});
         record({kind:'tools',first:Boolean(first.isError),second:Boolean(second.isError),third:Boolean(third.isError),reason:third.content[0]?.text});
       }finally{await client.close();}

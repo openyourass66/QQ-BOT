@@ -23,9 +23,9 @@
 | `qq/` | onebot、group-context、qq-actions、social-engine、social-store、social-tools、social-admin | 协议、QQ 行为、存档、工具定义与管理操作 |
 | `qq/handlers/` | conversation、media、stickers、memory、reminders、events、files、qzone、decisions、registry | 分组执行社交工具，校验定义与处理器登记完整一致 |
 | `agent/` | chat-model、cognition、learning-model、autonomy、context-policy | 模型连接、资料整理、群内用语、自主决策与上下文预算 |
-| `services/` | media、qzone、read-json、action-server、action-client | 媒体、空间、受限 JSON 响应与桥接/MCP 内部通信 |
+| `services/` | media、qzone、read-json、action-server、action-client、qq-tools、qq-mcp-server | 媒体、空间、受限 JSON 响应、工具注册与桥接/MCP 内部通信 |
 
-MCP 工具通过内部动作接口交由桥接执行；权限、会话范围、额度与轮次状态在执行处再次核验。桌面 Node 辅助模块使用 `dist/` 内对应目录的编译模块。改动路径时需同步测试、动态导入和桌面引用。
+MCP 工具通过内部动作接口交由桥接执行；权限、会话范围、额度与轮次状态在执行处再次核验。桥接在进程内提供单一的 HTTP MCP（`services/qq-mcp-server`），按 ACP 会话上下文与工具清单鉴权；`mcp-qq.ts` 仅保留 stdio 入口，供探针和独立脚本使用。桌面 Node 辅助模块使用 `dist/` 内对应目录的编译模块。改动路径时需同步测试、动态导入和桌面引用。
 
 `qq-action-service` 统一规范参数、只读/写入分派、媒体请求来源和当前轮次状态回写。桥接只提供可信的活动会话与取消信号；请求必须携带由私有 MCP 传输生成的编号。写入调用 `qq-operation-service`，再由逐项协议守卫和事务执行器约束实际副作用。不得给前端或模型开放通用 OneBot 调用入口。
 

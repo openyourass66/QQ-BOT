@@ -44,7 +44,7 @@ async function scenario(fail,learning=false,changePolicy=false) {
     send(1);await wait(()=>replies.length===1);
     let social=await data('social.json');assert.equal(social.turns[0].contextUsed,90);assert.equal(social.turns[0].contextSize,100);assert.equal(social.turns[0].inputTokens,null);
     const original=(await data('sessions.json')).sessions['group:30001'].sessionId;
-    const firstEvents=(await readFile(events,'utf8')).trim().split('\n').map(JSON.parse),manifest=JSON.parse(firstEvents.find(e=>e.kind==='new').servers[0].env.find(e=>e.name==='BOT_QQ_TOOLS').value);
+    const firstEvents=(await readFile(events,'utf8')).trim().split('\n').map(JSON.parse),headersOf=server=>Object.fromEntries(server.headers.map(({name,value})=>[name,value])),manifest=JSON.parse(headersOf(firstEvents.find(e=>e.kind==='new').servers[0])['x-whale-tools']);
     assert.ok(manifest.includes('qq_recent_messages'));assert.ok(!manifest.includes('qq_search'));assert.ok(!manifest.includes('qq_web_read'));assert.ok(!manifest.includes('qq_send_file'));assert.ok(!manifest.includes('qq_transcribe'));
     assert.match(firstEvents.find(e=>e.kind==='prompt').text,/DSH.*原生搜索与网页读取/);
     const tools=firstEvents.find(e=>e.kind==='tools');assert.equal(tools.first,false);assert.equal(tools.second,false);assert.equal(tools.third,true);assert.match(tools.reason,/QQ 工具调用次数/);
@@ -56,8 +56,8 @@ async function scenario(fail,learning=false,changePolicy=false) {
     else {assert.notEqual(current.sessionId,original);assert.equal(current.generation,2);}
     const prompts=(await readFile(events,'utf8')).trim().split('\n').map(JSON.parse).filter(e=>e.kind==='prompt');
     const creations=(await readFile(events,'utf8')).trim().split('\n').map(JSON.parse).filter(e=>e.kind==='new');
-    const envOf=entry=>Object.fromEntries(entry.servers[0].env.map(e=>[e.name,e.value]));assert.notEqual(envOf(creations[0]).BOT_ACTION_CONTEXT,envOf(creations.at(-1)).BOT_ACTION_CONTEXT);
-    if(changePolicy)assert.ok(JSON.parse(envOf(creations.at(-1)).BOT_QQ_TOOLS).includes('qq_send_file'));
+    const headerOf=entry=>headersOf(entry.servers[0]);assert.notEqual(headerOf(creations[0])['x-whale-context'],headerOf(creations.at(-1))['x-whale-context']);
+    if(changePolicy)assert.ok(JSON.parse(headerOf(creations.at(-1))['x-whale-tools']).includes('qq_send_file'));
     assert.match(prompts.at(-1).text,/会话换代交接/);assert.match(prompts.at(-1).text,/已处理测试消息 1/);
     assert.equal((await data('sessions.json')).sessions['group:30001'].generation,2);
     assert.doesNotMatch(output,/Invalid params|unhandled/i);

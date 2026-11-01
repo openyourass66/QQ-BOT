@@ -2,7 +2,6 @@ import { spawn } from 'node:child_process';
 import { Readable, Writable } from 'node:stream';
 import process from 'node:process';
 import { randomBytes } from 'node:crypto';
-import { fileURLToPath } from 'node:url';
 import {basename} from 'node:path';
 import {MediaReferenceMaintenance} from './services/media-reference-maintenance.js';
 import * as acp from '@agentclientprotocol/sdk';
@@ -30,6 +29,7 @@ import { classifyRuntimeFailure } from './core/runtime-failure.js';
 import {SqliteDailyUsageStore} from './storage/sqlite-usage-store.js';
 import { QqActionPolicy } from './qq/qq-actions.js';
 import { startActionServer, type ActionServer } from './services/action-server.js';
+import { startQqMcpServer, type QqMcpServer } from './services/qq-mcp-server.js';
 import {SqliteSocialStore} from './storage/sqlite-social-store.js';
 import type {SocialRepository} from './storage/social-repository.js';
 import { SocialEngine } from './qq/social-engine.js';
@@ -81,7 +81,7 @@ const engine = new SocialEngine(socialStore, media, api, usage, getSettings, ask
 }, text => log('info', text),undefined,prepareServiceRequest,operations);
 let scheduler: NodeJS.Timeout | undefined;
 
-const conversations=new ConversationService({store,settings:getSettings,context:()=>acpCtx,cwd:config.dsh.workspace,model:config.chatModel,servers:qqMcpServers,policy:toolPolicy,history:conversationHistory,isBusy:key=>activeConversations.has(key)||queue.has(key),log,fatal:error=>{if(!stopping){reportFatal(error);void shutdown(1);}},onEvict:key=>activeTopics.delete(key),onChange:size=>{status.sessions=size;}});
+const conversations=new ConversationService({store,settings:getSettings,context:()=>acpCtx,cwd:config.dsh.workspace,model:config.chatModel,servers:qqMcpServers,policy:toolPolicy,history:conversationHistory,isBusy:key=>activeConversations.has(key)||queue.has(key),log,fatal:error=>{if(!stopping){reportFatal(error);void shutdown(1);}},onEvict:key=>activeTopics.delete(key),onRelease:context=>qqMcp?.closeContext(context),onChange:size=>{status.sessions=size;}});
 const sessions=conversations.cache,contextUsage=conversations.usage,handoffs=conversations.handoffs;
 const queue = new ConversationQueue({
   maxPerKey: config.bot.queuePerConversation,
@@ -103,6 +103,7 @@ const lastGroupReply = new Map<number, number>();
 let selfId = config.bot.selfId;
 let acpCtx: acp.ClientContext | undefined;
 let actionServer: ActionServer | undefined;
+let qqMcp: QqMcpServer | undefined;
 let requestBudget:RequestBudget|undefined,budgetServer:Awaited<ReturnType<typeof startModelBudgetServer>>|undefined;
 function prepareServiceRequest(input:ServiceRequest):Promise<PreparedServiceRequest>{
   if(!requestBudget)throw new ModelBudgetError('服务请求预算尚未准备好');
@@ -138,17 +139,16 @@ function keyOf(event: MessageEvent): string {
 }
 
 function qqMcpServers(key: string,overrideContext?:string): acp.McpServer[] {
-  if (!actionServer) throw new Error('动作策略服务尚未就绪');
+  if (!qqMcp) throw new Error('QQ 工具服务尚未就绪');
   const context = overrideContext ?? sessionContexts.get(key) ?? randomBytes(24).toString('hex');
   return [{
     name: 'qq',
-    command: process.execPath,
-    args: [fileURLToPath(new URL('./mcp-qq.js', import.meta.url))],
-    env: [
-      { name: 'BOT_ACTION_URL', value: actionServer.url },
-      { name: 'BOT_ACTION_TOKEN', value: actionServer.token },
-      { name: 'BOT_ACTION_CONTEXT', value: context },
-      ...(getSettings().context.filterTools?[{name:'BOT_QQ_TOOLS',value:toolPolicy(key)}]:[]),
+    type: 'http',
+    url: qqMcp.url,
+    headers: [
+      { name: 'Authorization', value: `Bearer ${qqMcp.token}` },
+      { name: 'x-whale-context', value: context },
+      ...(getSettings().context.filterTools?[{name:'x-whale-tools',value:toolPolicy(key)}]:[]),
     ],
   }];
 }
@@ -748,6 +748,9 @@ async function main(): Promise<void> {
   }});
   actionServer = await startActionServer(actionService.execute);
   registerRuntimeSecret(actionServer.token);
+  // 所有 ACP 会话共用一个进程内 MCP 服务，避免每个会话各起一个 Node 子进程。
+  qqMcp = await startQqMcpServer(actionServer, { liveContexts: () => new Set(sessionContexts.values()) });
+  registerRuntimeSecret(qqMcp.token);
 
   const modelPatch = await prepareChatModelPatch(config.chatModel, sessionStorePath,getSettings().requests.maxOutputTokens);
   status.model = config.chatModel.mode === 'profile' ? 'DSH Profile' : config.chatModel.model;
@@ -837,7 +840,7 @@ async function shutdown(code = 0): Promise<void> {
   };
   try {
     await withTimeout((async () => {
-      await Promise.all([actionServer?.close(), budgetServer?.close(), operations.close(),stopChild(), queue.drain(), ingress.drain()]);
+      await Promise.all([actionServer?.close(), qqMcp?.close(), budgetServer?.close(), operations.close(),stopChild(), queue.drain(), ingress.drain()]);
       await engine.cognition.flush();
       await mediaReferences.flush();
       await media.flush();

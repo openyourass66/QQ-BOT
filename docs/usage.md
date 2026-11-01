@@ -48,7 +48,7 @@ NapCat 的 HTTP 服务与正向 WebSocket 服务通常分别使用 `3000`、`300
 
 `scripts/napcat-node.mjs` 从 `BOT_QQ_DIR` 读取 QQ 版本，复制所需组件到独立 `node-runtime/`，不修改系统 QQ。首次部署复用 Shell 中的账号配置，后续以 `node-runtime/config/` 为准。手动运行 `npm run napcat` 的进程需在原终端停止。
 
-新建和恢复 ACP 会话时，桥接自动挂载名为 `qq` 的 MCP。若旧 DSH Profile 中手动添加过同名 QQ MCP，需移除重复项；其他已挂载工具继续独立管理。
+新建和恢复 ACP 会话时，桥接自动挂载名为 `qq` 的 MCP；该服务由桥接进程内的单一 HTTP 端点提供，不再为每个会话启动 Node 子进程。若旧 DSH Profile 中手动添加过同名 QQ MCP，需移除重复项；其他已挂载工具继续独立管理。
 
 机器人运行模式仅开放受控 QQ 工具与 DSH 原生网页搜索、读取。本地文件、命令、子代理等执行工具关闭，旧命令开关不会放开权限；日常人设、记忆和文件收发通过工作台及受控 QQ 工具管理。工具守卫未成功加载时拒绝启动模型，需使用已验证的受管组件，详见[执行权限](security-policy.md)。
 

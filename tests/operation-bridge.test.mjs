@@ -10,7 +10,7 @@ import {tmpdir} from 'node:os';
 import {readSocialData} from './helpers/social-data.mjs';
 import {withTimeout} from '../dist/core/runtime.js';
 
-test('真实桥接绑定本轮身份：HTTP 重复只发送一次，换正文和自报编号拒绝，未知结果不重发', {timeout:25000},async()=>{
+test('真实桥接绑定本轮身份：同一 MCP 请求编号只发送一次，换正文和未知结果不重发', {timeout:25000},async()=>{
   const root=await mkdtemp(join(tmpdir(),'qq-operation-bridge-')),calls=[];let child,output='',next=100;
   const http=createServer(async(req,res)=>{let raw='';for await(const part of req)raw+=part;const args=JSON.parse(raw||'{}');let data={};
     if(req.url==='/get_login_info')data={user_id:10000,nickname:'测试'};
@@ -30,7 +30,7 @@ test('真实桥接绑定本轮身份：HTTP 重复只发送一次，换正文和
       await until(async()=>(await readEvents()).length>=id);await until(async()=>(await readSocialData(social)).turns.length>=id);
     }
     assert.equal(calls.filter(row=>row.message==='逻辑动作只发一次').length,2);assert.equal(calls.filter(row=>row.message==='丢失响应').length,2);assert.equal(calls.length,4);
-    for(const event of await readEvents()){assert.ok(event.joined.every(row=>row.status===200));assert.equal(new Set(event.joined.map(row=>row.body.data.message_id)).size,1);assert.equal(event.changed.status,409);assert.equal(event.invalid.status,400);assert.equal(event.forged.status,400);assert.equal(event.firstLost.status,409);assert.equal(event.secondLost.status,409);}
+    for(const event of await readEvents()){assert.ok(event.joined.every(row=>row.status===200&&!row.isError));assert.equal(new Set(event.joined.map(row=>JSON.parse(row.text).message_id)).size,1);assert.equal(event.changed.isError,true);assert.equal(event.firstLost.isError,true);assert.equal(event.secondLost.isError,true);}
     const data=await readSocialData(social);assert.equal(data.actions.filter(row=>row.state==='success').length,2);assert.equal(data.actions.filter(row=>row.state==='unknown').length,2);
   }finally{if(child&&child.exitCode===null){child.kill();await once(child,'exit');}for(const socket of ws.clients)socket.terminate();await new Promise(done=>ws.close(done));http.closeAllConnections();await new Promise(done=>http.close(done));await rm(root,{recursive:true,force:true,maxRetries:10,retryDelay:100});}
 });

@@ -1,7 +1,6 @@
 import { createInterface } from 'node:readline';
-import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { appendFileSync } from 'node:fs';
+import { connectFixture, headersOf, openRawMcp } from '../helpers/mcp-client.mjs';
 import { mockStickerAnalysis } from '../helpers/sticker-review.mjs';
 import {installFixturePolicy,beginFixtureRequest} from './model-budget.mjs';
 if(process.env.FAKE_OMIT_NATIVE_POLICY!=='1')installFixturePolicy();
@@ -42,12 +41,14 @@ lines.on('line', async (line) => {
     }
     let text = params.prompt.map((block) => block.text ?? '').join('');
     if(text.includes('OPERATION_REPLAY')){
-      const server=sessionServers.get(params.sessionId).find(entry=>entry.name==='qq'),env=Object.fromEntries(server.env.map(({name,value})=>[name,value]));
-      const headers={'content-type':'application/json',authorization:`Bearer ${env.BOT_ACTION_TOKEN}`,'x-bot-conversation':env.BOT_ACTION_CONTEXT,'x-bot-operation':'a'.repeat(64)};
-      const input={action:'social',tool:'qq_reply',args:{text:'逻辑动作只发一次'}},invoke=async(body=input,operation=headers['x-bot-operation'])=>{const response=await fetch(new URL('/actions',env.BOT_ACTION_URL),{method:'POST',headers:{...headers,'x-bot-operation':operation},body:JSON.stringify(body)});return {status:response.status,body:await response.json()};};
-      const joined=await Promise.all(Array.from({length:6},()=>invoke())),changed=await invoke({...input,args:{text:'替换正文'}}),invalid=await invoke(input,'invalid'),forged=await invoke({...input,args:{...input.args,operationId:'c'.repeat(64)}},'c'.repeat(64));
-      const lost={...input,args:{text:'丢失响应'}},firstLost=await invoke(lost,'d'.repeat(64)),secondLost=await invoke(lost,'e'.repeat(64));
-      if(process.env.FAKE_OPERATION_EVENTS)appendFileSync(process.env.FAKE_OPERATION_EVENTS,JSON.stringify({joined,changed,invalid,forged,firstLost,secondLost})+'\n');
+      const server=sessionServers.get(params.sessionId).find(entry=>entry.name==='qq'),mcp=await openRawMcp(server);
+      const send=(requestId,body)=>mcp.call(requestId,'qq_send_message',{target_type:'private',target_id:20001,text:body});
+      // MCP 会话以请求编号去重；同一编号的重试顺序重放，不能并发挤占同一 JSON-RPC 槽位。
+      const joined=[];
+      for(let attempt=0;attempt<6;attempt++)joined.push(await send(101,'逻辑动作只发一次'));
+      const changed=await send(101,'替换正文');
+      const firstLost=await send(102,'丢失响应'),secondLost=await send(102,'丢失响应');
+      if(process.env.FAKE_OPERATION_EVENTS)appendFileSync(process.env.FAKE_OPERATION_EVENTS,JSON.stringify({joined,changed,firstLost,secondLost})+'\n');
       respond(id,{stopReason:'end_turn'});return;
     }
     if (process.env.FAKE_GROUP_PROMPTS) {
@@ -56,9 +57,8 @@ lines.on('line', async (line) => {
       if (current.includes('GROUP_TIMEOUT')) return;
       if (current.includes('GROUP_TOOL_ONLY')) {
         const server = sessionServers.get(params.sessionId).find((entry) => entry.name === 'qq');
-        const client = new Client({ name: 'fake-agent', version: '1' });
+        const client = await connectFixture(server, 'fake-agent');
         try {
-          await client.connect(new StdioClientTransport({ command: server.command, args: server.args, env: Object.fromEntries(server.env.map(({ name, value }) => [name, value])), stderr: 'pipe' }));
           const result = await client.callTool({ name: 'qq_send_message', arguments: { target_type: 'group', target_id: Number(text.match(/【QQ群 (\d+)】/)[1]), text: '工具发出的群回答' } });
           if (result.isError) throw new Error(result.content[0].text);
         } finally { await client.close(); }
@@ -73,10 +73,9 @@ lines.on('line', async (line) => {
     }
     if(text.includes('AUTONOMY_SEED')||text.startsWith('自主想法 #')) {
       const server=sessionServers.get(params.sessionId).find(entry=>entry.name==='qq');
-      const client=new Client({name:'autonomy-agent',version:'1'});
+      const client=await connectFixture(server,'autonomy-agent');
       const invoke=async(name,args={})=>{const result=await client.callTool({name,arguments:args});if(result.isError)throw new Error(result.content[0].text);return result;};
       try {
-        await client.connect(new StdioClientTransport({command:server.command,args:server.args,env:Object.fromEntries(server.env.map(({name,value})=>[name,value])),stderr:'pipe'}));
         if(text.startsWith('自主想法 #')) {
           if(text.includes('（qzone-comment）')) {
             if(text.includes('SECRET_AUTONOMY'))throw new Error('空间互动泄露了私聊上下文');
@@ -111,9 +110,8 @@ lines.on('line', async (line) => {
     if (text.includes('测试崩溃')) { process.exit(3); }
     if (text.includes('SOCIAL_REPLY') || text.includes('SOCIAL_SILENT') || text.includes('SOCIAL_MEMORY') || text.includes('SOCIAL_STICKER')) {
       const server = sessionServers.get(params.sessionId).find(entry => entry.name === 'qq');
-      const client = new Client({ name:'social-agent',version:'1' });
+      const client = await connectFixture(server, 'social-agent');
       try {
-        await client.connect(new StdioClientTransport({command:server.command,args:server.args,env:Object.fromEntries(server.env.map(({name,value})=>[name,value])),stderr:'pipe'}));
         let tool;
         if(text.includes('SOCIAL_REPLY')) tool={name:'qq_reply',arguments:{text:'工具回复已送出',reply_to:Number(text.match(/当前消息编号 #(-?\d+)/)[1])}};
         if(text.includes('SOCIAL_SILENT')) tool={name:'qq_finish',arguments:{reason:'这段无需回应'}};
@@ -139,13 +137,10 @@ lines.on('line', async (line) => {
       const qzone = text.includes('MCP空间');
       const server = sessionServers.get(params.sessionId)?.find((entry) => entry.name === 'qq');
       if (!server) throw new Error('ACP 未传入 QQ MCP');
-      const env = Object.fromEntries(server.env.map(({ name, value }) => [name, value]));
-      if (!env.BOT_ACTION_TOKEN || !env.BOT_ACTION_URL) throw new Error('ACP 未显式传入动作接口凭据');
-      const client = new Client({ name: 'fake-agent', version: '1' });
+      const headers = headersOf(server);
+      if (!headers.Authorization || !/^[a-f0-9]{48}$/.test(headers['x-whale-context'] ?? '')) throw new Error('ACP 未显式传入 QQ MCP 凭据');
+      const client = await connectFixture(server, 'fake-agent');
       try {
-        await client.connect(new StdioClientTransport({
-          command: server.command, args: server.args, env, stderr: 'pipe',
-        }));
         const result = await client.callTool(qzone
           ? { name: 'qq_qzone_post', arguments: { text: '审批正文', images: ['https://example.test/picture.png'] } }
           : { name: 'qq_like', arguments: { user_id: 12345 } });
