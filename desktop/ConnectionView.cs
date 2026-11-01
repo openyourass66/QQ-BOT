@@ -290,6 +290,10 @@ partial class App
                 Feedback("尚未确认服务器主机密钥，请打开「服务器连接」继续。");
                 return;
             }
+            // 启动时的自动连接也要标记“期望连接”，否则服务器守护进程重启后不会触发自动重连。
+            remoteDesired = true;
+            remoteReconnectAttempt = 0;
+            remoteReconnectAt = DateTime.MinValue;
             StartRemoteHost(profile, false);
         } else StartLocalHost();
     }
