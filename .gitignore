@@ -87,3 +87,13 @@ Desktop.ini
 /.claude/
 /.vscode/
 *.code-workspace
+
+# 打包外发与传输临时归档；发行产物统一放在 release/
+/*.tgz
+/*.tar.gz
+/*.zip
+
+# 测试覆盖率与临时目录
+/coverage/
+/.nyc_output/
+/.tmp/
