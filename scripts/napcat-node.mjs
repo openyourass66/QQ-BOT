@@ -35,7 +35,9 @@ if (process.platform === 'linux') {
   console.log('正在启动受管 QQ 组件（无桌面模式），首次使用请按官方流程登录。');
   // 不经过发行包自带的 AppRun：它把组件内的 usr/lib 注入 LD_LIBRARY_PATH，
   // 在较新的发行版上会与系统库冲突，使 Electron 不打印任何日志却以 1 退出。
-  const child = spawn(xvfb,['-a',join(managed.directory,'qq'),'--no-sandbox'],{cwd:runtime,env:{...process.env,NAPCAT_WORKDIR:runtime},stdio:'inherit'});
+  // NapCat 在子进程内读取该变量；缺省时重启只会进入扫码，无法复用已有登录记录。
+  const quickAccount = /^\d+$/.test(process.env.BOT_SELF_ID || '') && process.env.BOT_SELF_ID !== '0' ? process.env.BOT_SELF_ID : '';
+  const child = spawn(xvfb,['-a',join(managed.directory,'qq'),'--no-sandbox'],{cwd:runtime,env:{...process.env,NAPCAT_WORKDIR:runtime,NAPCAT_QUICK_ACCOUNT:quickAccount},stdio:'inherit'});
   child.once('error',error=>{console.error(`QQ 组件启动失败：${error.message}`);console.error('请确认已安装 xvfb 与 Electron 运行库（libgtk-3-0、libnss3 等）。');process.exitCode=1;});
   child.once('close',code=>{process.exitCode=code??1;});
   const forward=signal=>{try{child.kill(signal);}catch{}};
