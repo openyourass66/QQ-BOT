@@ -77,7 +77,15 @@ export class ProcessGuard {
   async terminate(child){
     if(!child?.pid)return;
     if(process.platform==='win32'){if(running(this.helper))await this.request('terminate',child.pid).catch(()=>{});if(running(child))child.kill();}
-    else {try{process.kill(-child.pid,'SIGKILL');}catch{}if(running(child))child.kill();}
+    else {
+      try{process.kill(-child.pid,'SIGTERM');}catch{}
+      if(running(child))await new Promise(done=>{
+        const timer=setTimeout(done,7000);
+        child.once('exit',()=>{clearTimeout(timer);done();});
+      });
+      try{process.kill(-child.pid,'SIGKILL');}catch{}
+      if(running(child))child.kill();
+    }
   }
   async close(){
     if(this.closeTask)return this.closeTask;this.closing=true;
