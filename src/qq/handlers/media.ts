@@ -1,8 +1,9 @@
 import { toFile } from "./shared.js";
+import { isLibraryImage } from "../../services/image-library.js";
 import type { SocialExecutionPort } from "../social-engine.js";
 import type { HandlerGroup } from "./registry.js";
-export function mediaHandlers(port: Pick<SocialExecutionPort, "feature" | "message" | "messageImage" | "media" | "send" | "decorators" | "messageSource">): HandlerGroup {
-    return { names: ["qq_images", "qq_send_image", "qq_transcribe", "qq_speak", "qq_video"], execute: async (tool, a, ctx) => {
+export function mediaHandlers(port: Pick<SocialExecutionPort, "feature" | "message" | "messageImage" | "media" | "send" | "decorators" | "messageSource" | "imageLibrary" | "check">): HandlerGroup {
+    return { names: ["qq_images", "qq_save_image", "qq_search_images", "qq_send_image", "qq_transcribe", "qq_speak", "qq_video"], execute: async (tool, a, ctx) => {
             switch (tool) {
                 case 'qq_images': {
                     port.feature('mediaEnabled');
@@ -15,9 +16,32 @@ export function mediaHandlers(port: Pick<SocialExecutionPort, "feature" | "messa
                         images.push(await port.messageImage(s, ctx));
                     return port.media.vision(images, a.question, ctx.signal);
                 }
+                case 'qq_save_image': {
+                    port.feature('mediaEnabled');
+                    if ((a.message_id === undefined) === (a.source === undefined))
+                        throw new Error('请在 message_id 和 source 中选择一种图片来源');
+                    const message = a.message_id === undefined ? undefined : await port.message(ctx, a.message_id);
+                    const segment = message?.segments.filter(s => s.type === 'image')[a.image_index - 1];
+                    if (message && (!segment || message.recalled))
+                        throw new Error('这条消息已撤回或没有指定序号的图片');
+                    const image = segment ? await port.messageImage(segment, ctx) : await port.media.image(a.source, ctx.signal);
+                    const source = message ? { chat: ctx.chat, messageId: message.id }
+                        : /^https?:\/\//i.test(a.source) ? { url: a.source as string } : { local: true as const };
+                    return port.imageLibrary.save(image, { description: a.description, tags: a.tags, source }, () => {
+                        port.check(ctx);
+                        port.feature('mediaEnabled');
+                    });
+                }
+                case 'qq_search_images':
+                    port.feature('mediaEnabled');
+                    return port.imageLibrary.search(a.query, a.limit);
                 case 'qq_send_image': {
                     port.feature('mediaEnabled');
-                    const image = await port.media.image(a.source, ctx.signal);
+                    const fromLibrary = isLibraryImage(a.source);
+                    if (ctx.autonomous?.kind === 'qzone' && (!a.preview || !fromLibrary))
+                        throw new Error('空间任务只能预览库存图，发布请使用 qq_qzone_post');
+                    const source = fromLibrary ? port.imageLibrary.path(a.source) : a.source;
+                    const image = await port.media.image(source, ctx.signal);
                     if (a.preview)
                         return { content: [image] };
                     const file = await port.media.save(Buffer.from(image.data, 'base64'), '.' + image.mimeType.split('/')[1]);

@@ -3,7 +3,7 @@ const user = z.number().int().positive().safe();
 export const legacyTools = [
   { name: 'qq_send_message', title: '跨会话发送消息', description: '给指定群或好友发送文字，使用主动额度。回复当前会话优先使用 qq_reply。目标先用 qq_chats 查询，不要猜号码。', schema: { target_type: z.enum(['private','group']), target_id: user, text: z.string().min(1).max(4000) } },
   { name: 'qq_like', title: '名片点赞', description: '给好友名片点赞，按次数扣每日点赞额度。', schema: { user_id: user, times: z.number().int().min(1).max(20).default(1) } },
-  { name: 'qq_qzone_post', title: '发布空间说说', description: '发布说说，受空间开关与额度约束；需要协议端支持 send_qzone_msg 扩展。', schema: { text: z.string().min(1).max(2000), images: z.array(z.string().min(1).max(4096)).max(9).optional() } },
+  { name: 'qq_qzone_post', title: '发布空间说说', description: '发布说说，images 可填 qq_search_images 返回的图片 ID 或公网图片直链，受空间开关与额度约束；需要协议端支持 send_qzone_msg 扩展。', schema: { text: z.string().min(1).max(2000), images: z.array(z.string().min(1).max(4096)).max(9).optional() } },
   { name: 'qq_get_friend_list', title: '查询好友', description: '查询当前账号好友，过滤屏蔽对象。', schema: {} },
   { name: 'qq_get_group_list', title: '查询群', description: '查询当前账号加入的群，过滤屏蔽对象。', schema: {} },
   { name: 'qq_get_group_member_list', title: '查询群成员', description: '查询已加入群的成员。', schema: { group_id: user } },

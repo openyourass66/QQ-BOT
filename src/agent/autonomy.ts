@@ -15,7 +15,7 @@ import {IntervalClock} from '../core/interval-clock.js';
 const minute=60000,hour=60*minute;
 const common=['qq_self_state','qq_interest','qq_thought','qq_finish','qq_report'];
 const imageTools=['qq_images','qq_message','qq_recent_messages','qq_stickers','qq_sticker_image','qq_sticker_note','qq_collect_sticker'];
-const chatTools=['qq_reply','qq_send_image','qq_send_sticker','qq_speak','qq_read_forward','qq_memory_query','qq_memory_append','qq_memory_remove'];
+const chatTools=['qq_save_image','qq_search_images','qq_reply','qq_send_image','qq_send_sticker','qq_speak','qq_read_forward','qq_memory_query','qq_memory_append','qq_memory_remove'];
 const digest=(text:string)=>createHash('sha256').update(text).digest('hex');
 export function quietTime(s:BotSettings,now=Date.now()):boolean {
   const current=Number(new Intl.DateTimeFormat('en-US',{timeZone:'Asia/Shanghai',hour:'numeric',hourCycle:'h23'}).format(new Date(now)));
@@ -62,7 +62,7 @@ export class Autonomy {
       if(!s.social.autoQzoneCommentEnabled||!s.features.qzone.browseEnabled||!s.features.qzone.commentsEnabled)throw new Error('自主空间评论已关闭');
       if(!target||a.targetUser!==target||!allowedChat(s.social,`private:${target}`)||s.social.autoQzoneCommentUsers.length&&!s.social.autoQzoneCommentUsers.includes(String(target))||this.store.profile(`private:${target}`)?.proactive===false)throw new Error('该好友不在自主空间互动范围内');
     }
-    const allowed=a.kind==='qzone-comment'?['qq_self_state','qq_qzone_feed','qq_qzone_comment','qq_finish','qq_report']:a.kind==='qzone'?[...common,'qzone_post']:
+    const allowed=a.kind==='qzone-comment'?['qq_self_state','qq_qzone_feed','qq_qzone_comment','qq_finish','qq_report']:a.kind==='qzone'?[...common,'qq_search_images','qq_send_image','qzone_post']:
       a.kind==='collect'?[...common,...imageTools]:[...common,...imageTools,...chatTools];
     if(!allowed.includes(tool))throw new Error('当前自主任务不允许执行这个操作');
   }
@@ -168,16 +168,18 @@ export class Autonomy {
   }
   lastSticker(chat:string,id:string):number {return this.stickerRecency(chat).get(id)??0;}
   async usedSticker(chat:string,id:string):Promise<void> {await this.store.update(d=>{d.autonomous.stickerUses.push({chat,stickerId:id,at:this.now()});d.autonomous.stickerUses=d.autonomous.stickerUses.slice(-1000);});}
-  async publish(ctx:ToolContext,text:string,images:string[],run:(extra:Quota[],images:string[])=>Promise<unknown>):Promise<unknown> {
+  async publish(ctx:ToolContext,text:string,images:string[],run:(extra:Quota[],images:string[])=>Promise<unknown>,resolveSaved?:(id:string)=>Promise<string|undefined>):Promise<unknown> {
     this.authorize(ctx,'qzone_post');
-    if(!ctx.autonomous)return run([],images);
+    if(!ctx.autonomous)return run([],await Promise.all(images.map(async source=>(await resolveSaved?.(source))??source)));
     if(ctx.autonomous.effects.has('qzone'))throw new Error('本次自主机会已经发布过空间');
-    const publicImages:string[]=[];
+    const attachments:string[]=[];
     for(const source of images) {
-      if(!/^https?:\/\//i.test(source))throw new Error('自主空间配图只接受可核验的公网图片地址，不能读取本地或聊天缓存');
+      const saved=await resolveSaved?.(source);
+      if(saved){attachments.push(saved);continue;}
+      if(!/^https?:\/\//i.test(source))throw new Error('自主空间配图只接受图库图片 ID 或可核验的公网图片地址');
       if(!this.media)throw new Error('自主配图缓存不可用');
       const {buffer}=await downloadPublic(source,ctx.signal,12_000_000),mime=imageMime(buffer);
-      publicImages.push(pathToFileURL(await this.media.save(buffer,'.'+mime.split('/')[1])).href);
+      attachments.push(pathToFileURL(await this.media.save(buffer,'.'+mime.split('/')[1])).href);
     }
     const hash=digest(text.trim().replace(/\s+/g,' ')+'|'+images.join('|'));
     await this.store.update(d=>{
@@ -185,7 +187,7 @@ export class Autonomy {
       d.autonomous.posts.push({hash,at:this.now(),state:'running',tid:'',summary:text.slice(0,200)});d.autonomous.posts=d.autonomous.posts.slice(-100);
     });
     try {
-      const result=await run([{key:'autonomous-qzone',amount:1,limit:this.settings().social.autoQzonePerDay,label:'自主空间发布'}],publicImages);
+      const result=await run([{key:'autonomous-qzone',amount:1,limit:this.settings().social.autoQzonePerDay,label:'自主空间发布'}],attachments);
       const tid=(result as {tid?:unknown})?.tid;
       if(typeof tid!=='string'||!tid.trim())throw new Error('空间发布没有返回有效 tid，结果待核对，不自动重发');
       ctx.autonomous.effects.add('qzone');

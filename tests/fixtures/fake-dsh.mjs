@@ -85,7 +85,10 @@ lines.on('line', async (line) => {
           } else if(text.includes('（qzone）')) {
             if(text.includes('SECRET_AUTONOMY'))throw new Error('独立空间上下文泄露了聊天内容');
             const forbidden=await client.callTool({name:'qq_recent_messages',arguments:{}});if(!forbidden.isError)throw new Error('空间任务越权读取聊天');
-            await invoke('qq_qzone_post',{text:'猫猫表情总能把一个字的情绪表达得很到位。'});
+            const images=process.env.FAKE_IMAGE_LIBRARY==='1'
+              ? JSON.parse((await invoke('qq_search_images',{query:'小图'})).content[0].text).map(image=>image.id)
+              : [];
+            await invoke('qq_qzone_post',{text:'猫猫表情总能把一个字的情绪表达得很到位。',images});
           } else if(text.includes('（collect）')) {
             const message_id=Number(text.match(/来源消息 #(-?\d+)/)[1]);
             const preview=JSON.parse((await invoke('qq_collect_sticker',{message_id})).content[0].text);
@@ -94,9 +97,20 @@ lines.on('line', async (line) => {
           } else if(process.env.FAKE_AUTONOMY_NO_INSTRUCTION==='1') {
             if(!text.includes('【后台主动联系机会】')||!text.includes('不要求有新消息'))throw new Error('后台机会仍要求用户先发消息');
             await invoke('qq_speak',{text:'刚看到一只猫，突然想起你之前说的表情包。'});
+          } else if(process.env.FAKE_IMAGE_LIBRARY==='1') {
+            const [image]=JSON.parse((await invoke('qq_search_images',{query:'测试 小图'})).content[0].text);
+            const preview=await invoke('qq_send_image',{source:image.id,preview:true});
+            if(preview.content[0].type!=='image')throw new Error('图库预览未返回图片');
+            await invoke('qq_send_image',{source:image.id,note:'昨天说的猫猫表情找到了吗？'});
           } else await invoke('qq_reply',{text:'昨天说的猫猫表情找到了吗？'});
         } else {
           const message_id=Number(text.match(/当前消息编号 #(-?\d+)/)[1]);
+          if(process.env.FAKE_IMAGE_LIBRARY==='1') {
+            const args={message_id,description:'一张测试小图',tags:['小图']};
+            const first=JSON.parse((await invoke('qq_save_image',args)).content[0].text);
+            const second=JSON.parse((await invoke('qq_save_image',{...args,description:'同一张小图'})).content[0].text);
+            if(first.already_saved||!second.already_saved||first.id!==second.id)throw new Error('图库同图去重失败');
+          }
           await invoke('qq_interest',{topic:'猫猫表情',reason:'对方实际聊到了这个兴趣',message_id});
           await invoke('qq_thought',{summary:'稍后继续聊猫猫表情',reason:'有实际未完话题',message_id,delay_minutes:1,priority:80});
           await invoke('qq_finish',{reason:'先记下有依据的兴趣和想法'});

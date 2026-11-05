@@ -185,6 +185,12 @@ try{
   if(version<7)transaction(()=>db.exec('CREATE INDEX IF NOT EXISTS learning_chat_state ON entity_learning_jobs(chat,state);PRAGMA user_version=7;'));
   if(version<8)transaction(()=>createMediaCacheSchema(db));
   if(version<9)transaction(()=>createMediaReferenceSchema(db));
+  if(version<10)transaction(()=>{
+    db.exec(`CREATE TABLE IF NOT EXISTS entity_images(key TEXT PRIMARY KEY,ordinal INTEGER NOT NULL,chat TEXT NOT NULL,at REAL NOT NULL,state TEXT NOT NULL,due REAL NOT NULL,retry_at REAL NOT NULL,payload TEXT NOT NULL) WITHOUT ROWID;
+      CREATE INDEX IF NOT EXISTS images_chat_at ON entity_images(chat,at DESC);
+      CREATE TRIGGER IF NOT EXISTS media_refs_images_delete AFTER DELETE ON entity_images BEGIN DELETE FROM media_references WHERE source='e/images/'||old.key;END;
+      PRAGMA user_version=10;`);
+  });
   db.exec('PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA wal_autocheckpoint=1000;');
   port.postMessage({type:'ready'});
   port.on('message',({id,request}:{id:number;request:DatabaseRequest})=>{

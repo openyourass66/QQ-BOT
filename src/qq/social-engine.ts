@@ -20,6 +20,7 @@ import {Cognition} from '../agent/cognition.js';
 import { learningModel } from '../agent/learning-model.js';
 import { turnBudget, toolAvailable, toolEnabled } from '../agent/context-policy.js';
 import { QzoneService } from '../services/qzone.js';
+import { ImageLibrary } from '../services/image-library.js';
 import type {PrepareServiceRequest} from '../agent/service-request.js';
 import type {QqOperationService} from '../app/qq-operation-service.js';
 
@@ -34,6 +35,7 @@ export class SocialEngine {
   private tickRunning = false;
   private spaceContactsAt=0;
   private stickerReviews = new StickerReviews();
+  readonly imageLibrary: ImageLibrary;
   readonly qqStickers: QqStickers;
   readonly autonomy:Autonomy;
   readonly cognition:Cognition;
@@ -43,6 +45,7 @@ export class SocialEngine {
     private readonly confirm: (title: string, signal: AbortSignal) => Promise<boolean>,
     private readonly onSent: (chat: string, id: number, segments: Segment[], source?: string) => void,
     private readonly log: (text: string) => void, qzone?:QzoneService,requests?:PrepareServiceRequest,private operations?:QqOperationService) {
+      this.imageLibrary = new ImageLibrary(store, media);
       this.qqStickers=new QqStickers(store,media,api);this.autonomy=new Autonomy(store,settings,usage,undefined,media);
       const model=learningModel(process.env,requests);this.cognition=new Cognition(store,settings,usage,model.analyze,model.available,Date.now,model.prepare);
       this.qzone=qzone??new QzoneService(api,{blocked:user=>settings().social.blockedUsers.includes(String(user)),...(operations?{effect:<T>(payload:unknown,invoke:()=>Promise<T>)=>operations.effect('qzone_comment',payload,invoke)}:{})});
@@ -192,7 +195,7 @@ export class SocialEngine {
     const previousAuthorization=ctx.authorize;
     ctx.authorize=()=>{previousAuthorization?.();assertToolAccess(ctx,this.settings(),call.tool,args);if(!toolEnabled(call.tool,this.settings()))throw new Error('该工具已关闭或依赖尚未就绪');};
     try {
-      if (mutates&&call.tool!=='qq_qzone_comment') await this.approve(ctx, call.tool, call.tool==='qq_handle_request',args);
+      if (mutates&&!['qq_qzone_comment','qq_save_image'].includes(call.tool)) await this.approve(ctx, call.tool, call.tool==='qq_handle_request',args);
       const result = await this.perform(call.tool, args, ctx);
       if (actionId) await this.store.endAction(actionId, 'success', `${tool.title}：${String(args.text ?? args.name ?? args.note ?? '已完成')}`);
       return result;
@@ -204,7 +207,7 @@ export class SocialEngine {
   describe(input:unknown){
     const call=SocialCallSchema.parse(input),tool=socialTools.find(tool=>tool.name===call.tool);if(!tool)throw new Error('未知 QQ 工具');
     const args=z.object(tool.schema as z.ZodRawShape).strict().parse(call.args) as Record<string,any>;
-    const reads = new Set(['qq_capabilities', 'qq_recent_messages', 'qq_message', 'qq_read_forward', 'qq_active_members', 'qq_chats', 'qq_images', 'qq_stickers', 'qq_sticker_image', 'qq_memory_query', 'qq_reminders', 'qq_events', 'qq_transcribe', 'qq_video', 'qq_file', 'qq_event_file', 'qq_group_files', 'qq_qzone_feed', 'qq_finish', 'qq_report']);
+    const reads = new Set(['qq_capabilities', 'qq_recent_messages', 'qq_message', 'qq_read_forward', 'qq_active_members', 'qq_chats', 'qq_images', 'qq_search_images', 'qq_stickers', 'qq_sticker_image', 'qq_memory_query', 'qq_reminders', 'qq_events', 'qq_transcribe', 'qq_video', 'qq_file', 'qq_event_file', 'qq_group_files', 'qq_qzone_feed', 'qq_finish', 'qq_report']);
     reads.add('qq_self_state');
     const collectPreview = call.tool === 'qq_collect_sticker' && !args.analysis_token;
     const sendSticker = call.tool === 'qq_send_sticker' ? this.store.view('stickers').stickers.find(s => s.id === args.sticker_id) : undefined;
@@ -225,6 +228,7 @@ export class SocialEngine {
       feature:this.feature.bind(this),
       messageImage:this.messageImage.bind(this),
       get media(){return engine.media;},
+      get imageLibrary(){return engine.imageLibrary;},
       messageSource:this.messageSource.bind(this),
       get autonomy(){return engine.autonomy;},
       get qqStickers(){return engine.qqStickers;},

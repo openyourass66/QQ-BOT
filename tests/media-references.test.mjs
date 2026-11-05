@@ -68,11 +68,12 @@ test('全部业务表引用与正文共同事务替换/删除，独立来源共�
   await mutate(client,[{table:'tasks',key:'two'}]);assert.deepEqual((await query(client,[name(),name(2)])).names,[name(2)]);
 }));
 
-test('真实社交仓储的 QQ 收藏缓存、待执行提醒及消息引用随业务保存并在重启后保留',()=>fixture(async({path,keep})=>{
+test('真实社交仓储的图库、QQ 收藏缓存、待执行提醒及消息引用随业务保存并在重启后保留',()=>fixture(async({path,keep})=>{
   const social=keep(new SqliteSocialStore(path));await social.load();
-  await social.update(d=>{d.stickers.push({id:'favorite',file:name(),note:'收藏',tags:[],uses:0,at:1,qqPresent:true,qq:{resId:'real-ref',emojiId:'1',md5:'a'.repeat(32),url:'',cachePath:name(2),description:'收藏'}});d.tasks.push({id:'task',chat:'private:2',creator:'2',text:'稍后发送 '+name(3),due:Date.now()+3600000,interval:0,state:'pending',error:'',retryAt:0});});
+  await social.update(d=>{d.images.push({id:'image:'+name(5).split('.')[0],file:name(5),description:'图库测试',tags:[],at:1,source:{local:true}});d.stickers.push({id:'favorite',file:name(),note:'收藏',tags:[],uses:0,at:1,qqPresent:true,qq:{resId:'real-ref',emojiId:'1',md5:'a'.repeat(32),url:'',cachePath:name(2),description:'收藏'}});d.tasks.push({id:'task',chat:'private:2',creator:'2',text:'稍后发送 '+name(3),due:Date.now()+3600000,interval:0,state:'pending',error:'',retryAt:0});});
   await social.add(message(4));await social.close();const restored=keep(new SqliteSocialStore(path));await restored.load();
-  await backfill(restored.mediaReferenceStore);const result=await query(restored.mediaReferenceStore,[1,2,3,4].map(name));assert.equal(result.ready,true);assert.equal(result.names.length,4);
+  assert.equal(restored.view('images').images[0].description,'图库测试');
+  await backfill(restored.mediaReferenceStore);const result=await query(restored.mediaReferenceStore,[1,2,3,4,5].map(name));assert.equal(result.ready,true);assert.equal(result.names.length,5);
   await restored.update(d=>{d.stickers=[];d.tasks=[];});assert.deepEqual((await query(restored.mediaReferenceStore,[1,2,3,4].map(name))).names,[name(4)]);
 }));
 
@@ -90,7 +91,7 @@ test('schema 8 原子升级，历史回填有界可重启，新写入/替换/删
   const seed=keep(new SqliteSocialStore(path));await seed.load();for(let i=1;i<=150;i++)await seed.add(message(i));await seed.close();legacy(path);
   const a=keep(new DatabaseClient(path+'.sqlite'));assert.equal((await query(a,[name()])).ready,false);assert.equal((await query(a,[name()])).names.length,0);
   const first=await a.call({action:'media-refs-backfill'});assert.equal(first.ready,false);assert.ok(first.processed>0&&first.processed<=64);
-  const db=new DatabaseSync(path+'.sqlite',{readOnly:true});let progress;try{progress=db.prepare("SELECT value FROM runtime_meta WHERE key='media_refs_progress'").get().value;assert.equal(db.prepare('PRAGMA user_version').get().user_version,9);}finally{db.close();}
+  const db=new DatabaseSync(path+'.sqlite',{readOnly:true});let progress;try{progress=db.prepare("SELECT value FROM runtime_meta WHERE key='media_refs_progress'").get().value;assert.equal(db.prepare('PRAGMA user_version').get().user_version,10);}finally{db.close();}
   await a.close();const b=keep(new DatabaseClient(path+'.sqlite'));
   const check=new DatabaseSync(path+'.sqlite',{readOnly:true});try{assert.equal(check.prepare("SELECT value FROM runtime_meta WHERE key='media_refs_progress'").get().value,progress);}finally{check.close();}
   await mutate(b,[{table:'stickers',key:'new-behind-cursor',value:{file:name(900)}}],[message(1,{segments:[{type:'image',data:{file:name(901)}}]})]);

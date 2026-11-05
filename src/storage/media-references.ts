@@ -6,14 +6,15 @@ import {mediaNames,MEDIA_REFERENCE_LIMITS,type MediaReferenceRequest} from './me
 
 type Context={db:DatabaseSync;meta:(key:string)=>unknown;setMeta:(key:string,value:unknown)=>void;transaction:<T>(fn:()=>T)=>T};
 type Progress={table:number;key?:string;chat?:string;id?:number;sequence?:number};
-const tables=[...entityTables.map(table=>'entity_'+table),'messages','external_operations','external_steps'];
+// Keep the persisted backfill cursor in its original order across schema upgrades.
+const tables=[...entityTables.filter(table=>table!=='images').map(table=>'entity_'+table),'messages','external_operations','external_steps','entity_images'];
 const invalid=(message:string)=>Object.assign(new Error(message),{code:'DATABASE_MEDIA_INVALID'});
 export const entityMediaSource=(table:string,key:string)=>`e/${table}/${key}`;
 export const messageMediaSource=(chat:string,id:number)=>`m/${chat}/${id}`;
 
 export function createMediaReferenceSchema(db:DatabaseSync){
   db.exec("CREATE TABLE IF NOT EXISTS media_references(source TEXT NOT NULL,name TEXT NOT NULL,operation_id TEXT,PRIMARY KEY(source,name),FOREIGN KEY(operation_id) REFERENCES external_operations(id) ON DELETE CASCADE) WITHOUT ROWID;CREATE INDEX IF NOT EXISTS media_references_name ON media_references(name,operation_id);INSERT OR IGNORE INTO runtime_meta(key,value) VALUES('media_refs_count','0');CREATE TRIGGER IF NOT EXISTS media_refs_insert AFTER INSERT ON media_references BEGIN UPDATE runtime_meta SET value=CAST(value AS INTEGER)+1 WHERE key='media_refs_count';END;CREATE TRIGGER IF NOT EXISTS media_refs_delete AFTER DELETE ON media_references BEGIN UPDATE runtime_meta SET value=CAST(value AS INTEGER)-1 WHERE key='media_refs_count';END;");
-  for(const table of entityTables)db.exec(`CREATE TRIGGER IF NOT EXISTS media_refs_${table}_delete AFTER DELETE ON entity_${table} BEGIN DELETE FROM media_references WHERE source='e/${table}/'||old.key;END;`);
+  for(const table of entityTables.filter(table=>table!=='images'))db.exec(`CREATE TRIGGER IF NOT EXISTS media_refs_${table}_delete AFTER DELETE ON entity_${table} BEGIN DELETE FROM media_references WHERE source='e/${table}/'||old.key;END;`);
   db.exec("CREATE TRIGGER IF NOT EXISTS media_refs_message_delete AFTER DELETE ON messages BEGIN DELETE FROM media_references WHERE source='m/'||old.chat||'/'||old.id;END;PRAGMA user_version=9;");
 }
 export function replaceMediaReferences(db:DatabaseSync,source:string,payload:string,operationId:string|null=null){

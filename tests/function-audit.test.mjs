@@ -69,7 +69,8 @@ test('功能审计：全部 MCP 工具逐项经过真实传输、参数校验和
     const qzone=new QzoneService(api,{fetch:async(url,options)=>{assert.ok(['user.qzone.qq.com','h5.qzone.qq.com'].includes(url.hostname));assert.equal(options.redirect,'error');requests.push({path:'native-qzone',raw:String(options.body??'')});return new Response(JSON.stringify(options.method==='POST'?{code:0,commentid:'comment-real'}:{code:0,total:1,msglist:[{tid:'post-real',uin:10000,content:'动态'}]}));}});
     const engine=new SocialEngine(store,media,api,usage,()=>settings,async()=>true,()=>{},()=>{},qzone);
     const policy=new QqActionPolicy(api,usage,()=>settings,async()=>true);
-    const ctx=signal=>({chat:'group:30001',self:10000,user:20001,origin:'message',sent:0,silent:false,signal});
+    let chat='group:30001';
+    const ctx=signal=>({chat,self:10000,user:20001,origin:'message',sent:0,silent:false,signal});
     const segment=(type,data)=>[{type,data}];
     const seed=async(id,segments,self=false)=>store.add({chat:'group:30001',id,user:self?10000:20001,name:'甲',at:Date.now(),text:'测试消息',segments,self,recalled:false});
     await seed(1,segment('text',{text:'测试消息'}));await seed(2,segment('image',{file:png}));
@@ -92,7 +93,7 @@ test('功能审计：全部 MCP 工具逐项经过真实传输、参数校验和
     client=new Client({name:'feature-audit',version:'1'});
     await client.connect(new StdioClientTransport({command:process.execPath,args:[resolve('dist/mcp-qq.js')],env:{BOT_ACTION_URL:actions.url,BOT_ACTION_TOKEN:actions.token,BOT_ACTION_CONTEXT:'audit-context'},stderr:'pipe'}));
     const registry=(await client.listTools()).tools;
-    assert.equal(registry.length,51);assert.deepEqual(registry.map(d=>d.name).sort(),[...socialTools,...legacyTools].map(d=>d.name).sort());
+    assert.equal(registry.length,53);assert.deepEqual(registry.map(d=>d.name).sort(),[...socialTools,...legacyTools].map(d=>d.name).sort());
     const call=async(name,args={},error)=>{
       let value;
       await t.test(name,async()=>{
@@ -111,7 +112,14 @@ test('功能审计：全部 MCP 工具逐项经过真实传输、参数校验和
     await call('qq_thought',{summary:'以后继续聊咖啡',reason:'有实际话题可以延续',message_id:1});
     await call('qq_recent_messages',{refresh:true});await call('qq_message',{message_id:1});
     await call('qq_read_forward',{message_id:3});await call('qq_active_members');await call('qq_chats');await call('qq_poke',{user_id:20001});
-    await call('qq_images',{message_id:2});await call('qq_send_image',{source:png});
+    await call('qq_images',{message_id:2});
+    const savedImage=await call('qq_save_image',{message_id:2,description:'测试图片',tags:['素材']});
+    chat='private:20001';
+    const foundImages=await call('qq_search_images',{query:'素材'});
+    assert.deepEqual(foundImages.map(image=>image.id),[savedImage.id]);
+    const sentImage=await call('qq_send_image',{source:savedImage.id});
+    assert.equal(sentImage.target,'private:20001');
+    chat='group:30001';
     const sticker=await call('qq_collect_sticker',{message_id:2,note:'开心'});
     await call('qq_stickers');await call('qq_sticker_note',{sticker_id:sticker.id,note:'赞同'});
     await call('qq_sticker_image',{sticker_id:sticker.id});await call('qq_send_sticker',{sticker_id:sticker.id});
@@ -129,7 +137,7 @@ test('功能审计：全部 MCP 工具逐项经过真实传输、参数校验和
     await call('qq_get_friend_list');await call('qq_get_group_list');await call('qq_get_group_member_list',{group_id:30001});
     await call('qq_set_profile',{nickname:'小鲸',signature:'测试签名'});await call('qq_set_group_card',{group_id:30001,card:'小鲸'});
     await call('qq_set_avatar',{file:png});await call('qq_recall',{message_id:7});await call('qq_self_info',{group_id:30001});
-    assert.equal(exercised.size,51);assert.equal(requests.length,7);
+    assert.equal(exercised.size,53);assert.equal(requests.length,7);
     for(const endpoint of ['send_group_msg','send_private_msg','send_like','send_qzone_msg','upload_group_file','set_qq_profile','set_self_longnick','set_group_card','set_qq_avatar','delete_msg','group_poke','set_group_add_request','add_custom_face','fetch_custom_face_detail'])assert.ok(calls.some(c=>c.action===endpoint),endpoint);
     assert.equal(favorites.items.length,1);assert.equal(store.snapshot().stickers[0].qqPresent,true);
     assert.equal(store.message('group:30001',7).recalled,true);

@@ -14,6 +14,14 @@ const segment = z.object({ type: z.string(), data: z.record(z.string(), z.unknow
 const message = z.object({ chat: z.string(), id: z.number().int().safe(), user: z.number().int().safe(), name: z.string(), at: z.number(), text: z.string(), segments: z.array(segment), self: z.boolean(), recalled: z.boolean().default(false) });
 const contact = z.object({ chat: z.string(), name: z.string(), at: z.number() });
 const memory = z.object({ id: z.string(), chat: z.string(), user: z.string(), name: z.string(), text: z.string(), at: z.number() });
+const libraryImage = z.object({
+  id: z.string().regex(/^image:[a-f0-9]{64}$/),
+  file: z.string().regex(/^[a-f0-9]{64}\.[a-z0-9]{1,10}$/),
+  description: z.string(),
+  tags: z.array(z.string()),
+  source: z.union([z.object({ chat: z.string(), messageId: z.number() }), z.object({ url: z.string() }), z.object({ local: z.literal(true) })]),
+  at: z.number(),
+});
 const qqSticker = z.object({ resId: z.string().min(1), emojiId: z.string(), md5: z.string().regex(/^[a-f0-9]{32}$/), url: z.string(), cachePath: z.string(), description: z.string() });
 const sticker = z.object({ id: z.string(), file: z.string(), note: z.string(), tags: z.array(z.string()), uses: z.number(), at: z.number(), analysis: StoredStickerAnalysisSchema.optional(), md5: z.string().regex(/^[a-f0-9]{32}$/).optional(), qq: qqSticker.optional(), qqPresent: z.boolean().default(false) });
 export const ScheduledTaskSchema = z.object({ id: z.string(), chat: z.string(), creator: z.string(), text: z.string(), due: z.number(), interval: z.number().default(0), state: z.enum(['pending', 'blocked', 'running', 'sent', 'failed', 'unknown', 'cancelled']), error: z.string().default(''), retryAt: z.number().default(0),claim:z.object({id:z.string().min(1).max(128),owner:z.string().min(1).max(128),at:z.number().finite()}).optional() });
@@ -22,7 +30,7 @@ const event = z.object({ id: z.string(), chat: z.string(), type: z.string(), at:
 const action = z.object({ id: z.string(), chat: z.string(), tool: z.string(), at: z.number(), state: z.enum(['running', 'success', 'failed', 'unknown']), summary: z.string() });
 const turn = z.object({ id: z.string(), chat: z.string(), at: z.number(), duration: z.number(), input: z.string(), output: z.string(), tools: z.array(z.string()), error: z.string(), inputTokens: z.number().nullable(), outputTokens: z.number().nullable(), contextUsed:z.number().nonnegative().optional(),contextSize:z.number().positive().optional(),generation:z.number().optional() });
 const profile = z.object({ chat: z.string().regex(/^(group|private):\d+$/), persona: z.string().max(10000), responseMode: z.enum(['inherit','mention','keywords','probability','all']).default('inherit'), keywords: z.array(z.string().max(64)).max(100).default([]), probability: z.number().int().min(0).max(100).default(10), proactive: z.boolean().default(true) });
-const schema = z.object({ version: z.literal(2), account: z.number().int().default(0), messages: z.array(message), contacts: z.array(contact), memories: z.array(memory), stickers: z.array(sticker), tasks: z.array(task), events: z.array(event), actions: z.array(action), turns: z.array(turn), profiles: z.array(profile).default([]), autonomous:AutonomousStateSchema, cognition:CognitionStateSchema });
+const schema = z.object({ version: z.literal(2), account: z.number().int().default(0), messages: z.array(message), contacts: z.array(contact), memories: z.array(memory), stickers: z.array(sticker), images: z.array(libraryImage).default([]), tasks: z.array(task), events: z.array(event), actions: z.array(action), turns: z.array(turn), profiles: z.array(profile).default([]), autonomous:AutonomousStateSchema, cognition:CognitionStateSchema });
 export type SocialData = z.infer<typeof schema>;
 export type StoredMessage = z.infer<typeof message>;
 export type ScheduledTask = z.infer<typeof task>;

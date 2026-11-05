@@ -17,7 +17,7 @@ export function readContextUsage(update:unknown):{used:number;size:number}|undef
 export function toolEnabled(name:string,s:BotSettings):boolean {
   if(name.startsWith('qq_memory_')&&!s.social.memoryEnabled)return false;
   if(/sticker/.test(name)&&!s.social.stickersEnabled)return false;
-  if(['qq_images','qq_send_image','qq_video','qq_speak','qq_transcribe'].includes(name)&&!s.social.mediaEnabled)return false;
+  if(['qq_images','qq_save_image','qq_search_images','qq_send_image','qq_video','qq_speak','qq_transcribe'].includes(name)&&!s.social.mediaEnabled)return false;
   if(['qq_file','qq_event_file','qq_group_files','qq_group_file','qq_create_file','qq_send_file'].includes(name)&&!s.social.filesEnabled)return false;
   if(['qq_set_reminder','qq_reminders','qq_cancel_reminder'].includes(name)&&!s.social.remindersEnabled)return false;
   if(name==='qq_handle_request'&&!s.social.requestsEnabled)return false;
