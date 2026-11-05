@@ -84,7 +84,12 @@ export class QzoneService {
     const url=new URL(listEndpoint);url.search=new URLSearchParams({uin:String(user),ftype:'0',sort:'0',pos:String(offset),num:String(limit),replynum:'20',code_version:'1',format:'jsonp',need_private_comment:'0',callback:'_preloadCallback'}).toString();
     const data=await this.request(url,auth,signal);
     if(data.msglist==null&&data.total===0)return {...data,msglist:[]};
-    if(!Array.isArray(data.msglist))throw new QzoneError('空间未返回有效说说列表，无法把接口错误当作空动态');
+    if(!Array.isArray(data.msglist)){
+      const target=user===auth.self?'自己的空间':'好友空间';
+      const listType=data.msglist===null?'null':typeof data.msglist;
+      const totalType=Number.isSafeInteger(data.total)&&data.total>=0?String(data.total):typeof data.total;
+      throw new QzoneError(`空间未返回有效说说列表（${target}，code=0，msglist=${listType}，total=${totalType}），请检查空间访问权限或响应格式`);
+    }
     return data;
   }
   async feed(chat:string,self:number,user:number,limit:number,offset:number,signal:AbortSignal):Promise<unknown> {

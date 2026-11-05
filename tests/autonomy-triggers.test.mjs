@@ -19,13 +19,13 @@ async function fixture(run) {
   const store=new SocialStore(join(root,'social.json'));await store.load();await store.account(10000);
   const usage=new DailyUsageStore(join(root,'usage.json'),()=>new Date(clock.now));await usage.load();
   const api={async call(action,args){calls.push({action,args});if(action==='get_login_info')return {user_id:10000};if(action==='get_cookies')return {cookies:'uin=o10000; p_skey=fixture-key'};if(action==='get_friend_list')return [{user_id:20001,nickname:'朋友甲'},{user_id:20002,nickname:'朋友乙'}];if(action==='get_group_list')return [];return {message_id:1000+calls.length};}};
-  let posts=true,postRequests=0;
-  const qzone=new QzoneService(api,{fetch:async(url,options)=>{if(options.method==='POST'){postRequests++;return new Response('{"code":0,"commentid":"fixture-comment"}');}return new Response(JSON.stringify({code:0,total:posts?1:0,msglist:posts?[{tid:'real-post',uin:Number(url.searchParams.get('uin')),content:'公开的新动态',created_time:Math.floor(Date.now()/1000)}]:[]}));}});
+  let posts=true,postRequests=0,postAge=0;
+  const qzone=new QzoneService(api,{fetch:async(url,options)=>{if(options.method==='POST'){postRequests++;return new Response('{"code":0,"commentid":"fixture-comment"}');}return new Response(JSON.stringify({code:0,total:posts?1:0,msglist:posts?[{tid:'real-post',uin:Number(url.searchParams.get('uin')),content:'公开的新动态',created_time:Math.floor((Date.now()-postAge)/1000)}]:[]}));}});
   const media=new MediaService(join(root,'media'),()=>settings.social),engine=new SocialEngine(store,media,api,usage,()=>settings,async()=>true,()=>{},()=>{},qzone);
   const autonomy=new Autonomy(store,()=>settings,usage,()=>clock.now,media,new IntervalClock(()=>clock.now,()=>clock.now));engine.autonomy=autonomy;
   const ctx=a=>({chat:'private:20001',self:10000,user:20001,sent:0,silent:false,signal:new AbortController().signal,proactive:true,...(a?{autonomous:a}:{})});
   const add=async()=>{await store.add({chat:'private:20001',id:1,user:20001,name:'朋友',at:clock.now-3*hour,text:'之前聊过猫猫',segments:[],self:false,recalled:false});};
-  try{await run({root,clock,settings,store,usage,api,engine,autonomy,media,calls,ctx,add,setPosts:value=>{posts=value;},postCount:()=>postRequests});}finally{await rm(root,{recursive:true,force:true,maxRetries:10,retryDelay:100});}
+  try{await run({root,clock,settings,store,usage,api,engine,autonomy,media,calls,ctx,add,setPosts:value=>{posts=value;},setPostAge:value=>{postAge=value;},postCount:()=>postRequests});}finally{await rm(root,{recursive:true,force:true,maxRetries:10,retryDelay:100});}
 }
 
 test('到期想法不再等待两小时扫描；队列忙时不消耗模型判断额度',()=>fixture(async({clock,autonomy,store,usage,ctx})=>{
@@ -63,8 +63,9 @@ test('主动聊天可自行发语音，并计入主动消息额度',()=>fixture(
   assert.equal(calls.filter(c=>c.action==='send_private_msg').length,1);assert.equal(usage.used('proactive'),1);
 }));
 
-test('自主空间互动无需聊天记录，先读取真实新动态再评论，重启后不重复',()=>fixture(async({root,settings,store,engine,postCount,usage})=>{
+test('自主空间互动无需聊天记录，可评论 48 小时内真实动态并保存去重记录',()=>fixture(async({root,settings,store,engine,postCount,usage,setPostAge})=>{
   Object.assign(settings.social,{autoQzoneCommentEnabled:true,qzoneCommentIntervalMinutes:5});Object.assign(settings.features.qzone,{browseEnabled:true,commentsEnabled:true,commentRequireConfirm:false});
+  setPostAge(36*hour);
   let woke=0;
   await engine.tick(10000,new AbortController().signal,async(chat,reason,a)=>{
     woke++;assert.equal(chat,'');assert.equal(a.kind,'qzone-comment');assert.equal(a.targetUser,20001);assert.ok(a.spacePost?.id);

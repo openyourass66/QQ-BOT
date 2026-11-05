@@ -388,9 +388,10 @@ export class SocialEngine {
         if(t.kind!=='qzone-comment')return true;
         const ctx:ToolContext={chat:`private:${self}`,self,user:self,signal,sent:0,silent:false,proactive:true,autonomous:a};
         await this.spaceTarget(ctx,t.targetUser!);
-        const result=await this.qzone.feed(ctx.chat,self,t.targetUser!,3,0,signal) as {posts:SpacePost[]};
+        const result=await this.qzone.feed(ctx.chat,self,t.targetUser!,5,0,signal) as {posts:SpacePost[]};
         this.autonomy.authorizeSpaceTarget(ctx,t.targetUser!);
-        const post=result.posts.find(p=>p.created_at>Date.now()-24*3600000&&!p.comments.some(comment=>comment.user_id===self)&&!this.autonomy.spaceCommentSeen(p.url));
+        const recentSince=Date.now()-48*3600000;
+        const post=result.posts.find(p=>p.created_at>recentSince&&!p.comments.some(comment=>comment.user_id===self)&&!this.autonomy.spaceCommentSeen(p.url));
         if(!post){a.reason='好友近期没有新的可评论动态，或动态已评论、结果待核对；本轮不唤醒模型';return false;}
         a.spacePost=post;return true;
       },reserveOnWake);
