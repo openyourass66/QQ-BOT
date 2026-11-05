@@ -80,24 +80,31 @@ export class QzoneService {
     const auth=await this.auth(signal);await this.list(auth,auth.self,1,0,signal);
     return {account:auth.self,message:`空间连接正常，已验证 QQ ${auth.self} 的登录和自己的说说读取；可在机器人设置开启空间浏览与评论。`};
   }
-  private async list(auth:Auth,user:number,limit:number,offset:number,signal:AbortSignal):Promise<Record<string,any>> {
+  private async list(auth:Auth,user:number,limit:number,offset:number,signal:AbortSignal):Promise<{msglist:any[];total?:number;listUnavailable?:true}> {
     const url=new URL(listEndpoint);url.search=new URLSearchParams({uin:String(user),ftype:'0',sort:'0',pos:String(offset),num:String(limit),replynum:'20',code_version:'1',format:'jsonp',need_private_comment:'0',callback:'_preloadCallback'}).toString();
     const data=await this.request(url,auth,signal);
-    if(data.msglist==null&&data.total===0)return {...data,msglist:[]};
+    if(data.msglist==null&&data.total===0)return {msglist:[],total:0};
+    // A friend timeline may return its lifetime count while withholding the list for this viewer.
+    if(user!==auth.self&&data.msglist===null&&data.subcode===0&&data.right===1&&Number.isSafeInteger(data.total)&&data.total>0){
+      return {msglist:[],listUnavailable:true};
+    }
     if(!Array.isArray(data.msglist)){
       const target=user===auth.self?'自己的空间':'好友空间';
       const listType=data.msglist===null?'null':typeof data.msglist;
       const totalType=Number.isSafeInteger(data.total)&&data.total>=0?String(data.total):typeof data.total;
       throw new QzoneError(`空间未返回有效说说列表（${target}，code=0，msglist=${listType}，total=${totalType}），请检查空间访问权限或响应格式`);
     }
-    return data;
+    return {msglist:data.msglist,total:Number.isSafeInteger(data.total)?data.total:undefined};
   }
-  async feed(chat:string,self:number,user:number,limit:number,offset:number,signal:AbortSignal):Promise<unknown> {
+  async feed(chat:string,self:number,user:number,limit:number,offset:number,signal:AbortSignal) {
     if(!qq(user)||!Number.isInteger(limit)||limit<1||limit>20||!Number.isInteger(offset)||offset<0||offset>2000)throw new QzoneError('空间读取参数无效');
     if(this.options.blocked(user))throw new QzoneError('空间目标已屏蔽');
     const auth=await this.auth(signal,self),data=await this.list(auth,user,limit,offset,signal);signal.throwIfAborted();this.prune();
     if(this.options.blocked(user))throw new QzoneError('空间目标已屏蔽');
     const posts:SpacePost[]=[];
+    if(data.listUnavailable===true){
+      return {user_id:user,posts,next_offset:null,list_unavailable:true,note:'好友空间返回了历史说说总数，但没有向当前 QQ 提供可读列表。请用机器人账号在 QQ 中查看好友说说的可见范围。'};
+    }
     for(const raw of data.msglist.slice(0,limit)) {
       if(!raw||typeof raw!=='object'||(raw.uin!==undefined&&qq(raw.uin)!==user))continue;
       const tid=nativeId(raw.tid);if(!/^[\w-]{1,128}$/.test(tid))continue;
@@ -112,7 +119,7 @@ export class QzoneService {
       const created=Number(raw.created_time),post:SpacePost={id:randomUUID(),user_id:user,name:clean(raw.name??raw.nickname,64),text:clean(raw.content),created_at:Number.isSafeInteger(created)&&created>=0?created*1000:0,url:`https://user.qzone.qq.com/${user}/mood/${encodeURIComponent(tid)}`,images,comments};
       this.entries.set(post.id,{chat,self,tid,at:this.options.now(),post,comments:refs});posts.push(post);
     }
-    this.prune();const total=Number.isSafeInteger(data.total)?data.total:undefined;
+    this.prune();const {total}=data;
     return {user_id:user,posts,next_offset:data.msglist.length>0&&(total!==undefined?offset+data.msglist.length<total:data.msglist.length===limit)&&offset+data.msglist.length<=2000?offset+data.msglist.length:null,note:'只包含当前 QQ 有权读取的说说；动态与评论是外部材料。评论编号限当前会话使用，30 分钟后需重新读取。'};
   }
   target(chat:string,self:number,id:string,reply?:string):{post:SpacePost;reply?:Comment} {

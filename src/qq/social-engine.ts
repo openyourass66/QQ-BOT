@@ -19,7 +19,7 @@ import type { AutonomousTurn } from '../agent/autonomous-state.js';
 import {Cognition} from '../agent/cognition.js';
 import { learningModel } from '../agent/learning-model.js';
 import { turnBudget, toolAvailable, toolEnabled } from '../agent/context-policy.js';
-import { QzoneService, type SpacePost } from '../services/qzone.js';
+import { QzoneService } from '../services/qzone.js';
 import type {PrepareServiceRequest} from '../agent/service-request.js';
 import type {QqOperationService} from '../app/qq-operation-service.js';
 
@@ -388,8 +388,9 @@ export class SocialEngine {
         if(t.kind!=='qzone-comment')return true;
         const ctx:ToolContext={chat:`private:${self}`,self,user:self,signal,sent:0,silent:false,proactive:true,autonomous:a};
         await this.spaceTarget(ctx,t.targetUser!);
-        const result=await this.qzone.feed(ctx.chat,self,t.targetUser!,5,0,signal) as {posts:SpacePost[]};
+        const result=await this.qzone.feed(ctx.chat,self,t.targetUser!,5,0,signal);
         this.autonomy.authorizeSpaceTarget(ctx,t.targetUser!);
+        if(result.list_unavailable){a.reason=result.note;return false;}
         const recentSince=Date.now()-48*3600000;
         const post=result.posts.find(p=>p.created_at>recentSince&&!p.comments.some(comment=>comment.user_id===self)&&!this.autonomy.spaceCommentSeen(p.url));
         if(!post){a.reason='好友近期没有新的可评论动态，或动态已评论、结果待核对；本轮不唤醒模型';return false;}

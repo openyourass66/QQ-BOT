@@ -63,6 +63,13 @@ test('分页遇到空列表停止，不重复返回相同偏移',async()=>{
   const result=await service.feed('group:1',10000,20001,10,10,signal());assert.deepEqual(result.posts,[]);assert.equal(result.next_offset,null);
 });
 
+test('好友空间仅返回历史总数时明确标记列表不可读，自己的空间仍报异常',async()=>{
+  const {api}=rig(),service=new QzoneService(api,{fetch:async()=>new Response('{"code":0,"subcode":0,"right":1,"total":117,"msglist":null}')});
+  const result=await service.feed('group:1',10000,20001,5,0,signal());
+  assert.deepEqual(result.posts,[]);assert.equal(result.next_offset,null);assert.equal(result.list_unavailable,true);
+  await assert.rejects(service.inspect(signal()),/有效说说/);
+});
+
 test('动态编号限制会话、账号和有效期，回复只能选择已读取且未屏蔽的评论',async()=>{
   const {state,service}=rig(),post=(await service.feed('group:1',10000,20001,5,0,signal())).posts[0];
   for(const [chat,self]of [['group:2',10000],['group:1',10001]])await assert.rejects(service.comment(chat,self,{post_id:post.id,text:'测试'},signal(),async()=>{}),/当前会话/);
