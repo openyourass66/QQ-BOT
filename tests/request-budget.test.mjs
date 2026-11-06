@@ -30,6 +30,31 @@ test('每次外部模型请求都预扣总额和用户额度，服务上报与�
   }finally{end();budget.close();}
 }));
 
+test('管理员每日额度豁免只适用于本人发起的请求，保留用量登记和每轮限制',()=>fixture(async({usage,settings})=>{
+  settings.approval.adminQq=2;
+  Object.assign(settings.requests,{perDay:0,perChatPerDay:0,perUserPerDay:0,mediaPerDay:0,perTurn:1});
+  const budget=new RequestBudget(usage,()=>settings);
+  const ends=[budget.bind('session',scope()),budget.bind('guest',scope({user:'3'})),budget.bind('background',scope({background:true}))];
+  try{
+    await assert.rejects(budget.reserve(request()),/额度已用完/);
+    settings.requests.adminUnlimited=true;
+    await assert.rejects(budget.reserve(request('guest')),/额度已用完/);
+    await assert.rejects(budget.reserve(request('background')),/额度已用完/);
+    const accepted=await budget.reserve(request('session',{kind:'vision'}));
+    await budget.finish(accepted.id,'completed',known);
+    assert.equal(usage.used('service-requests'),0);
+    assert.equal(usage.used('service-chat:private:2'),0);
+    assert.equal(usage.used('service-user:2'),0);
+    assert.equal(usage.used('service-media'),0);
+    assert.equal((await usage.requestStatistics()).requests,1);
+    await assert.rejects(budget.reserve(request()),/本轮模型请求预算/);
+    ends[0]();
+    ends[0]=budget.bind('session',scope());
+    settings.approval.adminQq=0;
+    await assert.rejects(budget.reserve(request()),/额度已用完/);
+  }finally{for(const end of ends)end();budget.close();}
+}));
+
 test('先占用并发槽位再等待持久化，速率、每轮、材料和输出上限均在提交外部请求前拒绝',()=>fixture(async({usage,settings})=>{
   let now=0;settings.requests.concurrent=1;settings.requests.perMinute=2;settings.requests.perTurn=2;const budget=new RequestBudget(usage,()=>settings,{now:()=>now}),end=budget.bind('session',scope());
   try{

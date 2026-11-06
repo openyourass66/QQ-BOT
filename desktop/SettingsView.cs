@@ -50,6 +50,7 @@ partial class App
         new FieldSpec("context.rollover", "额度与节奏", "上下文管理", "高占用时更换会话", "默认沿用 DSH 压缩；开启后在下一轮交接近期记录。"),
         new FieldSpec("context.rolloverPercent", "额度与节奏", "上下文管理", "会话更换比例", "新会话及映射保存成功后才替换旧会话。", "%", 50, 99),
         new FieldSpec("context.toolsPerTurn", "额度与节奏", "工具预算", "每轮工具调用上限", "QQ 工具与原生搜索、网页读取共享；达到上限后停止本轮工具。", "次", 1, 200),
+        new FieldSpec("requests.adminUnlimited", "额度与节奏", "管理员额度", "管理员不限每日请求次数", "仅对已配置的管理员 QQ 本人发消息触发的请求生效。请求仍记录用量，并受每轮、每分钟和并发限制。"),
         new FieldSpec("requests.perDay", "额度与节奏", "服务请求额度", "每日服务请求总量", "模型生成、压缩、独立媒体、后台学习和原生联网共享；失败或结果未知仍计次。", "次/天", 0, 10000),
         new FieldSpec("requests.perUserPerDay", "额度与节奏", "服务请求额度", "每位用户每日请求量", "限制由这位用户触发的服务请求；同时受总量和会话额度限制。", "次/天", 0, 10000),
         new FieldSpec("requests.perChatPerDay", "额度与节奏", "服务请求额度", "每个会话每日请求量", "群聊与私聊各自累计；同时受每日总量限制。", "次/天", 0, 10000),
@@ -338,7 +339,7 @@ partial class App
         if(!IsSqliteNotice("(node:123) ExperimentalWarning: SQLite is an experimental feature and might change at any time")||IsSqliteNotice("Error: SQLite database is corrupt"))throw new Exception("SQLite 提示与实际错误未正确区分");
         if(logs.Any(line=>line.Contains("控制进程异常")))throw new Exception("启动时控制进程报告异常");
         string before=json.Serialize(Collect(settings,""));
-        var requestPaths=new[]{"perDay","perUserPerDay","perChatPerDay","backgroundPerDay","perMinute","perTurn","concurrent","maxOutputTokens","maxRequestKiB","maxResponseChars","mediaPerDay","nativeWebPerDay","noticesPerDay"};
+        var requestPaths=new[]{"adminUnlimited","perDay","perUserPerDay","perChatPerDay","backgroundPerDay","perMinute","perTurn","concurrent","maxOutputTokens","maxRequestKiB","maxResponseChars","mediaPerDay","nativeWebPerDay","noticesPerDay"};
         foreach(var requestPath in requestPaths)if(!fieldViews.ContainsKey("requests."+requestPath)||fieldViews["requests."+requestPath].Spec.Category!="额度与节奏")throw new Exception("服务预算设置缺失或分类错误："+requestPath);
         var mode=(ComboBox)fields["social.responseMode"];object originalMode=mode.SelectedValue;
         var number=(TextBox)fields["social.responseProbability"];string originalNumber=number.Text;

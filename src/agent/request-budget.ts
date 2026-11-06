@@ -10,6 +10,10 @@ export type RequestScope={chat:string;user:string;background:boolean;signal:Abor
 type Binding={scope:RequestScope;turn:string;requests:number;closed:boolean};
 type Lease={binding:Binding;record:ModelRequestRecord;id:string;timer?:NodeJS.Timeout};
 type RequestUsage={reserveModel:(record:ModelRequestRecord,getQuotas:()=>Quota[])=>Promise<{reused:boolean}>;finishModel:(id:string,outcome:'completed'|'failed'|'unknown',usage:ReportedUsage)=>Promise<unknown>};
+function exemptFromDailyQuotas(scope:RequestScope,settings:BotSettings):boolean {
+  const admin=settings.approval.adminQq;
+  return settings.requests.adminUnlimited && !scope.background && admin>0 && scope.user===String(admin);
+}
 export type ReserveRequest={sessionId:string;id:string;kind:ModelRequestRecord['kind'];provider:string;model:string;bytes:number;maxOutputTokens?:number};
 export class RequestBudget {
   private bindings=new Map<string,Binding>();
@@ -42,8 +46,11 @@ export class RequestBudget {
     const record:ModelRequestRecord={id:request.id,turn:binding.turn,kind:request.kind,background:binding.scope.background,chat:binding.scope.chat,user:binding.scope.user,provider:request.provider,model:request.model,maxOutputTokens:output};
     const lease:Lease={binding,record,id:request.id};this.leases.set(request.id,lease);binding.requests++;const rate={id:request.id,at:now};this.recent.push(rate);
     try{
+      let exempt=false;
       const saved=await this.usage.reserveModel(record,()=>{
         this.binding(request.sessionId);const s=this.settings(),q=s.requests;
+        exempt=exemptFromDailyQuotas(binding.scope,s);
+        if(exempt)return [];
         return [{key:'service-requests',amount:1,limit:q.perDay,label:'模型与能力请求'},
           {key:'service-chat:'+binding.scope.chat,amount:1,limit:q.perChatPerDay,label:'当前会话服务请求'},
           ...(binding.scope.background?[{key:'service-background',amount:1,limit:q.backgroundPerDay,label:'后台服务请求'}]:[{key:'service-user:'+binding.scope.user,amount:1,limit:q.perUserPerDay,label:'当前用户服务请求'}]),
@@ -53,7 +60,10 @@ export class RequestBudget {
       });
       if(saved.reused){this.completed.add(request.id);throw new ModelBudgetError('该模型请求已经预扣，不会再次提交外部服务。');}
       let latest;
-      try{latest=this.limits(request.sessionId);if(output>latest.maxOutputTokens||request.bytes>latest.maxRequestKiB*1024||binding.requests>latest.perTurn||[...this.leases.keys()].indexOf(request.id)>=latest.concurrent)throw new ModelBudgetError('请求排队期间预算已调整，本次请求未提交。');}catch(error){await this.usage.finishModel(request.id,'unknown',{inputTokens:null,outputTokens:null});throw error;}
+      try{
+        latest=this.limits(request.sessionId);
+        if((exempt&&!exemptFromDailyQuotas(binding.scope,this.settings()))||output>latest.maxOutputTokens||request.bytes>latest.maxRequestKiB*1024||binding.requests>latest.perTurn||[...this.leases.keys()].indexOf(request.id)>=latest.concurrent)throw new ModelBudgetError('请求排队期间预算已调整，本次请求未提交。');
+      }catch(error){await this.usage.finishModel(request.id,'unknown',{inputTokens:null,outputTokens:null});throw error;}
       return {id:request.id,maxOutputTokens:output,maxResponseChars:latest.maxResponseChars,maxRequestKiB:latest.maxRequestKiB};
     }catch(error){this.leases.delete(request.id);if(lease.timer)clearTimeout(lease.timer);binding.requests--;this.recent=this.recent.filter(item=>item!==rate);if((error as {code?:string}).code==='DATABASE_QUOTA_EXCEEDED')throw new ModelBudgetError('今天的模型或能力请求额度已用完，请等额度恢复或由主人调整。');throw error;}
   }

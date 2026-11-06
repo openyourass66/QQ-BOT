@@ -1,5 +1,6 @@
 import {z} from 'zod';
 export const RequestSettingsSchema=z.object({
+  adminUnlimited:z.boolean().default(false),
   perDay:z.number().int().min(0).max(10000).default(500),
   perUserPerDay:z.number().int().min(0).max(10000).default(100),
   perChatPerDay:z.number().int().min(0).max(10000).default(200),
