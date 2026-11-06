@@ -2,7 +2,7 @@
   "name": "qq-bot-bridge",
   "private": true,
   "type": "module",
-  "version": "0.2.3",
+  "version": "0.2.4",
   "engines": {
     "node": "^22.20.0 || >=24.0.0"
   },
