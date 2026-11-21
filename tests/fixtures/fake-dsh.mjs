@@ -10,7 +10,7 @@ let nextGroupTurn = 0;
 const sessionServers = new Map();
 const sessionModels = new Map();
 const lifecycle=(kind,sessionId)=>{if(process.env.FAKE_LIFECYCLE_EVENTS)appendFileSync(process.env.FAKE_LIFECYCLE_EVENTS,JSON.stringify({kind,sessionId})+'\n');};
-if (process.env.FAKE_MODEL_EVENTS) appendFileSync(process.env.FAKE_MODEL_EVENTS, JSON.stringify({ args: process.argv.slice(2),serviceCredentialsPresent:['ONEBOT_TOKEN','BOT_MEDIA_API_KEY','BOT_LEARNING_API_KEY','BOT_ACTION_TOKEN'].some(key=>Boolean(process.env[key])) }) + '\n');
+if (process.env.FAKE_MODEL_EVENTS) appendFileSync(process.env.FAKE_MODEL_EVENTS, JSON.stringify({ args: process.argv.slice(2),serviceCredentialsPresent:['ONEBOT_TOKEN','BOT_IMAGE_API_KEY','BOT_MEDIA_API_KEY','BOT_LEARNING_API_KEY','BOT_ACTION_TOKEN'].some(key=>Boolean(process.env[key])) }) + '\n');
 const respond = (id, result) => process.stdout.write(`${JSON.stringify({ jsonrpc: '2.0', id, result })}\n`);
 const notify = (method, params) => process.stdout.write(`${JSON.stringify({ jsonrpc: '2.0', method, params })}\n`);
 const lines = createInterface({ input: process.stdin });

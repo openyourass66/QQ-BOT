@@ -202,6 +202,35 @@ export class MediaService {
       return Buffer.concat(chunks, size);
     } finally { await reader.cancel().catch(() => undefined); reader.releaseLock(); }
   }
+  async generateImage(prompt: string, signal: AbortSignal, authorize:()=>void=()=>{}): Promise<{type:'image';data:string;mimeType:string}> {
+    const s=this.settings(),model=s.imageGenerationModel;
+    const check=()=>{signal.throwIfAborted();authorize();const current=this.settings();if(!current.mediaEnabled||!current.imageGenerationEnabled||!model||current.imageGenerationModel!==model||current.imageGenerationSize!==s.imageGenerationSize)throw new Error('图片生成未开启、模型未配置或配置已变化');};
+    check();
+    if(!process.env.BOT_IMAGE_BASE_URL)throw new Error('图片生成服务地址未配置');
+    const base=new URL(process.env.BOT_IMAGE_BASE_URL.replace(/\/?$/, '/'));
+    if(!['http:','https:'].includes(base.protocol)||base.username||base.password||base.search||base.hash)throw new Error('图片生成服务地址必须为不带账号或查询参数的 HTTP(S) 基础地址');
+    const body=JSON.stringify({model,prompt,n:1,size:s.imageGenerationSize});
+    return this.request({kind:'image-generation',model,bytes:Buffer.byteLength(body),signal},async(_limits,report)=>{
+      check();
+      const requestSignal=AbortSignal.any([signal,AbortSignal.timeout(120_000)]);
+      const response=await fetch(new URL('images/generations',base),{method:'POST',redirect:'error',signal:requestSignal,headers:{'content-type':'application/json',...(process.env.BOT_IMAGE_API_KEY?{authorization:'Bearer '+process.env.BOT_IMAGE_API_KEY}:{})},body});
+      if(!response.ok){await response.body?.cancel();throw new Error('图片生成失败（HTTP '+response.status+'），请核对服务地址、模型和密钥；本次不自动重试');}
+      const result=await readJsonLimited(response,17_000_000) as {data?:Array<{b64_json?:unknown;url?:unknown}>;usage?:unknown};
+      if(result?.usage)report(reportedServiceUsage(result.usage));
+      const item=result?.data?.[0];let buffer:Buffer;
+      if(typeof item?.b64_json==='string'){
+        const encoded=item.b64_json;
+        if(encoded.length>16_000_000||!encoded||!/^[A-Za-z0-9+/]+={0,2}$/.test(encoded))throw new Error('图片生成返回了无效或过大的图片数据');
+        buffer=Buffer.from(encoded,'base64');
+        if(buffer.toString('base64').replace(/=+$/,'')!==encoded.replace(/=+$/,''))throw new Error('图片生成返回了无效的 Base64 图片');
+      }else if(typeof item?.url==='string'){
+        buffer=(await downloadPublic(item.url,requestSignal,12_000_000)).buffer;
+      }else throw new Error('图片生成服务未返回 b64_json 或图片 URL');
+      check();
+      if(buffer.length>12_000_000)throw new Error('生成图片超过 12 MB 上限');
+      return {type:'image',data:buffer.toString('base64'),mimeType:imageMime(buffer)};
+    });
+  }
   async vision(images: Array<{ data: string; mimeType: string }>, question: string, signal: AbortSignal): Promise<unknown> {
     const model = this.settings().visionModel;
     if (!model) return { content: [{ type: 'text', text: '以下图片交给当前 Agent 的视觉能力处理；若当前模型不支持图片，请明确说明。' }, ...images.map(i => ({ type: 'image', ...i }))] };
@@ -255,6 +284,6 @@ export class MediaService {
   }
   capabilities(): Record<string, string> {
     const s = this.settings();
-    return { images: s.visionModel && process.env.BOT_MEDIA_BASE_URL ? '已配置独立视觉服务' : '图片通过 MCP 交给 DSH，需当前模型支持视觉', transcription: s.transcriptionModel && process.env.BOT_MEDIA_BASE_URL ? '已配置' : '未配置', speech: s.speechModel && process.env.BOT_MEDIA_BASE_URL ? '已配置' : '未配置', video: process.env.BOT_FFMPEG_BIN ? '已配置抽帧' : '未配置 FFmpeg', search: '使用 DSH / DeepSeek 原生搜索与网页读取，是否可用取决于当前 Profile 和凭据', qzone: '浏览与评论内置连接 NapCat 登录；发布说说使用协议端空间扩展，可在扩展服务检查连接' };
+    return { imageGeneration: !s.imageGenerationEnabled?'未开启':s.imageGenerationModel&&process.env.BOT_IMAGE_BASE_URL?'已配置':'未配置完整', images: s.visionModel && process.env.BOT_MEDIA_BASE_URL ? '已配置独立视觉服务' : '图片通过 MCP 交给 DSH，需当前模型支持视觉', transcription: s.transcriptionModel && process.env.BOT_MEDIA_BASE_URL ? '已配置' : '未配置', speech: s.speechModel && process.env.BOT_MEDIA_BASE_URL ? '已配置' : '未配置', video: process.env.BOT_FFMPEG_BIN ? '已配置抽帧' : '未配置 FFmpeg', search: '使用 DSH / DeepSeek 原生搜索与网页读取，是否可用取决于当前 Profile 和凭据', qzone: '浏览与评论内置连接 NapCat 登录；发布说说使用协议端空间扩展，可在扩展服务检查连接' };
   }
 }

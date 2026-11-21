@@ -22,7 +22,7 @@ partial class App
         "配置后台分析，检查空间登录；联网搜索由 DSH / DeepSeek 原生工具提供。",
         "管理工作区之外的数据文件位置和高级环境文件；行为参数在机器人设置管理。"
     };
-    static readonly string[] mediaKeys = { "visionModel", "transcriptionModel", "speechModel", "speechVoice", "videoFrames" };
+    static readonly string[] mediaKeys = { "imageGenerationModel", "imageGenerationSize", "visionModel", "transcriptionModel", "speechModel", "speechVoice", "videoFrames" };
     static readonly Dictionary<string,long[]> runtimeRanges = new Dictionary<string,long[]> {
         {"TURN_TIMEOUT_MS",new long[]{1000,600000}}, {"QUEUE_PER_CONVERSATION",new long[]{1,100}},
         {"QUEUE_TOTAL",new long[]{1,1000}}, {"MAX_CONCURRENT_TURNS",new long[]{1,32}},
@@ -41,6 +41,8 @@ partial class App
         {"BOT_WORKSPACE","用于人设、记忆和生成文件；应选择已存在的目录。切换后请重新打开工作台加载对应人设。"},
         {"BOT_SETTINGS_FILE","保存后加载目标文件的机器人设置；运行中的机器人需重启后使用目标文件。"},
         {"BOT_MEDIA_BASE_URL","填写兼容 API 的基础地址，如 https://api.example.com/v1/；语音和独立视觉模型共用此服务。"},
+        {"BOT_IMAGE_BASE_URL","独立的 OpenAI 兼容 Images 基础地址，如 https://api.example.com/v1/；程序自动调用 images/generations。"},
+        {"BOT_IMAGE_API_KEY","仅用于图片生成的密钥，输入隐藏；不会复用对话或语音服务的密钥。"},
         {"BOT_MEDIA_API_KEY","媒体服务的 API 密钥，输入内容会隐藏。"},
         {"BOT_FFMPEG_BIN","仅视频抽帧需要；选择 FFmpeg 可执行文件。"},
         {"BOT_LEARNING_API_KEY","分析不挂载工具。项目 Key 模式可留空复用；Profile 或账号模式需独立密钥。"},
@@ -231,7 +233,7 @@ partial class App
         foreach(string key in mediaKeys) {
             string path="social."+key;if(!fields.ContainsKey(path))continue;var view=fieldViews[path];var input=(TextBox)fields[path];
             var parent=LogicalTreeHelper.GetParent(view.Row) as Panel;if(parent!=null)parent.Children.Remove(view.Row);
-            input.Tag=key=="visionModel"?"留空沿用对话模型":key=="videoFrames"?"1–12 帧":"填写服务支持的名称";
+            input.Tag=key=="visionModel"?"留空沿用对话模型":key=="imageGenerationSize"?"1024x1024":key=="videoFrames"?"1–12 帧":"填写服务支持的名称";
             mediaInputs[key]=input;mediaErrors[key]=view.Error;System.Windows.Automation.AutomationProperties.SetAutomationId(input,"Media-"+key);
             SettingStatus(path,"保存后热更新");body.Children.Add(view.Row);
         }
@@ -246,6 +248,7 @@ partial class App
         Func<string,string> state=key=>((TextBox)fields["social."+key]).Text.Trim().Length==0?"未配置":service?"已填写":"待填写服务地址";
         mediaSummary.Text=(!enabled?"媒体能力已关闭；可先配置服务和模型，再前往功能开关开启并保存。":"视觉："+(((TextBox)fields["social.visionModel"]).Text.Trim().Length==0?"沿用对话模型（需支持图片）":state("visionModel"))+" · 转写："+state("transcriptionModel")+" · 合成："+state("speechModel"))+(dirtySettingPaths.Contains("social.mediaEnabled")?"\n功能开关有未保存修改，请在机器人设置单独保存。":"");
         var saved=(Dictionary<string,object>)settings["social"];string savedSummary="已保存模型：视觉 "+(Convert.ToString(saved["visionModel"]).Length==0?"沿用对话模型":Convert.ToString(saved["visionModel"]))+" · 转写 "+(Convert.ToString(saved["transcriptionModel"]).Length==0?"未配置":Convert.ToString(saved["transcriptionModel"]))+" · 合成 "+(Convert.ToString(saved["speechModel"]).Length==0?"未配置":Convert.ToString(saved["speechModel"]));
+        mediaSummary.Text+=" · 生图："+(((TextBox)fields["social.imageGenerationModel"]).Text.Trim().Length==0?"未配置":RuntimeValue("BOT_IMAGE_BASE_URL").Trim().Length>0?"已填写":"待填写生图地址");
         SettingStatus("social.mediaEnabled",savedSummary+(dirtySections.Contains("models")?"；媒体服务还有未保存修改。":""));
     }
     static bool SavedMediaEnabled() {return settings!=null&&(bool)((Dictionary<string,object>)settings["social"])["mediaEnabled"];}
@@ -253,6 +256,7 @@ partial class App
         if(!mediaErrors.ContainsKey(key)||fields["social."+key] is CheckBox)return true;
         string text=((TextBox)fields["social."+key]).Text,error="";int limit=key=="speechVoice"?64:128;long frames;
         if(key=="videoFrames"&&(!long.TryParse(text,out frames)||frames<1||frames>12))error="视频抽帧数量应为 1–12 之间的整数。";
+        else if(key=="imageGenerationSize"&&!System.Text.RegularExpressions.Regex.IsMatch(text,@"^(auto|(256|512|1024|1536|1792)x(256|512|1024|1536|1792))$"))error="请输入受支持的尺寸，例如 1024x1024，或 auto。";
         else if(key!="videoFrames"&&text.Length>limit)error="最多输入 "+limit+" 个字符。";
         mediaErrors[key].Text=error;mediaErrors[key].Visibility=error.Length==0?Visibility.Collapsed:Visibility.Visible;return error.Length==0;
     }
@@ -277,6 +281,9 @@ partial class App
     static bool ValidateConnectionForm() {
         foreach(string key in runtimeInputs.Keys)if(!ValidateRuntimeField(key)) {RuntimePage=RuntimeCategoryForKey(key);runtimeInputs[key].BringIntoView();runtimeInputs[key].Focus();Feedback("连接配置需要调整，请检查行内提示。");return false;}
         foreach(string key in mediaKeys)if(!ValidateMediaField(key)) {RuntimePage=2;mediaInputs[key].BringIntoView();mediaInputs[key].Focus();Feedback("媒体模型配置需要调整，请检查行内提示。");return false;}
+        if(SavedMediaEnabled()&&(bool)((Dictionary<string,object>)settings["social"])["imageGenerationEnabled"]&&(((TextBox)fields["social.imageGenerationModel"]).Text.Trim().Length==0||RuntimeValue("BOT_IMAGE_BASE_URL").Trim().Length==0)) {
+            RuntimePage=2;Feedback("开启图片生成前，请填写图片生成模型和服务地址。");return false;
+        }
         if(SavedMediaEnabled()&&new[]{"visionModel","transcriptionModel","speechModel"}.Any(key=>((TextBox)fields["social."+key]).Text.Trim().Length>0)&&RuntimeValue("BOT_MEDIA_BASE_URL").Trim().Length==0) {
             runtimeErrors["BOT_MEDIA_BASE_URL"].Text="使用独立媒体模型前，请先填写媒体服务地址。";runtimeErrors["BOT_MEDIA_BASE_URL"].Visibility=Visibility.Visible;RuntimePage=2;runtimeInputs["BOT_MEDIA_BASE_URL"].BringIntoView();runtimeInputs["BOT_MEDIA_BASE_URL"].Focus();Feedback("请先配置媒体服务地址，再使用独立媒体模型。");return false;
         }
@@ -321,6 +328,9 @@ partial class App
         media.Text="vision-check";if(!dirtySections.Contains("models")||dirtySections.Contains("settings"))throw new Exception("媒体参数被归入机器人设置保存范围");vision.Text=originalVision;
         var frames=(TextBox)mediaInputs["videoFrames"];string originalFrames=frames.Text;frames.Text="0";
         if(ValidateConnectionForm()||mediaErrors["videoFrames"].Visibility!=Visibility.Visible||RuntimePage!=2)throw new Exception("媒体模型没有显示行内校验提示");frames.Text=originalFrames;ValidateMediaField("videoFrames");
+        if(!(runtimeInputs["BOT_IMAGE_API_KEY"] is PasswordBox)||!mediaInputs.ContainsKey("imageGenerationModel"))throw new Exception("缺少图片生成模型或密钥未隐藏");
+        var imageSize=(TextBox)mediaInputs["imageGenerationSize"];string originalImageSize=imageSize.Text;imageSize.Text="huge";
+        if(ValidateConnectionForm()||mediaErrors["imageGenerationSize"].Visibility!=Visibility.Visible||RuntimePage!=2)throw new Exception("图片生成尺寸缺少行内校验");imageSize.Text=originalImageSize;ValidateMediaField("imageGenerationSize");
         var saved=json.Deserialize<Dictionary<string,object>>(json.Serialize(settings));var disabled=json.Deserialize<Dictionary<string,object>>(json.Serialize(settings));((Dictionary<string,object>)disabled["social"])["mediaEnabled"]=false;
         ApplySavedSettings(disabled,new[]{"social.mediaEnabled"});if(!media.IsEnabled||!mediaSummary.Text.Contains("已关闭"))throw new Exception("关闭媒体能力后无法预先配置服务或缺少状态提示");ApplySavedSettings(saved,new[]{"social.mediaEnabled"});
         dirtySections.Remove("runtime");dirtySections.Remove("models");UpdateConnectionEditing();

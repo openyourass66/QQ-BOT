@@ -5,7 +5,7 @@ import {randomBytes,createHash} from 'node:crypto';
 import {parseEnv} from 'node:util';
 import {replaceEnvAssignments} from './env-file.mjs';
 
-export const credentialKeys=['ONEBOT_TOKEN','QQ_BOT_DEEPSEEK_API_KEY','BOT_MEDIA_API_KEY','BOT_LEARNING_API_KEY'];
+export const credentialKeys=['ONEBOT_TOKEN','QQ_BOT_DEEPSEEK_API_KEY','BOT_IMAGE_API_KEY','BOT_MEDIA_API_KEY','BOT_LEARNING_API_KEY'];
 const prefix='@whale-credential:',reference=/^@whale-credential:([a-f0-9]{32})$/;
 const cache=new Map();
 const failure=()=>new Error('Windows 凭据不可读取，请使用原 Windows 用户打开，或在连接设置中重新输入密钥。');

@@ -11,6 +11,7 @@ export const RequestSettingsSchema=z.object({
   maxOutputTokens:z.number().int().min(128).max(32768).default(8192),
   maxRequestKiB:z.number().int().min(64).max(32768).default(8192),
   maxResponseChars:z.number().int().min(1000).max(128000).default(32000),
+  imageGenerationPerDay:z.number().int().min(0).max(100).default(3),
   mediaPerDay:z.number().int().min(0).max(1000).default(60),
   nativeWebPerDay:z.number().int().min(0).max(1000).default(100),
   noticesPerDay:z.number().int().min(0).max(1000).default(40),

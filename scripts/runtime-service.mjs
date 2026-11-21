@@ -100,7 +100,7 @@ async function launch(name, script, overrides = {}, recovering=false) {
   if(!lease.held)throw new Error('运行管理实例锁已失效');
   if(closing)throw new Error('运行管理服务正在关闭');
   const env = { ...await environment(dataRoot), ...overrides };
-  if(name==='napcat')for(const key of ['QQ_BOT_DEEPSEEK_API_KEY','BOT_MEDIA_API_KEY','BOT_LEARNING_API_KEY'])delete env[key];
+  if(name==='napcat')for(const key of ['QQ_BOT_DEEPSEEK_API_KEY','BOT_IMAGE_API_KEY','BOT_MEDIA_API_KEY','BOT_LEARNING_API_KEY'])delete env[key];
   env.BOT_DATA_DIR = dataRoot;
   let execPath = process.execPath;
   if (name === 'napcat') {

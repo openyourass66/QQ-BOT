@@ -83,7 +83,7 @@ test('完整桥接链路：群上下文、连续回复顺序、超时恢复、DS
       env: { ...process.env,
         ONEBOT_HTTP_URL: `http://127.0.0.1:${http.address().port}`,
         ONEBOT_WS_URL: `ws://127.0.0.1:${wsServer.address().port}`,
-        ONEBOT_TOKEN: 'fixture-onebot-token', BOT_MEDIA_API_KEY:'fixture-private-media',BOT_LEARNING_API_KEY:'fixture-private-learning',BOT_SELF_ID: '10000', ADMIN_QQ: '0', ALLOW_EXEC: '0',
+        ONEBOT_TOKEN: 'fixture-onebot-token', BOT_IMAGE_API_KEY:'fixture-private-image', BOT_MEDIA_API_KEY:'fixture-private-media',BOT_LEARNING_API_KEY:'fixture-private-learning',BOT_SELF_ID: '10000', ADMIN_QQ: '0', ALLOW_EXEC: '0',
         BOT_DSH_BIN: wrapper, BOT_WORKSPACE: dir, BOT_DSH_PROFILE: 'acp',
         BOT_CHAT_MODE: 'project', BOT_CHAT_MODEL: 'test-project-model', QQ_BOT_DEEPSEEK_API_KEY: 'project-test-key',
         FAKE_MODEL_EVENTS: join(dir, 'model-events.jsonl'),

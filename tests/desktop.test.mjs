@@ -41,9 +41,12 @@ test('桌面配置：中文往返、完整设置校验、无效保存保留文�
     assert.ok(!(await worker('load')).result.env.includes('BOT_USAGE_STORE=""'));
     assert.equal((await worker('runtime', { BOT_QQ_DIR: 'C:\\new\\napcat' })).ok, true);
     assert.equal((await worker('load')).result.runtimeFields.find(f => f.key === 'BOT_QQ_DIR').value, 'C:\\new\\napcat');
-    const connection = { runtime: { BOT_DSH_PROFILE: 'chat-test', BOT_MEDIA_BASE_URL: 'https://api.example.com/v1/' }, media: { visionModel: ' vision-test ', transcriptionModel: 'transcribe-test', videoFrames: 4 } };
+    const connection = { runtime: { BOT_DSH_PROFILE: 'chat-test', BOT_MEDIA_BASE_URL: 'https://api.example.com/v1/', BOT_IMAGE_BASE_URL: 'https://images.example.com/v1/', BOT_IMAGE_API_KEY: 'image-config-fixture' }, media: { imageGenerationModel: ' image-test ', imageGenerationSize: '1536x1024', visionModel: ' vision-test ', transcriptionModel: 'transcribe-test', videoFrames: 4 } };
     response = await worker('connection', connection);
     assert.equal(response.ok, true);
+    assert.equal(response.result.settings.social.imageGenerationModel, 'image-test');
+    assert.equal(response.result.settings.social.imageGenerationSize, '1536x1024');
+    assert.equal(response.result.runtimeFields.find(f=>f.key==='BOT_IMAGE_API_KEY').kind, 'secret');
     assert.equal(response.result.settings.social.visionModel, 'vision-test');
     assert.equal(response.result.settings.identity.name, '小鲸');
     assert.match(response.result.env, /# 中文配置/);
@@ -55,6 +58,8 @@ test('桌面配置：中文往返、完整设置校验、无效保存保留文�
       { ...connection, runtime: { BOT_MEDIA_BASE_URL: 'not a url' } },
       { ...connection, runtime: { BOT_MEDIA_BASE_URL: '' } },
       { ...connection, runtime: { ADMIN_QQ: '9007199254740992' } },
+      { ...connection, runtime: { BOT_IMAGE_BASE_URL: 'https://user:pass@images.example.com/v1/' } },
+      { ...connection, media: { imageGenerationSize: 'huge' } },
       { ...connection, media: { videoFrames: 0 } },
       { ...connection, media: { speechModel: 'x'.repeat(129) } },
       { ...connection, media: { allowAll: true } },

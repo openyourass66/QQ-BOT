@@ -22,25 +22,26 @@ import { mockStickerAnalysis, fakeQqFavorites } from './helpers/sticker-review.m
 
 test('功能审计：全部 MCP 工具逐项经过真实传输、参数校验和受控协议/服务适配', { timeout: 30000 }, async t => {
   const dir = await mkdtemp(join(tmpdir(), 'qq-tool-audit-'));
-  const keys = ['BOT_MEDIA_BASE_URL','BOT_MEDIA_API_KEY','BOT_FFMPEG_BIN'];
+  const keys = ['BOT_IMAGE_BASE_URL','BOT_IMAGE_API_KEY','BOT_MEDIA_BASE_URL','BOT_MEDIA_API_KEY','BOT_FFMPEG_BIN'];
   const saved = Object.fromEntries(keys.map(k => [k,process.env[k]]));
   const requests = [], calls = [], exercised = new Set();
   const http = createServer(async (req,res) => {
     let raw=''; for await(const c of req) raw+=c;
     requests.push({path:req.url,raw}); res.setHeader('content-type','application/json');
     if(req.url==='/audio/speech') { res.setHeader('content-type','audio/mpeg'); res.end(Buffer.from('test-mp3')); }
+    else if(req.url==='/images/generations') res.end(JSON.stringify({data:[{b64_json:'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jP1kAAAAASUVORK5CYII='}]}));
     else if(req.url==='/audio/transcriptions') res.end(JSON.stringify({text:'测试语音正文'}));
     else if(req.url==='/chat/completions') res.end(JSON.stringify({choices:[{message:{content:'图片中有测试图案'}}]}));
     else { res.statusCode=404;res.end('{}'); }
   });
   http.listen(0,'127.0.0.1');await once(http,'listening');
   const base=`http://127.0.0.1:${http.address().port}`;
-  Object.assign(process.env,{BOT_MEDIA_BASE_URL:base+'/',BOT_MEDIA_API_KEY:'local-fixture'});
+  Object.assign(process.env,{BOT_IMAGE_BASE_URL:base+'/',BOT_IMAGE_API_KEY:'image-fixture',BOT_MEDIA_BASE_URL:base+'/',BOT_MEDIA_API_KEY:'local-fixture'});
   delete process.env.BOT_FFMPEG_BIN;
   let client,actions;
   try {
     const settings=structuredClone(DEFAULT_SETTINGS);settings.approval.adminQq=20001;
-    Object.assign(settings.social,{messagesPerMinute:100,actionsPerDay:1000,visionModel:'test-vision',transcriptionModel:'test-asr',speechModel:'test-tts'});
+    Object.assign(settings.social,{imageGenerationEnabled:true,imageGenerationModel:'test-image',messagesPerMinute:100,actionsPerDay:1000,visionModel:'test-vision',transcriptionModel:'test-asr',speechModel:'test-tts'});
     settings.chat.group.proactive.enabled=true;settings.chat.group.proactive.perGroupPerDay=20;
     settings.budgets.proactiveMessagesPerDay=100;Object.assign(settings.features.qzone,{enabled:true,requireConfirm:false,dailyLimit:10,browseEnabled:true,commentsEnabled:true,commentRequireConfirm:false});
     const store=new SocialStore(join(dir,'social.json'));await store.load();await store.account(10000);
@@ -93,7 +94,7 @@ test('功能审计：全部 MCP 工具逐项经过真实传输、参数校验和
     client=new Client({name:'feature-audit',version:'1'});
     await client.connect(new StdioClientTransport({command:process.execPath,args:[resolve('dist/mcp-qq.js')],env:{BOT_ACTION_URL:actions.url,BOT_ACTION_TOKEN:actions.token,BOT_ACTION_CONTEXT:'audit-context'},stderr:'pipe'}));
     const registry=(await client.listTools()).tools;
-    assert.equal(registry.length,53);assert.deepEqual(registry.map(d=>d.name).sort(),[...socialTools,...legacyTools].map(d=>d.name).sort());
+    assert.equal(registry.length,54);assert.deepEqual(registry.map(d=>d.name).sort(),[...socialTools,...legacyTools].map(d=>d.name).sort());
     const call=async(name,args={},error)=>{
       let value;
       await t.test(name,async()=>{
@@ -120,6 +121,7 @@ test('功能审计：全部 MCP 工具逐项经过真实传输、参数校验和
     const sentImage=await call('qq_send_image',{source:savedImage.id});
     assert.equal(sentImage.target,'private:20001');
     chat='group:30001';
+    await call('qq_generate_image',{prompt:'画一只蓝色鲸鱼',description:'蓝色鲸鱼',tags:['鲸鱼']});
     const sticker=await call('qq_collect_sticker',{message_id:2,note:'开心'});
     await call('qq_stickers');await call('qq_sticker_note',{sticker_id:sticker.id,note:'赞同'});
     await call('qq_sticker_image',{sticker_id:sticker.id});await call('qq_send_sticker',{sticker_id:sticker.id});
@@ -137,7 +139,7 @@ test('功能审计：全部 MCP 工具逐项经过真实传输、参数校验和
     await call('qq_get_friend_list');await call('qq_get_group_list');await call('qq_get_group_member_list',{group_id:30001});
     await call('qq_set_profile',{nickname:'小鲸',signature:'测试签名'});await call('qq_set_group_card',{group_id:30001,card:'小鲸'});
     await call('qq_set_avatar',{file:png});await call('qq_recall',{message_id:7});await call('qq_self_info',{group_id:30001});
-    assert.equal(exercised.size,53);assert.equal(requests.length,7);
+    assert.equal(exercised.size,54);assert.equal(requests.length,8);
     for(const endpoint of ['send_group_msg','send_private_msg','send_like','send_qzone_msg','upload_group_file','set_qq_profile','set_self_longnick','set_group_card','set_qq_avatar','delete_msg','group_poke','set_group_add_request','add_custom_face','fetch_custom_face_detail'])assert.ok(calls.some(c=>c.action===endpoint),endpoint);
     assert.equal(favorites.items.length,1);assert.equal(store.snapshot().stickers[0].qqPresent,true);
     assert.equal(store.message('group:30001',7).recalled,true);

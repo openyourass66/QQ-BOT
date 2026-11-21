@@ -195,7 +195,7 @@ export class SocialEngine {
     const previousAuthorization=ctx.authorize;
     ctx.authorize=()=>{previousAuthorization?.();assertToolAccess(ctx,this.settings(),call.tool,args);if(!toolEnabled(call.tool,this.settings()))throw new Error('该工具已关闭或依赖尚未就绪');};
     try {
-      if (mutates&&!['qq_qzone_comment','qq_save_image'].includes(call.tool)) await this.approve(ctx, call.tool, call.tool==='qq_handle_request',args);
+      if (mutates&&!['qq_qzone_comment','qq_save_image','qq_generate_image'].includes(call.tool)) await this.approve(ctx, call.tool, call.tool==='qq_handle_request',args);
       const result = await this.perform(call.tool, args, ctx);
       if (actionId) await this.store.endAction(actionId, 'success', `${tool.title}：${String(args.text ?? args.name ?? args.note ?? '已完成')}`);
       return result;

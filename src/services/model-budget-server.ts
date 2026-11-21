@@ -5,7 +5,7 @@ import type {RequestBudget} from '../agent/request-budget.js';
 const usage=z.object({inputTokens:z.number().int().min(0).max(1e9).nullable(),outputTokens:z.number().int().min(0).max(1e9).nullable(),cacheReadTokens:z.number().int().min(0).max(1e9).nullable().optional(),cacheWriteTokens:z.number().int().min(0).max(1e9).nullable().optional(),totalTokens:z.number().int().min(0).max(1e9).nullable().optional()}).strict();
 const schema=z.discriminatedUnion('op',[
   z.object({op:z.literal('limits'),sessionId:z.string().min(1).max(256)}).strict(),
-  z.object({op:z.literal('reserve'),sessionId:z.string().min(1).max(256),id:z.string().min(8).max(128),kind:z.enum(['conversation','compaction','vision','transcription','speech','learning','search','fetch']),provider:z.string().max(256),model:z.string().max(256),bytes:z.number().int().nonnegative(),maxOutputTokens:z.number().int().nonnegative().optional()}).strict(),
+  z.object({op:z.literal('reserve'),sessionId:z.string().min(1).max(256),id:z.string().min(8).max(128),kind:z.enum(['conversation','compaction','vision','image-generation','transcription','speech','learning','search','fetch']),provider:z.string().max(256),model:z.string().max(256),bytes:z.number().int().nonnegative(),maxOutputTokens:z.number().int().nonnegative().optional()}).strict(),
   z.object({op:z.literal('finish'),id:z.string().min(8).max(128),outcome:z.enum(['completed','failed','unknown']),usage}).strict(),
 ]);
 export async function startModelBudgetServer(budget:RequestBudget){

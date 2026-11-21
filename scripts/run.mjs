@@ -16,7 +16,7 @@ try {
   if(command==='bridge'||command==='napcat'){
     const guard=new ProcessGuard({root:layout.programRoot,dataRoot:layout.dataRoot});
     try{
-      const env={...process.env};if(command==='napcat')for(const key of ['QQ_BOT_DEEPSEEK_API_KEY','BOT_MEDIA_API_KEY','BOT_LEARNING_API_KEY'])delete env[key];
+      const env={...process.env};if(command==='napcat')for(const key of ['QQ_BOT_DEEPSEEK_API_KEY','BOT_IMAGE_API_KEY','BOT_MEDIA_API_KEY','BOT_LEARNING_API_KEY'])delete env[key];
       const child=await guard.fork(entries[command],{cwd:layout.dataRoot,env});child.stdout.pipe(process.stdout);child.stderr.pipe(process.stderr);
       let timer;
       const stop=()=>{if(timer)return;if(command==='bridge'&&child.connected)child.send('shutdown',()=>{});else void guard.terminate(child);timer=setTimeout(()=>void guard.terminate(child),7000);};

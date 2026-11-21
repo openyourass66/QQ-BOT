@@ -1,10 +1,11 @@
 import { resolve } from 'node:path';
 import { parseEnv } from 'node:util';
 
-export const mediaKeys = ['mediaEnabled', 'visionModel', 'transcriptionModel', 'speechModel', 'speechVoice', 'videoFrames'];
+export const mediaKeys = ['mediaEnabled', 'imageGenerationModel', 'imageGenerationSize', 'visionModel', 'transcriptionModel', 'speechModel', 'speechVoice', 'videoFrames'];
 export const settingsFileFor = (env, inherited = process.env) => resolve((parseEnv(env).BOT_SETTINGS_FILE ?? inherited.BOT_SETTINGS_FILE) || 'bot.config.json');
 
 export function validateMediaService(settings, env) {
+  if(settings.social.mediaEnabled && settings.social.imageGenerationEnabled && (!settings.social.imageGenerationModel?.trim() || !parseEnv(env).BOT_IMAGE_BASE_URL?.trim()))throw new Error('配置格式无效：开启图片生成前，请填写图片生成模型和图片生成服务地址');
   if (settings.social.mediaEnabled && ['visionModel', 'transcriptionModel', 'speechModel'].some(key => settings.social[key]?.trim()) && !parseEnv(env).BOT_MEDIA_BASE_URL?.trim()) {
     throw new Error('配置格式无效：使用独立媒体模型前，请在连接与运行中填写并保存媒体服务地址');
   }

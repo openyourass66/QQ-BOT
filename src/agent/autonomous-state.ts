@@ -29,4 +29,4 @@ export const AutonomousStateSchema = z.object({
   scheduleCursor:z.string().max(256).default(''),
 }).prefault({});
 export type Thought = z.infer<typeof ThoughtSchema>;
-export type AutonomousTurn = {kind:Thought['kind'];thoughtId:string;runId?:string;reserveDecision?:()=>Promise<void>;effects:Set<Thought['kind']>;messages:number;reason:string;failure?:string;targetUser?:number;spacePost?:import('../services/qzone.js').SpacePost};
+export type AutonomousTurn = {kind:Thought['kind'];thoughtId:string;runId?:string;reserveDecision?:()=>Promise<void>;effects:Set<Thought['kind']>;messages:number;reason:string;failure?:string;imageGenerationAttempted?:boolean;targetUser?:number;spacePost?:import('../services/qzone.js').SpacePost};

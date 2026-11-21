@@ -55,7 +55,8 @@ partial class App
         new FieldSpec("requests.perUserPerDay", "额度与节奏", "服务请求额度", "每位用户每日请求量", "限制由这位用户触发的服务请求；同时受总量和会话额度限制。", "次/天", 0, 10000),
         new FieldSpec("requests.perChatPerDay", "额度与节奏", "服务请求额度", "每个会话每日请求量", "群聊与私聊各自累计；同时受每日总量限制。", "次/天", 0, 10000),
         new FieldSpec("requests.backgroundPerDay", "额度与节奏", "服务请求额度", "每日后台服务请求量", "主动行动和后台学习共享，避免无人交互时持续请求。", "次/天", 0, 1000),
-        new FieldSpec("requests.mediaPerDay", "额度与节奏", "服务请求额度", "每日独立媒体请求量", "独立看图、语音识别和语音合成共享；图片随当前对话模型发送时不重复计次。", "次/天", 0, 1000),
+        new FieldSpec("requests.imageGenerationPerDay", "额度与节奏", "服务请求额度", "每日图片生成上限", "每次生成一张，同时计入独立媒体与服务请求额度；失败或结果未知仍计次。", "张/天", 0, 100),
+        new FieldSpec("requests.mediaPerDay", "额度与节奏", "服务请求额度", "每日独立媒体请求量", "独立看图、生图、语音识别和语音合成共享；图片随当前对话模型发送时不重复计次。", "次/天", 0, 1000),
         new FieldSpec("requests.nativeWebPerDay", "额度与节奏", "服务请求额度", "每日原生联网调用量", "搜索与网页读取共享；同时受服务总量和每轮工具上限限制。", "次/天", 0, 1000),
         new FieldSpec("requests.noticesPerDay", "额度与节奏", "QQ 通知额度", "每日确认与忙碌通知量", "授权请求、授权结果和忙碌提示共享；同时占用 QQ 动作总量。", "次/天", 0, 1000),
         new FieldSpec("requests.perMinute", "额度与节奏", "请求节奏与大小", "每分钟服务请求量", "按最近一分钟统计，限制突发请求。", "次", 1, 1000),
@@ -92,6 +93,10 @@ partial class App
         new FieldSpec("features.qzone.commentsEnabled", "功能开关", "QQ 空间互动", "空间评论与回复", "需先开启空间浏览，只能评论当前会话实际读到的动态；好友空间受联系范围限制。"),
         new FieldSpec("features.qzone.commentRequireConfirm", "身份与审批", "QQ 动作确认", "空间评论前确认", "确认时显示动态作者、动态内容及评论正文；敏感或全部确认模式仍要求审批。"),
         new FieldSpec("features.qzone.requireConfirm", "身份与审批", "QQ 动作确认", "空间发布前确认", "即使选择自主执行，开启此项后，空间发布仍需确认实际正文与图片。"),
+        new FieldSpec("social.imageGenerationEnabled", "功能开关", "日常能力", "图片生成", "允许调用独立生图服务，默认关闭；地址、密钥和模型在连接与运行的媒体服务中配置。"),
+        new FieldSpec("social.autoQzoneGenerateImages", "主动与提醒", "自主空间分享", "自主生成说说配图", "先从图库选图，无合适图片时允许生成一张。需开启图片生成；失败不自动重试，可继续发纯文字。"),
+        new FieldSpec("social.imageGenerationModel", "媒体服务", "模型与声音", "图片生成模型", "填写图片生成服务支持的模型 ID；使用独立的图片生成地址和密钥。"),
+        new FieldSpec("social.imageGenerationSize", "媒体服务", "模型与声音", "生成图片尺寸", "例如 1024x1024、1536x1024，或 auto；具体尺寸需服务和模型支持。"),
         new FieldSpec("social.visionModel", "媒体服务", "模型与声音", "独立视觉模型", "留空沿用对话模型；填写时使用本页上方的媒体服务。"),
         new FieldSpec("social.transcriptionModel", "媒体服务", "模型与声音", "语音转写模型", "使用本页上方的媒体服务；留空表示未配置语音识别。"),
         new FieldSpec("social.speechModel", "媒体服务", "模型与声音", "语音合成模型", "使用本页上方的媒体服务；留空表示未配置语音合成。"),
@@ -324,6 +329,9 @@ partial class App
             fieldViews["context.rolloverPercent"].Error.Text="会话更换比例应大于上下文提醒比例。";fieldViews["context.rolloverPercent"].Error.Visibility=Visibility.Visible;SelectSetting("context.rolloverPercent");return false;
         }
         var savedSocial=(Dictionary<string,object>)settings["social"];
+        if(SettingOn("social.mediaEnabled")&&SettingOn("social.imageGenerationEnabled")&&(Convert.ToString(savedSocial["imageGenerationModel"]).Trim().Length==0||!savedRuntimeValues.ContainsKey("BOT_IMAGE_BASE_URL")||savedRuntimeValues["BOT_IMAGE_BASE_URL"].Trim().Length==0)) {
+            var view=fieldViews["social.imageGenerationEnabled"];view.Error.Text="请先在媒体服务中配置并保存图片生成地址和模型。";view.Error.Visibility=Visibility.Visible;SelectSetting("social.imageGenerationEnabled");return false;
+        }
         if(SettingOn("social.mediaEnabled")&&new[]{"visionModel","transcriptionModel","speechModel"}.Any(key=>Convert.ToString(savedSocial[key]).Trim().Length>0)&&(!savedRuntimeValues.ContainsKey("BOT_MEDIA_BASE_URL")||savedRuntimeValues["BOT_MEDIA_BASE_URL"].Trim().Length==0)) {
             var view=fieldViews["social.mediaEnabled"];view.Error.Text="已保存的独立模型需要媒体服务地址，请先前往媒体服务配置并保存。";view.Error.Visibility=Visibility.Visible;SelectSetting("social.mediaEnabled");return false;
         }
@@ -339,7 +347,7 @@ partial class App
         if(!IsSqliteNotice("(node:123) ExperimentalWarning: SQLite is an experimental feature and might change at any time")||IsSqliteNotice("Error: SQLite database is corrupt"))throw new Exception("SQLite 提示与实际错误未正确区分");
         if(logs.Any(line=>line.Contains("控制进程异常")))throw new Exception("启动时控制进程报告异常");
         string before=json.Serialize(Collect(settings,""));
-        var requestPaths=new[]{"adminUnlimited","perDay","perUserPerDay","perChatPerDay","backgroundPerDay","perMinute","perTurn","concurrent","maxOutputTokens","maxRequestKiB","maxResponseChars","mediaPerDay","nativeWebPerDay","noticesPerDay"};
+        var requestPaths=new[]{"adminUnlimited","perDay","perUserPerDay","perChatPerDay","backgroundPerDay","perMinute","perTurn","concurrent","maxOutputTokens","maxRequestKiB","maxResponseChars","imageGenerationPerDay","mediaPerDay","nativeWebPerDay","noticesPerDay"};
         foreach(var requestPath in requestPaths)if(!fieldViews.ContainsKey("requests."+requestPath)||fieldViews["requests."+requestPath].Spec.Category!="额度与节奏")throw new Exception("服务预算设置缺失或分类错误："+requestPath);
         var mode=(ComboBox)fields["social.responseMode"];object originalMode=mode.SelectedValue;
         var number=(TextBox)fields["social.responseProbability"];string originalNumber=number.Text;

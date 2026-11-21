@@ -55,6 +55,7 @@ export class Autonomy {
     const s=this.settings();
     if(!['qzone','qzone-comment'].includes(a.kind)&&(!allowedChat(s.social,ctx.chat,ctx.user)||this.store.profile(ctx.chat)?.proactive===false))throw new Error('该会话不允许自主活动');
     if(a.kind==='collect'&&(!s.social.autoCollectStickers||!s.social.stickersEnabled))throw new Error('后台收藏已关闭');
+    if(tool==='qq_generate_image'&&(a.kind!=='qzone'||!s.social.autoQzoneGenerateImages))throw new Error('自主图片生成仅在开启说说配图生成时可用');
     if(tool==='qq_collect_sticker'&&!s.social.autoCollectStickers)throw new Error('后台收藏已关闭');
     if(a.kind==='qzone'&&(!s.social.autoQzoneEnabled||!s.features.qzone.enabled))throw new Error('自主空间发布已关闭');
     if(a.kind==='qzone-comment') {
@@ -62,7 +63,7 @@ export class Autonomy {
       if(!s.social.autoQzoneCommentEnabled||!s.features.qzone.browseEnabled||!s.features.qzone.commentsEnabled)throw new Error('自主空间评论已关闭');
       if(!target||a.targetUser!==target||!allowedChat(s.social,`private:${target}`)||s.social.autoQzoneCommentUsers.length&&!s.social.autoQzoneCommentUsers.includes(String(target))||this.store.profile(`private:${target}`)?.proactive===false)throw new Error('该好友不在自主空间互动范围内');
     }
-    const allowed=a.kind==='qzone-comment'?['qq_self_state','qq_qzone_feed','qq_qzone_comment','qq_finish','qq_report']:a.kind==='qzone'?[...common,'qq_search_images','qq_send_image','qzone_post']:
+    const allowed=a.kind==='qzone-comment'?['qq_self_state','qq_qzone_feed','qq_qzone_comment','qq_finish','qq_report']:a.kind==='qzone'?[...common,'qq_search_images','qq_generate_image','qq_send_image','qzone_post']:
       a.kind==='collect'?[...common,...imageTools]:[...common,...imageTools,...chatTools];
     if(!allowed.includes(tool))throw new Error('当前自主任务不允许执行这个操作');
   }

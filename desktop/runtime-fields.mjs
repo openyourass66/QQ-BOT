@@ -14,6 +14,8 @@ export const runtimeFields = [
   ['模型选择', 'BOT_CHAT_MODEL', '对话模型', defaultChatModel, 'chat-model'],
   ['模型选择', 'QQ_BOT_DEEPSEEK_API_KEY', '本项目 API Key', '', 'secret'],
   ['模型选择', 'BOT_CHAT_BASE_URL', 'API 地址', defaultChatBaseUrl],
+  ['图片生成服务', 'BOT_IMAGE_BASE_URL', '图片生成地址（兼容 Images API 的 /v1/）', ''],
+  ['图片生成服务', 'BOT_IMAGE_API_KEY', '图片生成密钥', '', 'secret'],
   ['媒体服务连接', 'BOT_MEDIA_BASE_URL', '媒体服务地址（兼容 API 的 /v1/）', ''], ['媒体服务连接', 'BOT_MEDIA_API_KEY', '媒体服务密钥', '', 'secret'], ['媒体服务连接', 'BOT_FFMPEG_BIN', 'FFmpeg 文件（视频抽帧）', '', 'file'],
   ['社交数据', 'BOT_SOCIAL_STORE', '社交数据文件（留空自动选择）', ''], ['社交数据', 'BOT_MEDIA_DIR', '媒体库目录（留空自动选择）', '', 'folder'], ['社交数据', 'BOT_MEDIA_IMPORT_DIRS', '允许导入的媒体目录（多个用 | 分隔）', ''],
   ['OneBot 连接', 'ONEBOT_HTTP_URL', 'HTTP 地址', 'http://127.0.0.1:3000'], ['OneBot 连接', 'ONEBOT_WS_URL', 'WebSocket 地址', 'ws://127.0.0.1:3001'], ['OneBot 连接', 'ONEBOT_TOKEN', '连接令牌', '', 'secret'],
@@ -49,6 +51,7 @@ export function validateRuntimeEnv(data) {
   for (const key of runtimeFields.map(field => field[1]).filter(key => key.endsWith('_URL'))) if (parsed[key] && (key !== 'BOT_CHAT_BASE_URL' || parsed.BOT_CHAT_MODE === 'project')) {
     let url;
     try { url = new URL(parsed[key]); } catch { throw new Error('连接配置格式无效：' + key + ' 地址无效'); }
+    if(key==='BOT_IMAGE_BASE_URL'&&(url.username||url.password||url.search||url.hash))throw new Error('图片生成地址不可包含账号、查询参数或片段');
     if (!(key === 'ONEBOT_WS_URL' ? ['ws:', 'wss:'] : ['http:', 'https:']).includes(url.protocol)) throw new Error(key + ' 协议无效');
   }
   if (parsed.BOT_DSH_PROFILE && !/^[\w-]+$/.test(parsed.BOT_DSH_PROFILE)) throw new Error('连接配置格式无效：Profile 只允许字母、数字、下划线和短横线');

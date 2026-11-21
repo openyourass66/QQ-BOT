@@ -159,6 +159,7 @@ export async function socialAdmin(input: unknown, store: SocialRepository, media
   const quotas = usage?.summary([
     {key:'service-requests',label:'模型与能力请求',limit:s.requests.perDay},
     {key:'service-background',label:'后台服务请求',limit:s.requests.backgroundPerDay},
+    {key:'image-generation',label:'图片生成',limit:s.requests.imageGenerationPerDay},
     {key:'service-media',label:'独立媒体服务',limit:s.requests.mediaPerDay},
     {key:'native-web',label:'原生联网',limit:s.requests.nativeWebPerDay},
     {key:'social-actions',label:'QQ 动作',limit:s.social.actionsPerDay},

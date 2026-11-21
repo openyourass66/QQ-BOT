@@ -41,7 +41,7 @@ export class RequestBudget {
     if(this.leases.size>=limits.concurrent)throw new ModelBudgetError('模型请求并发已满，请稍后再试。');
     const now=(this.options.now??(()=>performance.now()))();this.recent=this.recent.filter(item=>now-item.at<60000);
     if(this.recent.length>=limits.perMinute)throw new ModelBudgetError('模型请求过于频繁，请稍后再试。');
-    const output=request.maxOutputTokens??(['conversation','compaction'].includes(request.kind)?0:['speech','transcription','search','fetch'].includes(request.kind)?0:limits.maxOutputTokens);
+    const output=request.maxOutputTokens??(['conversation','compaction'].includes(request.kind)?0:['speech','image-generation','transcription','search','fetch'].includes(request.kind)?0:limits.maxOutputTokens);
     if(!Number.isSafeInteger(output)||output<0||output>limits.maxOutputTokens||(['conversation','compaction'].includes(request.kind)&&!output))throw new ModelBudgetError('模型请求未遵守输出上限，已停止提交；请重新连接受管模型。');
     const record:ModelRequestRecord={id:request.id,turn:binding.turn,kind:request.kind,background:binding.scope.background,chat:binding.scope.chat,user:binding.scope.user,provider:request.provider,model:request.model,maxOutputTokens:output};
     const lease:Lease={binding,record,id:request.id};this.leases.set(request.id,lease);binding.requests++;const rate={id:request.id,at:now};this.recent.push(rate);
@@ -54,7 +54,8 @@ export class RequestBudget {
         return [{key:'service-requests',amount:1,limit:q.perDay,label:'模型与能力请求'},
           {key:'service-chat:'+binding.scope.chat,amount:1,limit:q.perChatPerDay,label:'当前会话服务请求'},
           ...(binding.scope.background?[{key:'service-background',amount:1,limit:q.backgroundPerDay,label:'后台服务请求'}]:[{key:'service-user:'+binding.scope.user,amount:1,limit:q.perUserPerDay,label:'当前用户服务请求'}]),
-          ...(['vision','speech','transcription'].includes(request.kind)?[{key:'service-media',amount:1,limit:q.mediaPerDay,label:'独立媒体服务'}]:[]),
+          ...(['vision','image-generation','speech','transcription'].includes(request.kind)?[{key:'service-media',amount:1,limit:q.mediaPerDay,label:'独立媒体服务'}]:[]),
+          ...(request.kind==='image-generation'?[{key:'image-generation',amount:1,limit:q.imageGenerationPerDay,label:'图片生成'}]:[]),
           ...(request.kind==='learning'?[{key:'learning',amount:1,limit:s.learning.dailyCalls,label:'后台学习'}]:[]),
           ...(['search','fetch'].includes(request.kind)?[{key:'native-web',amount:1,limit:q.nativeWebPerDay,label:'原生联网'}]:[])] as Quota[];
       });
@@ -76,7 +77,7 @@ export class RequestBudget {
     available();const sessionId=scope.sessionId??'service-'+randomUUID(),unbind=scope.sessionId?()=>{}:this.bind(sessionId,scope),id=randomUUID();let attempted=false,started=false,reservedId=false,report:ReportedUsage={inputTokens:null,outputTokens:null};
     const settle=async(outcome:'completed'|'unknown')=>{if(attempted)return;attempted=true;await this.finish(id,outcome,report);};
     try{
-      const cap=this.settings().requests.maxOutputTokens,maxOutputTokens=['speech','transcription'].includes(input.kind)?0:Math.min(input.maxOutputTokens??cap,cap);
+      const cap=this.settings().requests.maxOutputTokens,maxOutputTokens=['speech','image-generation','transcription'].includes(input.kind)?0:Math.min(input.maxOutputTokens??cap,cap);
       const reserved=await this.reserve({sessionId,id,kind:input.kind,provider:input.kind==='learning'?'learning-service':'media-service',model:input.model,bytes:input.bytes,maxOutputTokens});
       reservedId=true;available();
       return {run:async operation=>{

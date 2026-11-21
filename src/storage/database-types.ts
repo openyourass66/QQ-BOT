@@ -13,7 +13,7 @@ export type EntityTable=typeof entityTables[number];
 export type EntityRow={table:EntityTable;key:string;ordinal:number;value:unknown};
 export type EntityChange={table:EntityTable;key:string;ordinal?:number;value?:unknown};
 export type EntityGuard={table:'thoughts';key:string;claimId:string;state?:'running'}|{table:'learning_jobs';key:string;claimId:string;state:'preparing'|'running'};
-export type ModelRequestRecord={id:string;turn:string;kind:'conversation'|'compaction'|'vision'|'transcription'|'speech'|'learning'|'search'|'fetch';background:boolean;chat:string;user:string;provider:string;model:string;maxOutputTokens:number};
+export type ModelRequestRecord={id:string;turn:string;kind:'conversation'|'compaction'|'vision'|'image-generation'|'transcription'|'speech'|'learning'|'search'|'fetch';background:boolean;chat:string;user:string;provider:string;model:string;maxOutputTokens:number};
 export type ReportedUsage={inputTokens:number|null;outputTokens:number|null;cacheReadTokens?:number|null;cacheWriteTokens?:number|null;totalTokens?:number|null};
 export type UsageDatabaseRequest=OperationDatabaseRequest
   |{action:'usage-import';date:string;counters:Record<string,number>;final?:boolean}

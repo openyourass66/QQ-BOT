@@ -17,9 +17,10 @@ export function readContextUsage(update:unknown):{used:number;size:number}|undef
 export function toolEnabled(name:string,s:BotSettings):boolean {
   if(name.startsWith('qq_memory_')&&!s.social.memoryEnabled)return false;
   if(/sticker/.test(name)&&!s.social.stickersEnabled)return false;
-  if(['qq_images','qq_save_image','qq_search_images','qq_send_image','qq_video','qq_speak','qq_transcribe'].includes(name)&&!s.social.mediaEnabled)return false;
+  if(['qq_generate_image','qq_images','qq_save_image','qq_search_images','qq_send_image','qq_video','qq_speak','qq_transcribe'].includes(name)&&!s.social.mediaEnabled)return false;
   if(['qq_file','qq_event_file','qq_group_files','qq_group_file','qq_create_file','qq_send_file'].includes(name)&&!s.social.filesEnabled)return false;
   if(['qq_set_reminder','qq_reminders','qq_cancel_reminder'].includes(name)&&!s.social.remindersEnabled)return false;
+  if(name==='qq_generate_image'&&!s.social.imageGenerationEnabled)return false;
   if(name==='qq_handle_request'&&!s.social.requestsEnabled)return false;
   if(['qq_qzone_feed','qq_qzone_comment'].includes(name)&&!s.features.qzone.browseEnabled)return false;
   if(name==='qq_qzone_comment'&&!s.features.qzone.commentsEnabled)return false;
@@ -28,6 +29,7 @@ export function toolEnabled(name:string,s:BotSettings):boolean {
 }
 export function toolAvailable(name:string,s:BotSettings,env:Record<string,string|undefined>=process.env):boolean {
   if(!toolEnabled(name,s))return false;
+  if(name==='qq_generate_image'&&(!s.social.imageGenerationModel||!env.BOT_IMAGE_BASE_URL))return false;
   if(name==='qq_speak'&&(!s.social.speechModel||!env.BOT_MEDIA_BASE_URL))return false;
   if(name==='qq_transcribe'&&(!s.social.transcriptionModel||!env.BOT_MEDIA_BASE_URL))return false;
   if(name==='qq_video'&&!env.BOT_FFMPEG_BIN)return false;

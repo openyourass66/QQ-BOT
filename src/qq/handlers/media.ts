@@ -2,8 +2,8 @@ import { toFile } from "./shared.js";
 import { isLibraryImage } from "../../services/image-library.js";
 import type { SocialExecutionPort } from "../social-engine.js";
 import type { HandlerGroup } from "./registry.js";
-export function mediaHandlers(port: Pick<SocialExecutionPort, "feature" | "message" | "messageImage" | "media" | "send" | "decorators" | "messageSource" | "imageLibrary" | "check">): HandlerGroup {
-    return { names: ["qq_images", "qq_save_image", "qq_search_images", "qq_send_image", "qq_transcribe", "qq_speak", "qq_video"], execute: async (tool, a, ctx) => {
+export function mediaHandlers(port: Pick<SocialExecutionPort, "feature" | "message" | "messageImage" | "settings" | "autonomy" | "media" | "send" | "decorators" | "messageSource" | "imageLibrary" | "check">): HandlerGroup {
+    return { names: ["qq_generate_image", "qq_images", "qq_save_image", "qq_search_images", "qq_send_image", "qq_transcribe", "qq_speak", "qq_video"], execute: async (tool, a, ctx) => {
             switch (tool) {
                 case 'qq_images': {
                     port.feature('mediaEnabled');
@@ -15,6 +15,24 @@ export function mediaHandlers(port: Pick<SocialExecutionPort, "feature" | "messa
                     for (const s of sources)
                         images.push(await port.messageImage(s, ctx));
                     return port.media.vision(images, a.question, ctx.signal);
+                }
+                case 'qq_generate_image': {
+                    port.feature('mediaEnabled');
+                    const check=()=>{
+                        port.check(ctx);
+                        port.autonomy.authorize(ctx,'qq_generate_image');
+                        const s=port.settings().social;
+                        if(!s.imageGenerationEnabled)throw new Error('图片生成已关闭');
+                        if(ctx.autonomous&&(ctx.autonomous.kind!=='qzone'||!s.autoQzoneGenerateImages))throw new Error('自主说说配图生成已关闭');
+                    };
+                    check();
+                    if(ctx.autonomous){
+                        if(ctx.autonomous.imageGenerationAttempted)throw new Error('本次自主说说已尝试生成图片，不会重复请求');
+                        ctx.autonomous.imageGenerationAttempted=true;
+                    }
+                    const image=await port.media.generateImage(a.prompt,ctx.signal,check);
+                    check();
+                    return port.imageLibrary.save(image,{description:a.description,tags:a.tags,source:{local:true}},check);
                 }
                 case 'qq_save_image': {
                     port.feature('mediaEnabled');
