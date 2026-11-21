@@ -3,9 +3,10 @@ import { isAccountOwner } from "../../core/permissions.js";
 import { toolAccessVisible } from "../../security/tool-policy.js";
 import type { SocialExecutionPort } from "../social-engine.js";
 import type { HandlerGroup } from "./registry.js";
-export function decisionsHandlers(port: Pick<SocialExecutionPort, "autonomy" | "media" | "settings" | "log">): HandlerGroup {
-    return { names: ["qq_self_state", "qq_interest", "qq_thought", "qq_capabilities", "qq_finish", "qq_report"], execute: async (tool, a, ctx) => {
+export function decisionsHandlers(port: Pick<SocialExecutionPort, "anecdotes" | "autonomy" | "media" | "settings" | "log">): HandlerGroup {
+    return { names: ["qq_propose_anecdote", "qq_self_state", "qq_interest", "qq_thought", "qq_capabilities", "qq_finish", "qq_report"], execute: async (tool, a, ctx) => {
             switch (tool) {
+                case 'qq_propose_anecdote': return port.anecdotes.propose(ctx,a as never);
                 case 'qq_self_state': return port.autonomy.view(ctx);
                 case 'qq_interest': return port.autonomy.interest(ctx, a as never);
                 case 'qq_thought': return port.autonomy.thought(ctx, a as never);

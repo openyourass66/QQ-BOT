@@ -52,7 +52,7 @@ partial class App
     static EventWaitHandle restore;
     public class Choice { public string Value { get; set; } public string Label { get; set; } }
     public partial class SocialRow { public string Id { get; set; } public string Chat { get; set; } public string Name { get; set; } public string Summary { get; set; } public string Status { get; set; } public string Time { get; set; } public string Detail { get; set; } public string Text { get; set; } }
-    static string[] socialSections = { "contacts", "messages", "memories", "stickers", "tasks", "events", "actions", "turns", "capabilities", "thoughts", "interests", "decisions", "lexicon", "learning" };
+    static string[] socialSections = { "contacts", "messages", "memories", "stickers", "tasks", "events", "actions", "turns", "capabilities", "thoughts", "interests", "decisions", "lexicon", "learning", "anecdotes" };
     static Dictionary<string, Dictionary<string, object>> socialProfiles = new Dictionary<string, Dictionary<string, object>>();
     static Window profileDialog;
     static SocialRow socialSelection;
@@ -70,7 +70,7 @@ partial class App
         var row = Find<ListView>("SocialList").SelectedItem as SocialRow;
         if (op != "list" && op != "refresh_contacts" && row == null) { Feedback("请先选择一条记录。"); return; }
         if (dirtySections.Contains("memory") && op != "edit_memory"&&op!="edit_interest" && MessageBox.Show(window,"记录编辑尚未保存，继续会放弃编辑。", "记录编辑", MessageBoxButton.YesNo) != MessageBoxResult.Yes) return;
-        string deletePrompt=SocialSection==9?"取消这条自主想法？已发出的操作无法撤回。":SocialSection==10?"删除这条兴趣记录？":SocialSection==3?(row!=null&&row.Status.StartsWith("QQ收藏")?"从 QQ 账号的收藏表情中移除这张？本地理解缓存会保留。":"删除所选本地待同步记录？"):"取消所选提醒？";
+        string deletePrompt=SocialSection==14?"删除这条趣事素材？会阻止近期来源再次提取，已发布的说说不会自动撤回。":SocialSection==9?"取消这条自主想法？已发出的操作无法撤回。":SocialSection==10?"删除这条兴趣记录？":SocialSection==3?(row!=null&&row.Status.StartsWith("QQ收藏")?"从 QQ 账号的收藏表情中移除这张？本地理解缓存会保留。":"删除所选本地待同步记录？"):"取消所选提醒？";
         if ((op == "delete" || op == "reset_session") && MessageBox.Show(window, op == "delete" ? deletePrompt : "清除该会话的 Agent 上下文？消息存档仍会保留。", "确认操作", MessageBoxButton.YesNo) != MessageBoxResult.Yes) return;
         Find<TextBlock>("SocialNote").Text = "正在读取，请稍候…";
         SetSocialBusy(true);

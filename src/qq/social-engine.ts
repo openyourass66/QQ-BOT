@@ -24,6 +24,9 @@ import { ImageLibrary } from '../services/image-library.js';
 import type {PrepareServiceRequest} from '../agent/service-request.js';
 import type {QqOperationService} from '../app/qq-operation-service.js';
 
+import {Anecdotes} from '../agent/anecdotes.js';
+import {anecdoteReviewer} from '../agent/anecdote-model.js';
+
 export class SocialEngine {
   private readonly handlers:ReadonlyMap<string,ToolHandler>;
   private sending = new Map<string, Promise<unknown>>();
@@ -38,6 +41,7 @@ export class SocialEngine {
   readonly imageLibrary: ImageLibrary;
   readonly qqStickers: QqStickers;
   readonly autonomy:Autonomy;
+  readonly anecdotes:Anecdotes;
   readonly cognition:Cognition;
   readonly qzone:QzoneService;
   constructor(readonly store: SocialRepository, readonly media: MediaService, private readonly api: OneBotHttp,
@@ -47,6 +51,7 @@ export class SocialEngine {
     private readonly log: (text: string) => void, qzone?:QzoneService,requests?:PrepareServiceRequest,private operations?:QqOperationService) {
       this.imageLibrary = new ImageLibrary(store, media);
       this.qqStickers=new QqStickers(store,media,api);this.autonomy=new Autonomy(store,settings,usage,undefined,media);
+      const reviewer=anecdoteReviewer(process.env,requests);this.anecdotes=new Anecdotes(store,settings,reviewer.review,reviewer.available);
       const model=learningModel(process.env,requests);this.cognition=new Cognition(store,settings,usage,model.analyze,model.available,Date.now,model.prepare);
       this.qzone=qzone??new QzoneService(api,{blocked:user=>settings().social.blockedUsers.includes(String(user)),...(operations?{effect:<T>(payload:unknown,invoke:()=>Promise<T>)=>operations.effect('qzone_comment',payload,invoke)}:{})});
       this.handlers=createSocialHandlers(this.executionPort());
@@ -195,7 +200,7 @@ export class SocialEngine {
     const previousAuthorization=ctx.authorize;
     ctx.authorize=()=>{previousAuthorization?.();assertToolAccess(ctx,this.settings(),call.tool,args);if(!toolEnabled(call.tool,this.settings()))throw new Error('该工具已关闭或依赖尚未就绪');};
     try {
-      if (mutates&&!['qq_qzone_comment','qq_save_image','qq_generate_image'].includes(call.tool)) await this.approve(ctx, call.tool, call.tool==='qq_handle_request',args);
+      if (mutates&&!['qq_propose_anecdote','qq_qzone_comment','qq_save_image','qq_generate_image'].includes(call.tool)) await this.approve(ctx, call.tool, call.tool==='qq_handle_request',args);
       const result = await this.perform(call.tool, args, ctx);
       if (actionId) await this.store.endAction(actionId, 'success', `${tool.title}：${String(args.text ?? args.name ?? args.note ?? '已完成')}`);
       return result;
@@ -231,6 +236,7 @@ export class SocialEngine {
       get imageLibrary(){return engine.imageLibrary;},
       messageSource:this.messageSource.bind(this),
       get autonomy(){return engine.autonomy;},
+      get anecdotes(){return engine.anecdotes;},
       get qqStickers(){return engine.qqStickers;},
       prepareStickerReview:this.prepareStickerReview.bind(this),
       serial:<T>(key:string,operation:()=>Promise<T>)=>this.serial(key,operation),

@@ -3,9 +3,7 @@ import { LearningProposalSchema, type Analyze,type PrepareAnalysis } from './cog
 import {reportedServiceUsage,type PrepareServiceRequest,type ServiceLimits} from './service-request.js';
 import type {ReportedUsage} from '../storage/database-types.js';
 
-/** Content-only Messages requests never mount QQ, workspace, browser, or DSH tools. */
-export function learningModel(env:Record<string,string|undefined>=process.env,requests?:PrepareServiceRequest):{available:()=>string;analyze:Analyze;prepare?:PrepareAnalysis} {
-  function connection() {
+export function analysisConnection(env:Record<string,string|undefined>=process.env) {
     const chat=readChatModelConfig(env),explicit=Boolean(env.BOT_LEARNING_API_KEY?.trim());
     const key=explicit?env.BOT_LEARNING_API_KEY!.trim():chat.mode==='project'?chat.apiKey:'';
     const base=env.BOT_LEARNING_BASE_URL?.trim()||chat.baseUrl;
@@ -16,6 +14,10 @@ export function learningModel(env:Record<string,string|undefined>=process.env,re
     if(!['http:','https:'].includes(url.protocol)||url.username||url.password||url.search||url.hash)throw new Error('后台分析服务地址格式无效');
     return {key,url,model};
   }
+
+/** Content-only Messages requests never mount QQ, workspace, browser, or DSH tools. */
+export function learningModel(env:Record<string,string|undefined>=process.env,requests?:PrepareServiceRequest):{available:()=>string;analyze:Analyze;prepare?:PrepareAnalysis} {
+  const connection=()=>analysisConnection(env);
   const prepare:PrepareAnalysis=async(batch,signal)=>{
     const {key,url,model}=connection();
     const payload={model,max_tokens:2400,stream:false,thinking:{type:'disabled'},

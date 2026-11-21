@@ -1,3 +1,4 @@
+import {AnecdoteTopicSchema} from '../agent/anecdote-state.js';
 import { z } from 'zod';
 import { StickerAnalysisSchema } from './sticker-review.js';
 import type { AutonomousTurn } from '../agent/autonomous-state.js';
@@ -9,6 +10,7 @@ const short = z.string().min(1).max(2000);
 const chat = z.string().regex(/^(group|private):\d+$/);
 const empty = {};
 export const socialTools = [
+  { name: 'qq_propose_anecdote', title: '提炼可公开的聊天趣事', description: '仅在当前真实聊天出现无敏感背景的普通笑点时提交候选；先正常回复，不必每轮提取。text 为围绕自己反应的独立感想，不能出现谁说了什么、原话、昵称、身份、地点或私人经历；message_ids 必须含当前消息编号。候选需经过独立隐私审核才能进入说说素材池，不直接发布。失败不重试，不向聊天播报整理过程。', schema: { text:z.string().trim().min(8).max(240), topic:AnecdoteTopicSchema, message_ids:z.array(id).min(1).max(6) } },
   {name:'qq_self_state',title:'查看兴趣与未完想法',description:'查看当前会话的兴趣、未完想法及近期行动摘要。空间独立任务只能查看公开兴趣，不能读取聊天记忆。',schema:empty},
   {name:'qq_interest',title:'记下或调整兴趣',description:'依据实际互动逐渐调整当前会话的兴趣；message_id 使用真实收到的消息。兴趣不跨会话传播。空间任务中只记录公开兴趣。无需每轮更新。',schema:{topic:z.string().trim().min(1).max(80),reason:z.string().trim().min(1).max(300),strength:z.number().int().min(1).max(5).default(3),message_id:id.optional()}},
   {name:'qq_thought',title:'记住、推迟或放弃想法',description:'保存值得以后继续的具体想法；chat 为后续聊天，collect 为看图判断是否收藏。message_id 必须来自当前会话收到的真实消息。空间任务只可保存 qzone 想法。完成由实际工具结果确认，不能自行标记成功。',schema:{op:z.enum(['remember','defer','dismiss']).default('remember'),thought_id:z.string().optional(),kind:z.enum(['chat','collect','qzone']).default('chat'),summary:z.string().trim().min(1).max(200).optional(),reason:z.string().trim().min(1).max(500),message_id:id.optional(),delay_minutes:z.number().min(1).max(10080).default(60),expires_hours:z.number().min(1).max(720).default(72),priority:z.number().int().min(1).max(100).default(50)}},

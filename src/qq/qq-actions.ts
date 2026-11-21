@@ -20,6 +20,7 @@ export const QqActionSchema = z.discriminatedUnion('action', [
     action: z.literal('qzone_post'),
     text: z.string().min(1).max(2000),
     images: z.array(z.string().min(1).max(4096)).max(9).optional(),
+    anecdote_id:z.string().uuid().optional(),
   }).strict(),
 ]);
 
@@ -34,7 +35,7 @@ export class QqActionPolicy {
     private readonly onMessageSent: () => void = () => undefined,
   ) {}
 
-  async execute(input: unknown, signal: AbortSignal, additionalQuotas: () => Quota[] = () => [], onReserved: () => void = () => undefined): Promise<unknown> {
+  async execute(input: unknown, signal: AbortSignal, additionalQuotas: () => Quota[] = () => [], onReserved: () => void = () => undefined, beforeDispatch?:()=>Promise<void>): Promise<unknown> {
     const action = QqActionSchema.parse(input);
     signal.throwIfAborted();
     let confirmed = false;
@@ -77,6 +78,9 @@ export class QqActionPolicy {
     signal.throwIfAborted();
     checkApproval?.();
 
+    await beforeDispatch?.();
+    signal.throwIfAborted();
+    checkApproval?.();
     if (action.action === 'like') {
       return this.api.call('send_like', { user_id: action.user_id, times: action.times }, signal);
     }

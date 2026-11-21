@@ -1,7 +1,7 @@
 import {AsyncLocalStorage} from 'node:async_hooks';
 import type {RequestScope} from './request-budget.js';
 import type {ReportedUsage} from '../storage/database-types.js';
-export type ServiceRequest={kind:'vision'|'image-generation'|'transcription'|'speech'|'learning';model:string;bytes:number;signal:AbortSignal;chat?:string;maxOutputTokens?:number};
+export type ServiceRequest={kind:'vision'|'image-generation'|'anecdote-review'|'transcription'|'speech'|'learning';model:string;bytes:number;signal:AbortSignal;chat?:string;maxOutputTokens?:number};
 export type ServiceLimits={maxOutputTokens:number;maxResponseChars:number};
 export type PreparedServiceRequest={run:<T>(operation:(limits:ServiceLimits,report:(usage:ReportedUsage)=>void)=>Promise<T>)=>Promise<T>;close:()=>Promise<void>};
 export type PrepareServiceRequest=(request:ServiceRequest)=>Promise<PreparedServiceRequest>;

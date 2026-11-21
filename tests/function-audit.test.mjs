@@ -22,13 +22,14 @@ import { mockStickerAnalysis, fakeQqFavorites } from './helpers/sticker-review.m
 
 test('功能审计：全部 MCP 工具逐项经过真实传输、参数校验和受控协议/服务适配', { timeout: 30000 }, async t => {
   const dir = await mkdtemp(join(tmpdir(), 'qq-tool-audit-'));
-  const keys = ['BOT_IMAGE_BASE_URL','BOT_IMAGE_API_KEY','BOT_MEDIA_BASE_URL','BOT_MEDIA_API_KEY','BOT_FFMPEG_BIN'];
+  const keys = ['BOT_LEARNING_BASE_URL','BOT_LEARNING_API_KEY','BOT_LEARNING_MODEL','BOT_IMAGE_BASE_URL','BOT_IMAGE_API_KEY','BOT_MEDIA_BASE_URL','BOT_MEDIA_API_KEY','BOT_FFMPEG_BIN'];
   const saved = Object.fromEntries(keys.map(k => [k,process.env[k]]));
   const requests = [], calls = [], exercised = new Set();
   const http = createServer(async (req,res) => {
     let raw=''; for await(const c of req) raw+=c;
     requests.push({path:req.url,raw}); res.setHeader('content-type','application/json');
     if(req.url==='/audio/speech') { res.setHeader('content-type','audio/mpeg'); res.end(Buffer.from('test-mp3')); }
+    else if(req.url==='/v1/messages') res.end(JSON.stringify({content:[{type:'text',text:JSON.stringify({safe:true,grounded:true,identifiable:false,sensitive:false,verbatim:false,text:'把小事想复杂的本领又熟练了一点，脑内剧场总比现实热闹',topic:'奇思妙想'})}]}));
     else if(req.url==='/images/generations') res.end(JSON.stringify({data:[{b64_json:'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jP1kAAAAASUVORK5CYII='}]}));
     else if(req.url==='/audio/transcriptions') res.end(JSON.stringify({text:'测试语音正文'}));
     else if(req.url==='/chat/completions') res.end(JSON.stringify({choices:[{message:{content:'图片中有测试图案'}}]}));
@@ -36,7 +37,7 @@ test('功能审计：全部 MCP 工具逐项经过真实传输、参数校验和
   });
   http.listen(0,'127.0.0.1');await once(http,'listening');
   const base=`http://127.0.0.1:${http.address().port}`;
-  Object.assign(process.env,{BOT_IMAGE_BASE_URL:base+'/',BOT_IMAGE_API_KEY:'image-fixture',BOT_MEDIA_BASE_URL:base+'/',BOT_MEDIA_API_KEY:'local-fixture'});
+  Object.assign(process.env,{BOT_LEARNING_BASE_URL:base,BOT_LEARNING_API_KEY:'review-fixture-key',BOT_LEARNING_MODEL:'fixture-review',BOT_IMAGE_BASE_URL:base+'/',BOT_IMAGE_API_KEY:'image-fixture',BOT_MEDIA_BASE_URL:base+'/',BOT_MEDIA_API_KEY:'local-fixture'});
   delete process.env.BOT_FFMPEG_BIN;
   let client,actions;
   try {
@@ -71,7 +72,7 @@ test('功能审计：全部 MCP 工具逐项经过真实传输、参数校验和
     const engine=new SocialEngine(store,media,api,usage,()=>settings,async()=>true,()=>{},()=>{},qzone);
     const policy=new QqActionPolicy(api,usage,()=>settings,async()=>true);
     let chat='group:30001';
-    const ctx=signal=>({chat,self:10000,user:20001,origin:'message',sent:0,silent:false,signal});
+    const ctx=signal=>({chat,self:10000,user:20001,origin:'message',messageId:1,sent:0,silent:false,signal});
     const segment=(type,data)=>[{type,data}];
     const seed=async(id,segments,self=false)=>store.add({chat:'group:30001',id,user:self?10000:20001,name:'甲',at:Date.now(),text:'测试消息',segments,self,recalled:false});
     await seed(1,segment('text',{text:'测试消息'}));await seed(2,segment('image',{file:png}));
@@ -94,7 +95,7 @@ test('功能审计：全部 MCP 工具逐项经过真实传输、参数校验和
     client=new Client({name:'feature-audit',version:'1'});
     await client.connect(new StdioClientTransport({command:process.execPath,args:[resolve('dist/mcp-qq.js')],env:{BOT_ACTION_URL:actions.url,BOT_ACTION_TOKEN:actions.token,BOT_ACTION_CONTEXT:'audit-context'},stderr:'pipe'}));
     const registry=(await client.listTools()).tools;
-    assert.equal(registry.length,54);assert.deepEqual(registry.map(d=>d.name).sort(),[...socialTools,...legacyTools].map(d=>d.name).sort());
+    assert.equal(registry.length,55);assert.deepEqual(registry.map(d=>d.name).sort(),[...socialTools,...legacyTools].map(d=>d.name).sort());
     const call=async(name,args={},error)=>{
       let value;
       await t.test(name,async()=>{
@@ -109,6 +110,7 @@ test('功能审计：全部 MCP 工具逐项经过真实传输、参数校验和
       });return value;
     };
     await call('qq_capabilities');await call('qq_reply',{text:'收到',reply_to:1,at_user:20001});
+    await call('qq_propose_anecdote',{text:'把小事想复杂的本领又熟练了一点，脑内剧场总比现实热闹',topic:'奇思妙想',message_ids:[1]});
     await call('qq_self_state');await call('qq_interest',{topic:'咖啡',reason:'聊天提到了咖啡',message_id:1});
     await call('qq_thought',{summary:'以后继续聊咖啡',reason:'有实际话题可以延续',message_id:1});
     await call('qq_recent_messages',{refresh:true});await call('qq_message',{message_id:1});
@@ -139,7 +141,7 @@ test('功能审计：全部 MCP 工具逐项经过真实传输、参数校验和
     await call('qq_get_friend_list');await call('qq_get_group_list');await call('qq_get_group_member_list',{group_id:30001});
     await call('qq_set_profile',{nickname:'小鲸',signature:'测试签名'});await call('qq_set_group_card',{group_id:30001,card:'小鲸'});
     await call('qq_set_avatar',{file:png});await call('qq_recall',{message_id:7});await call('qq_self_info',{group_id:30001});
-    assert.equal(exercised.size,54);assert.equal(requests.length,8);
+    assert.equal(exercised.size,55);assert.equal(requests.length,9);
     for(const endpoint of ['send_group_msg','send_private_msg','send_like','send_qzone_msg','upload_group_file','set_qq_profile','set_self_longnick','set_group_card','set_qq_avatar','delete_msg','group_poke','set_group_add_request','add_custom_face','fetch_custom_face_detail'])assert.ok(calls.some(c=>c.action===endpoint),endpoint);
     assert.equal(favorites.items.length,1);assert.equal(store.snapshot().stickers[0].qqPresent,true);
     assert.equal(store.message('group:30001',7).recalled,true);

@@ -56,6 +56,7 @@ export class RequestBudget {
           ...(binding.scope.background?[{key:'service-background',amount:1,limit:q.backgroundPerDay,label:'后台服务请求'}]:[{key:'service-user:'+binding.scope.user,amount:1,limit:q.perUserPerDay,label:'当前用户服务请求'}]),
           ...(['vision','image-generation','speech','transcription'].includes(request.kind)?[{key:'service-media',amount:1,limit:q.mediaPerDay,label:'独立媒体服务'}]:[]),
           ...(request.kind==='image-generation'?[{key:'image-generation',amount:1,limit:q.imageGenerationPerDay,label:'图片生成'}]:[]),
+          ...(request.kind==='anecdote-review'?[{key:'anecdote-review',amount:1,limit:q.anecdoteReviewsPerDay,label:'趣事素材审核'}]:[]),
           ...(request.kind==='learning'?[{key:'learning',amount:1,limit:s.learning.dailyCalls,label:'后台学习'}]:[]),
           ...(['search','fetch'].includes(request.kind)?[{key:'native-web',amount:1,limit:q.nativeWebPerDay,label:'原生联网'}]:[])] as Quota[];
       });
@@ -78,7 +79,7 @@ export class RequestBudget {
     const settle=async(outcome:'completed'|'unknown')=>{if(attempted)return;attempted=true;await this.finish(id,outcome,report);};
     try{
       const cap=this.settings().requests.maxOutputTokens,maxOutputTokens=['speech','image-generation','transcription'].includes(input.kind)?0:Math.min(input.maxOutputTokens??cap,cap);
-      const reserved=await this.reserve({sessionId,id,kind:input.kind,provider:input.kind==='learning'?'learning-service':'media-service',model:input.model,bytes:input.bytes,maxOutputTokens});
+      const reserved=await this.reserve({sessionId,id,kind:input.kind,provider:input.kind==='learning'?'learning-service':input.kind==='anecdote-review'?'anecdote-review-service':'media-service',model:input.model,bytes:input.bytes,maxOutputTokens});
       reservedId=true;available();
       return {run:async operation=>{
         if(started||attempted)throw new ModelBudgetError('同一服务请求不能重复提交');started=true;

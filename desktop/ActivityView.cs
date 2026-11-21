@@ -33,7 +33,7 @@ partial class App
     static void InitActivityView() {
         var categories=new[]{
             new ActivityCategory("contacts","联系人与群","日常互动"),new ActivityCategory("messages","聊天记录","日常互动"),new ActivityCategory("stickers","QQ 收藏表情","日常互动"),new ActivityCategory("tasks","定时提醒","日常互动"),
-            new ActivityCategory("thoughts","自主想法","自主活动"),new ActivityCategory("interests","兴趣偏好","自主活动"),new ActivityCategory("decisions","自主决策记录","自主活动"),
+            new ActivityCategory("thoughts","自主想法","自主活动"),new ActivityCategory("interests","兴趣偏好","自主活动"),new ActivityCategory("decisions","自主决策记录","自主活动"),new ActivityCategory("anecdotes","聊天趣事素材","自主活动"),
             new ActivityCategory("events","QQ 事件","运行记录"),new ActivityCategory("actions","工具执行结果","运行记录"),new ActivityCategory("turns","模型会话","运行记录"),new ActivityCategory("learning","后台学习记录","运行记录"),new ActivityCategory("capabilities","能力状态","运行记录")
         };
         var view=CollectionViewSource.GetDefaultView(categories);view.GroupDescriptions.Add(new PropertyGroupDescription("Group"));
@@ -148,8 +148,8 @@ partial class App
         Find<Button>("SocialReset").Visibility=chat||session?Visibility.Visible:Visibility.Collapsed;
         Find<Button>("SocialSave").Visibility=row!=null&&(interest||(section==3&&row.Status.StartsWith("仅本地"))||(section==9&&row.Status=="等待判断"))?Visibility.Visible:Visibility.Collapsed;
         Find<Button>("SocialSave").Content=section==3?"存入 QQ 收藏":section==9?"推迟一小时":"保存兴趣主题";
-        Find<Button>("SocialDelete").Visibility=row!=null&&(new[]{3,4,10}.Contains(section)||(section==9&&new[]{"等待判断","执行中"}.Contains(row.Status)))?Visibility.Visible:Visibility.Collapsed;
-        Find<Button>("SocialDelete").Content=section==9?"取消想法":section==10?"删除兴趣":section==4?"取消提醒":section==3?(row!=null&&row.Status.StartsWith("QQ收藏")?"从 QQ 收藏移除":"删除本地记录"):"删除记录";
+        Find<Button>("SocialDelete").Visibility=row!=null&&(new[]{3,4,10,14}.Contains(section)||(section==9&&new[]{"等待判断","执行中"}.Contains(row.Status)))?Visibility.Visible:Visibility.Collapsed;
+        Find<Button>("SocialDelete").Content=section==14?"删除趣事素材":section==9?"取消想法":section==10?"删除兴趣":section==4?"取消提醒":section==3?(row!=null&&row.Status.StartsWith("QQ收藏")?"从 QQ 收藏移除":"删除本地记录"):"删除记录";
         Find<Border>("SocialDangerActions").Visibility=new[]{"SocialBlock","SocialReset","SocialDelete"}.Any(name=>Find<Button>(name).Visibility==Visibility.Visible)?Visibility.Visible:Visibility.Collapsed;
         Find<StackPanel>("SocialActionPanel").Visibility=new[]{"SocialProfile","SocialSave","SocialBlock","SocialUnblock","SocialReset","SocialDelete"}.Any(name=>Find<Button>(name).Visibility==Visibility.Visible)?Visibility.Visible:Visibility.Collapsed;
         loading=false;
@@ -159,11 +159,12 @@ partial class App
         if(nav.Items.Cast<ActivityCategory>().Any(item=>item.Key=="memories"||item.Key=="lexicon")||nav.Items.Groups==null||nav.Items.Groups.Count!=3)throw new Exception("活动分类仍有重复的记忆入口，或未按用途分组");
         int section=SocialSection;MainPage page=SelectedPage;bool wasLoading=loading;
         try {
-            foreach(int target in new[]{0,1,3,4,5,6,7,8,11,13}) {
+            foreach(int target in new[]{0,1,3,4,5,6,7,8,11,13,14}) {
                 loading=true;SocialSection=target;
                 ShowActivityDetail(new SocialRow{Id="context-fixture",Chat="group:30001",Name="示例会话",Status="完成",Detail="查看当前记录与对应操作。",Text="",Time=""});
                 bool chat=target==0||target==1;
                 if((Find<Button>("SocialProfile").Visibility==Visibility.Visible)!=chat||(Find<Button>("SocialBlock").Visibility==Visibility.Visible)!=chat||(Find<Button>("SocialReset").Visibility==Visibility.Visible)!=(chat||target==7))throw new Exception("记录详情显示了无关的会话管理操作");
+                if(target==14){if(!Find<TextBox>("SocialDetail").IsReadOnly||Find<Button>("SocialDelete").Visibility!=Visibility.Visible||Find<Button>("SocialSave").Visibility!=Visibility.Collapsed)throw new Exception("趣事文案可绕过审核编辑，或缺少删除入口");Capture(System.IO.Path.Combine(root,"anecdote-material.png"),MainPage.Activity);}
                 if(target==0)Capture(System.IO.Path.Combine(root,"activity-context-actions.png"),MainPage.Activity);
                 if(new[]{5,6,8,11,13}.Contains(target)&&Find<StackPanel>("SocialActionPanel").Visibility!=Visibility.Collapsed)throw new Exception("只读运行记录显示了无关操作");
             }

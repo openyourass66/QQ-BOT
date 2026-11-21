@@ -55,6 +55,7 @@ partial class App
         new FieldSpec("requests.perUserPerDay", "额度与节奏", "服务请求额度", "每位用户每日请求量", "限制由这位用户触发的服务请求；同时受总量和会话额度限制。", "次/天", 0, 10000),
         new FieldSpec("requests.perChatPerDay", "额度与节奏", "服务请求额度", "每个会话每日请求量", "群聊与私聊各自累计；同时受每日总量限制。", "次/天", 0, 10000),
         new FieldSpec("requests.backgroundPerDay", "额度与节奏", "服务请求额度", "每日后台服务请求量", "主动行动和后台学习共享，避免无人交互时持续请求。", "次/天", 0, 1000),
+        new FieldSpec("requests.anecdoteReviewsPerDay", "额度与节奏", "服务请求额度", "每日趣事审核上限", "不带工具的独立隐私审核，默认每天最多 12 次；同时受总请求和用户/会话额度约束。", "次/天", 0, 100),
         new FieldSpec("requests.imageGenerationPerDay", "额度与节奏", "服务请求额度", "每日图片生成上限", "每次生成一张，同时计入独立媒体与服务请求额度；失败或结果未知仍计次。", "张/天", 0, 100),
         new FieldSpec("requests.mediaPerDay", "额度与节奏", "服务请求额度", "每日独立媒体请求量", "独立看图、生图、语音识别和语音合成共享；图片随当前对话模型发送时不重复计次。", "次/天", 0, 1000),
         new FieldSpec("requests.nativeWebPerDay", "额度与节奏", "服务请求额度", "每日原生联网调用量", "搜索与网页读取共享；同时受服务总量和每轮工具上限限制。", "次/天", 0, 1000),
@@ -94,6 +95,7 @@ partial class App
         new FieldSpec("features.qzone.commentRequireConfirm", "身份与审批", "QQ 动作确认", "空间评论前确认", "确认时显示动态作者、动态内容及评论正文；敏感或全部确认模式仍要求审批。"),
         new FieldSpec("features.qzone.requireConfirm", "身份与审批", "QQ 动作确认", "空间发布前确认", "即使选择自主执行，开启此项后，空间发布仍需确认实际正文与图片。"),
         new FieldSpec("social.imageGenerationEnabled", "功能开关", "日常能力", "图片生成", "允许调用独立生图服务，默认关闭；地址、密钥和模型在连接与运行的媒体服务中配置。"),
+        new FieldSpec("social.anecdotesEnabled", "主动与提醒", "自主空间分享", "聊天趣事素材池", "提炼无敏感背景的抽象趣事，经独立隐私审核后用于说说。只处理新聊天，有效期 7 天；可在 QQ 活动查看和删除。需本项目 API Key 或独立后台分析密钥。"),
         new FieldSpec("social.autoQzoneGenerateImages", "主动与提醒", "自主空间分享", "自主生成说说配图", "先从图库选图，无合适图片时允许生成一张。需开启图片生成；失败不自动重试，可继续发纯文字。"),
         new FieldSpec("social.imageGenerationModel", "媒体服务", "模型与声音", "图片生成模型", "填写图片生成服务支持的模型 ID；使用独立的图片生成地址和密钥。"),
         new FieldSpec("social.imageGenerationSize", "媒体服务", "模型与声音", "生成图片尺寸", "例如 1024x1024、1536x1024，或 auto；具体尺寸需服务和模型支持。"),
@@ -296,6 +298,7 @@ partial class App
         string background=!SettingOn("social.proactiveEnabled")?"等待开启后台自主活动":!SettingOn("social.autonomousEnabled")?"等待开启持续兴趣与想法":SettingNumber("social.autonomousDecisionsPerDay")==0?"每日后台判断上限为 0，后台不会唤醒模型":SettingNumber("social.actionsPerDay")==0?"QQ 动作总额为 0，后台动作暂停":quiet?"当前为上海时间安静时段，后台暂停":"基础条件已满足，等待候选话题、联系间隔与可用额度";
         SettingStatus("social.proactiveEnabled",background);
         SettingStatus("social.autoCollectStickers",!SettingOn("social.autoCollectStickers")?"后台收藏已关闭":!SettingOn("social.stickersEnabled")?"等待开启 QQ 收藏表情":SettingNumber("social.autoCollectPerDay")==0?"每日后台新增收藏为 0":background);
+        SettingStatus("social.anecdotesEnabled",!SettingOn("social.anecdotesEnabled")?"趣事提取与素材使用已关闭，已有素材保留。":SettingNumber("requests.anecdoteReviewsPerDay")==0?"审核额度为 0，不提取新素材。":"审核后仅公开独立文案，不读原始聊天；素材 7 天有效，使用一次后停用，可在 QQ 活动删除。");
         SettingStatus("social.autoQzoneEnabled",!SettingOn("social.autoQzoneEnabled")?"自主空间创作已关闭":!SettingOn("features.qzone.enabled")?"等待开启 QQ 空间发布":SettingNumber("social.autoQzonePerDay")==0||SettingNumber("features.qzone.dailyLimit")==0?"自主空间或空间总额度为 0":SettingOn("features.qzone.requireConfirm")&&SettingNumber("approval.adminQq")==0?"发布前需确认，请先设置管理员 QQ":background);
         SettingStatus("social.autoQzoneCommentEnabled",!SettingOn("social.autoQzoneCommentEnabled")?"自主空间互动已关闭，仍可按对话要求浏览和评论。":!SettingOn("features.qzone.browseEnabled")||!SettingOn("features.qzone.commentsEnabled")?"请先在功能开关开启空间浏览和评论。":SettingNumber("features.qzone.commentDailyLimit")==0?"空间评论额度为 0。":SettingOn("features.qzone.commentRequireConfirm")&&SettingNumber("approval.adminQq")==0?"评论需确认，请先设置管理员 QQ。":background);
         SettingStatus("social.remindersEnabled",SettingOn("social.remindersEnabled")?"使用独立提醒额度；群提醒还需要群聊主动发言。受阻时等待恢复，结果未知时不自动重发。":"提醒暂停执行，已有任务保留");
@@ -347,7 +350,7 @@ partial class App
         if(!IsSqliteNotice("(node:123) ExperimentalWarning: SQLite is an experimental feature and might change at any time")||IsSqliteNotice("Error: SQLite database is corrupt"))throw new Exception("SQLite 提示与实际错误未正确区分");
         if(logs.Any(line=>line.Contains("控制进程异常")))throw new Exception("启动时控制进程报告异常");
         string before=json.Serialize(Collect(settings,""));
-        var requestPaths=new[]{"adminUnlimited","perDay","perUserPerDay","perChatPerDay","backgroundPerDay","perMinute","perTurn","concurrent","maxOutputTokens","maxRequestKiB","maxResponseChars","imageGenerationPerDay","mediaPerDay","nativeWebPerDay","noticesPerDay"};
+        var requestPaths=new[]{"adminUnlimited","perDay","perUserPerDay","perChatPerDay","backgroundPerDay","perMinute","perTurn","concurrent","maxOutputTokens","maxRequestKiB","maxResponseChars","anecdoteReviewsPerDay","imageGenerationPerDay","mediaPerDay","nativeWebPerDay","noticesPerDay"};
         foreach(var requestPath in requestPaths)if(!fieldViews.ContainsKey("requests."+requestPath)||fieldViews["requests."+requestPath].Spec.Category!="额度与节奏")throw new Exception("服务预算设置缺失或分类错误："+requestPath);
         var mode=(ComboBox)fields["social.responseMode"];object originalMode=mode.SelectedValue;
         var number=(TextBox)fields["social.responseProbability"];string originalNumber=number.Text;

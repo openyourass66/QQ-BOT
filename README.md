@@ -1,6 +1,6 @@
 # QQ-BOT · 小鲸工作台
 
-基于 DSH（ACP）与 NapCat（OneBot 11）的 QQ 机器人，提供 Windows 原生控制台，支持私聊、群聊、人设、长期记忆、独立图片生成与图库配图和受权限与额度约束的 QQ 操作。机器人可以运行在本机，也可以部署在 Linux 服务器由 `whaled` 守护，Windows 控制台通过 SSH 远程管理。
+基于 DSH（ACP）与 NapCat（OneBot 11）的 QQ 机器人，提供 Windows 原生控制台，支持私聊、群聊、人设、长期记忆、独立图片生成、图库配图、经隐私审核的聊天趣事素材，以及受权限与额度约束的 QQ 操作。机器人可以运行在本机，也可以部署在 Linux 服务器由 `whaled` 守护，Windows 控制台通过 SSH 远程管理。
 
 ```text
 QQ ↔ NapCat / OneBot 11 ↔ bridge ↔ DSH（ACP）

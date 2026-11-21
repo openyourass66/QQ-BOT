@@ -1,7 +1,7 @@
 import type { BotSettings } from '../core/settings.js';
 
 /** Shared by all copies of a turn context so parallel tools cannot reset their counters. */
-export type TurnBudget = {tools:number};
+export type TurnBudget = {tools:number;anecdoteSubmitted?:boolean};
 export const turnBudget=():TurnBudget=>({tools:0});
 export function clipBackground(text:string,max:number):string {
   if(text.length<=max)return text;
@@ -15,6 +15,7 @@ export function readContextUsage(update:unknown):{used:number;size:number}|undef
   if(u.sessionUpdate==='usage_update'&&typeof u.used==='number'&&typeof u.size==='number'&&Number.isFinite(u.used)&&Number.isFinite(u.size)&&u.used>=0&&u.size>0)return {used:u.used,size:u.size};
 }
 export function toolEnabled(name:string,s:BotSettings):boolean {
+  if(name==='qq_propose_anecdote'&&!s.social.anecdotesEnabled)return false;
   if(name.startsWith('qq_memory_')&&!s.social.memoryEnabled)return false;
   if(/sticker/.test(name)&&!s.social.stickersEnabled)return false;
   if(['qq_generate_image','qq_images','qq_save_image','qq_search_images','qq_send_image','qq_video','qq_speak','qq_transcribe'].includes(name)&&!s.social.mediaEnabled)return false;
@@ -29,6 +30,7 @@ export function toolEnabled(name:string,s:BotSettings):boolean {
 }
 export function toolAvailable(name:string,s:BotSettings,env:Record<string,string|undefined>=process.env):boolean {
   if(!toolEnabled(name,s))return false;
+  if(name==='qq_propose_anecdote'&&!env.BOT_LEARNING_API_KEY&&!(env.BOT_CHAT_MODE==='project'&&env.QQ_BOT_DEEPSEEK_API_KEY))return false;
   if(name==='qq_generate_image'&&(!s.social.imageGenerationModel||!env.BOT_IMAGE_BASE_URL))return false;
   if(name==='qq_speak'&&(!s.social.speechModel||!env.BOT_MEDIA_BASE_URL))return false;
   if(name==='qq_transcribe'&&(!s.social.transcriptionModel||!env.BOT_MEDIA_BASE_URL))return false;

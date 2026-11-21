@@ -56,7 +56,7 @@ export class QqActionService {
 
   private async plain(action:QqAction,ctx:ToolContext):Promise<unknown>{
     const name=actionNames[action.action];this.engine.guardTool(ctx,name);assertToolAccess(ctx,this.options.settings(),name,action);
-    ctx.authorize=()=>assertToolAccess(ctx,this.options.settings(),name,action);
+    ctx.authorize=()=>{assertToolAccess(ctx,this.options.settings(),name,action);if(action.action==='qzone_post')this.engine.anecdotes.assertPublication(ctx,action.text,action.anecdote_id);};
     this.engine.autonomy.authorize(ctx,action.action);this.engine.check(ctx);
     if(action.action==='like')await this.engine.target(ctx,`private:${action.user_id}`,true);
     if(action.action!=='qzone_post')await this.engine.approve(ctx,name,false,action);
@@ -65,7 +65,7 @@ export class QqActionService {
       let result:unknown;
       if(action.action==='send_message')result=await this.engine.send(ctx,[{type:'text',data:{text:action.text}}],`${action.target_type}:${action.target_id}`,true);
       else if(action.action==='qzone_post')result=await this.engine.autonomy.publish(ctx,action.text,action.images??[],
-        (extra,images)=>this.policy.execute({...action,images},ctx.signal,()=>[...this.engine.actionQuotas(ctx),...extra],()=>this.engine.recordAction(ctx.chat)),
+        (extra,images)=>this.policy.execute({...action,images},ctx.signal,()=>[...this.engine.actionQuotas(ctx),...extra],()=>this.engine.recordAction(ctx.chat),()=>this.engine.anecdotes.publicationGuard(ctx,action.text,action.anecdote_id)),
         async source=>{
           if(!isLibraryImage(source))return;
           this.engine.check(ctx);

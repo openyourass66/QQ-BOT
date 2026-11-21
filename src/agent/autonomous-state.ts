@@ -1,5 +1,7 @@
 import { z } from 'zod';
 
+import {AnecdotePoolSchema} from './anecdote-state.js';
+
 const scope = z.string().regex(/^(?:(?:group|private):\d+)?$/);
 export const ThoughtKindSchema = z.enum(['chat','collect','qzone','qzone-comment']);
 export const InterestSchema = z.object({
@@ -17,6 +19,7 @@ export const ThoughtSchema = z.object({
   claim:z.object({id:z.string().min(1).max(128),owner:z.string().min(1).max(128),at:z.number()}).optional(),
 });
 export const AutonomousStateSchema = z.object({
+  anecdotePool:AnecdotePoolSchema,
   interests:z.array(InterestSchema).max(1000).default([]),
   thoughts:z.array(ThoughtSchema).max(1000).default([]),
   decisions:z.array(z.object({id:z.string(),thoughtId:z.string(),chat:scope,kind:ThoughtKindSchema,at:z.number(),outcome:z.string(),reason:z.string().max(500)})).max(500).default([]),
@@ -29,4 +32,4 @@ export const AutonomousStateSchema = z.object({
   scheduleCursor:z.string().max(256).default(''),
 }).prefault({});
 export type Thought = z.infer<typeof ThoughtSchema>;
-export type AutonomousTurn = {kind:Thought['kind'];thoughtId:string;runId?:string;reserveDecision?:()=>Promise<void>;effects:Set<Thought['kind']>;messages:number;reason:string;failure?:string;imageGenerationAttempted?:boolean;targetUser?:number;spacePost?:import('../services/qzone.js').SpacePost};
+export type AutonomousTurn = {kind:Thought['kind'];thoughtId:string;runId?:string;reserveDecision?:()=>Promise<void>;effects:Set<Thought['kind']>;messages:number;reason:string;failure?:string;imageGenerationAttempted?:boolean;publicAnecdoteIds?:string[];reservedAnecdoteId?:string;targetUser?:number;spacePost?:import('../services/qzone.js').SpacePost};

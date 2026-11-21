@@ -71,6 +71,24 @@ lines.on('line', async (line) => {
       });
       respond(id, { stopReason: 'end_turn' }); return;
     }
+    if(process.env.FAKE_ANECDOTES==='1') {
+      const server=sessionServers.get(params.sessionId).find(entry=>entry.name==='qq'),client=await connectFixture(server,'anecdote-agent');
+      const invoke=async(name,args={})=>{const result=await client.callTool({name,arguments:args});if(result.isError)throw new Error(result.content[0].text);return result;};
+      try {
+        if(text.includes('【独立空间创作】')){
+          const materials=JSON.parse(text.match(/【可公开趣事素材】(\[[\s\S]*?\])。/)[1]);
+          if(text.includes('尾巴上能不能放一盏灯')||text.includes('私聊访客')||text.includes('20001'))throw new Error('公开创作收到了原始聊天或身份');
+          if(materials.length){const item=materials[0],[image]=JSON.parse((await invoke('qq_search_images',{query:'台灯'})).content[0].text);if(image)await invoke('qq_send_image',{source:image.id,preview:true});await invoke('qq_qzone_post',{text:item.text,anecdote_id:item.id,images:image?[image.id]:[]});}
+          else await invoke('qq_finish',{reason:'这次没有可用的趣事，不重复旧内容'});
+        }else if(text.includes('【QQ私聊】')){
+          const message_id=Number(text.match(/当前消息编号 #(-?\d+)/)[1]);
+          await invoke('qq_reply',{text:'尾巴差点变成台灯了'});
+          await invoke('qq_propose_anecdote',{text:'给尾巴加点亮度这件事，怎么越想越像在研究鱼缸照明',topic:'奇思妙想',message_ids:[message_id]});
+        }else await invoke('qq_finish',{reason:'只验证趣事链路'});
+      } finally {await client.close();}
+      if(process.env.FAKE_AUTONOMY_EVENTS)appendFileSync(process.env.FAKE_AUTONOMY_EVENTS,JSON.stringify({public:text.includes('【独立空间创作】'),prompt:text})+'\n');
+      notify('session/update',{sessionId:params.sessionId,update:{sessionUpdate:'agent_message_chunk',content:{type:'text',text:'已通过实际工具处理'}}});respond(id,{stopReason:'end_turn'});return;
+    }
     if(text.includes('AUTONOMY_SEED')||text.startsWith('自主想法 #')) {
       const server=sessionServers.get(params.sessionId).find(entry=>entry.name==='qq');
       const client=await connectFixture(server,'autonomy-agent');

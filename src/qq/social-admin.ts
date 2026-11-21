@@ -9,11 +9,13 @@ import type {SqliteDailyUsageStore} from '../storage/sqlite-usage-store.js';
 import { stickerSearchText } from './sticker-review.js';
 import { reviseMemory, forgetMemory, memoryMeta, fingerprint } from '../agent/cognition.js';
 import { learningModel } from '../agent/learning-model.js';
+import {deleteAnecdote} from '../agent/anecdotes.js';
+import {anecdoteReviewer} from '../agent/anecdote-model.js';
 import { toolAvailable } from '../agent/context-policy.js';
 
 const requestSchema = z.object({
   op: z.enum(['list', 'edit_memory', 'delete', 'block', 'allow', 'refresh_contacts', 'reset_session', 'profile', 'collect_sticker','edit_interest','defer_thought','lock_memory','restore_memory','edit_lexicon','activate_lexicon','disable_lexicon','restore_lexicon','review_memory']),
-  section: z.enum(['contacts','messages','memories','stickers','tasks','events','actions','turns','capabilities','thoughts','interests','decisions','lexicon','learning']).default('contacts'),
+  section: z.enum(['contacts','messages','memories','stickers','tasks','events','actions','turns','capabilities','thoughts','interests','decisions','lexicon','learning','anecdotes']).default('contacts'),
   chat: z.string().max(64).default(''), query: z.string().max(256).default(''), id: z.string().max(128).default(''),
   text: z.string().max(10000).default(''), expectedText: z.string().max(2000).optional(), blocked: z.boolean().default(true),
   responseMode: z.enum(['inherit','mention','keywords','probability','all']).default('inherit'),
@@ -83,10 +85,11 @@ export async function socialAdmin(input: unknown, store: SocialRepository, media
     else if(a.section==='lexicon'){const item=d.cognition.lexicon.find(l=>l.id===a.id);if(!item)throw new Error('词条不存在');if(a.expectedText!==undefined&&item.meaning!==a.expectedText)throw new Error('词条已修改，当前编辑已保留');d.cognition.suppressed.push({chat:item.chat,hash:fingerprint(item.term),at:Date.now()});d.cognition.suppressed=d.cognition.suppressed.slice(-10000);d.cognition.lexicon=d.cognition.lexicon.filter(l=>l.id!==a.id);}
     else if (a.section === 'tasks') { const t = d.tasks.find(t => t.id === a.id); if (!t || !['pending','blocked'].includes(t.state)) throw new Error('只能取消尚未执行的提醒'); t.state = 'cancelled'; }
     else if(a.section==='thoughts'){const t=d.autonomous.thoughts.find(t=>t.id===a.id);if(!t||!['pending','running'].includes(t.state))throw new Error('这条想法已经结束');t.state='dismissed';t.result='管理员取消，不再执行';}
+    else if(a.section==='anecdotes')deleteAnecdote(d,a.id);
     else if(a.section==='interests'){if(!d.autonomous.interests.some(i=>i.id===a.id))throw new Error('兴趣不存在');d.autonomous.interests=d.autonomous.interests.filter(i=>i.id!==a.id);}
     else throw new Error('该列表不支持删除');
   });
-  const sectionField:Record<string,SocialField>={thoughts:'autonomous',interests:'autonomous',decisions:'autonomous',lexicon:'cognition',learning:'cognition'};
+  const sectionField:Record<string,SocialField>={anecdotes:'autonomous',thoughts:'autonomous',interests:'autonomous',decisions:'autonomous',lexicon:'cognition',learning:'cognition'};
   const field=sectionField[a.section]??(!['messages','capabilities'].includes(a.section)?a.section as SocialField:undefined);
   const data = store.view('contacts','profiles','turns',...(field?[field]:[]),...(a.section==='memories'?['cognition' as const]:[])), s = getSettings();
   const archive=a.section==='messages'?await store.queryMessages({chat:a.chat||undefined,query:a.query,limit:200}):undefined;
@@ -103,6 +106,7 @@ export async function socialAdmin(input: unknown, store: SocialRepository, media
     rows.push({ id, chat, name, summary: summary.slice(0,160), status, time: date(at), detail, text });
   };
   switch (a.section) {
+    case 'anecdotes':for(const item of [...data.autonomous.anecdotePool.items].reverse()){const state=item.state==='used'?'已使用':item.state==='revoked'?'已失效':item.expires<=Date.now()?'已过期':'可公开';add(item.id,item.chat,item.topic,item.text,state,item.at,`${item.text}\n\n独立隐私审核已通过 · 来源 ${item.sources.length} 条 · 有效期至 ${date(item.expires)}\n${item.usedAt?'已使用，结果未知也不会自动复用':'原始聊天不进入公开创作上下文'}`);}break;
     case 'thoughts':for(const t of [...data.autonomous.thoughts].sort((x,y)=>Number(['pending','running'].includes(y.state))-Number(['pending','running'].includes(x.state))||y.at-x.at)) {
       const status={pending:'等待判断',running:'执行中',done:'完成',dismissed:'已放弃',expired:'已过期',unknown:'结果待核对'}[t.state];
       add(t.id,t.chat,t.summary,t.reason,status,t.at,`行动：${{chat:'主动聊天',collect:'看图判断收藏',qzone:'独立空间创作','qzone-comment':'自主空间互动'}[t.kind]}\n来源：${t.targetUser?'QQ '+t.targetUser:t.chat||'公开创作兴趣'}${t.messageId!==undefined?' · 消息 #'+t.messageId:''}\n\n理由：${t.reason}\n适合时间：${date(t.due)}\n有效期至：${date(t.expires)}\n\n结果：${t.result||'尚未判断'}`);
@@ -118,7 +122,7 @@ export async function socialAdmin(input: unknown, store: SocialRepository, media
       const allowed=s.social.allowAll||(kind==='group'?s.social.allowedGroups:s.social.allowedUsers).includes(id);
       const participation = kind==='group' ? `${override?'会话专属':'沿用全局'} · ${modes[mode]}` : `全局私聊自动回复${s.chat.privateAutoReply?'已开启':'已关闭'}`;
       add(c.chat, c.chat, c.name, participation, blocked ? '已屏蔽' : allowed?'可联系':'未在允许名单', c.at,
-        `当前状态：${blocked?'已屏蔽':allowed?'可联系':'未在允许名单'}\n参与配置：${participation}${kind==='group'&&mode==='probability'?'\n参与概率：'+(override?profile.probability:s.social.responseProbability)+'%':''}\n会话人设：${profile?.persona?'使用会话独立副本':'沿用工作区人设'}\n会话后台活动：${profile?.proactive===false?'聊天与收藏已关闭':'沿用全局开关、安静时段与额度'}\n\n可在会话设置调整独立参与方式与人设。`);
+        `当前状态：${blocked?'已屏蔽':allowed?'可联系':'未在允许名单'}\n参与配置：${participation}${kind==='group'&&mode==='probability'?'\n参与概率：'+(override?profile.probability:s.social.responseProbability)+'%':''}\n会话人设：${profile?.persona?'使用会话独立副本':'沿用工作区人设'}\n会话后台活动：${profile?.proactive===false?'聊天、收藏与趣事分享已关闭':'沿用全局开关、安静时段与额度'}\n\n可在会话设置调整独立参与方式与人设。`);
     } break;
     case 'messages': for (const m of [...data.messages].reverse()) add(String(m.id), m.chat, m.name, m.text, m.recalled ? '已撤回' : m.self ? '自己发送' : '收到', m.at, `${m.name}（${m.user}）\n消息 #${m.id}\n${m.text}\n\n媒体：${m.segments.filter(s => s.type !== 'text').map(s => s.type).join('、')}`); break;
     case 'memories': for (const m of [...data.memories].reverse()) if(a.op!=='list'||!a.id||m.id===a.id) {
@@ -154,11 +158,12 @@ export async function socialAdmin(input: unknown, store: SocialRepository, media
       break;
     }
   }
-  const note=a.section==='stickers'?`${live?.stickers?'已读取 QQ 收藏':'离线缓存，启动机器人后可刷新 QQ 收藏'} · QQ 收藏 ${data.stickers.filter(t=>t.qqPresent).length} 张；本地待同步 ${data.stickers.filter(t=>!t.qq).length} 张。` : rows.length?`显示前 ${Math.min(200,rows.length)} 条；时间为上海时间。`:'暂无记录。启动机器人后接收消息，或刷新联系人。';
+  const note=a.section==='anecdotes'?`仅展示审核文案，原始聊天不进入公开创作。${anecdoteReviewer().available()||'独立审核服务可用'}。不公开偏好 ${data.autonomous.anecdotePool.optedOutUsers.length} 人；本人发送“允许分享聊天趣事”可恢复后续提取。`:a.section==='stickers'?`${live?.stickers?'已读取 QQ 收藏':'离线缓存，启动机器人后可刷新 QQ 收藏'} · QQ 收藏 ${data.stickers.filter(t=>t.qqPresent).length} 张；本地待同步 ${data.stickers.filter(t=>!t.qq).length} 张。` : rows.length?`显示前 ${Math.min(200,rows.length)} 条；时间为上海时间。`:'暂无记录。启动机器人后接收消息，或刷新联系人。';
   if(a.section==='memories'&&a.op==='edit_memory') {const selected=rows.findIndex(row=>row.id===a.id);if(selected>0)rows.unshift(rows.splice(selected,1)[0]);}
   const quotas = usage?.summary([
     {key:'service-requests',label:'模型与能力请求',limit:s.requests.perDay},
     {key:'service-background',label:'后台服务请求',limit:s.requests.backgroundPerDay},
+    {key:'anecdote-review',label:'趣事素材审核',limit:s.requests.anecdoteReviewsPerDay},
     {key:'image-generation',label:'图片生成',limit:s.requests.imageGenerationPerDay},
     {key:'service-media',label:'独立媒体服务',limit:s.requests.mediaPerDay},
     {key:'native-web',label:'原生联网',limit:s.requests.nativeWebPerDay},
