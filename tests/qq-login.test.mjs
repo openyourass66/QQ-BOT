@@ -96,11 +96,12 @@ test('QQ 登录适配缓存认证、支持令牌轮换，二维码不落盘、�
     return new Response(JSON.stringify({code:0,data}));
   }});
   await qq.prepare(options.shell);
+  assert.equal(await qq.loginHealth(),'offline');assert.equal(encodes,0);
   let result=await qq.status();assert.match(result.qrImage,/^data:image\/png/);await qq.status();assert.equal(logins,1);assert.equal(encodes,1);
   assert.doesNotMatch(JSON.stringify(result),/fixture-session-credential|qq.com|webuiPort|token/);
   await qq.status({refresh:true});assert.equal(refreshes,1);assert.equal(encodes,2);
-  phase='qrcode_scanned';assert.equal((await qq.status()).qrImage,undefined);
-  phase='ready';result=await qq.status();assert.equal(result.networkReady,true);assert.equal(result.account,'10001');assert.equal(result.qrImage,undefined);
+  phase='qrcode_scanned';assert.equal(await qq.loginHealth(),'unknown');assert.equal((await qq.status()).qrImage,undefined);
+  phase='ready';assert.equal(await qq.loginHealth(),'online');result=await qq.status();assert.equal(result.networkReady,true);assert.equal(result.account,'10001');assert.equal(result.qrImage,undefined);
   const path=join(qq.runtime,'config/webui.json'),config=JSON.parse(await readFile(path,'utf8'));config.token='changed-token-with-enough-entropy-for-fixture';await writeFile(path,JSON.stringify(config));
   await qq.status();assert.equal(logins,2);
 }));

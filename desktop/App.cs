@@ -43,7 +43,7 @@ partial class App
     static Dictionary<string, object> settings;
     static Queue<string> logs = new Queue<string>();
     static bool exiting, paused, dirty, loading, hostFailed;
-    static string runtimePhase="stopped", runtimeFailure="";
+    static string runtimePhase="stopped", runtimeFailure="", qqConnection="";
     static HashSet<string> dirtySections = new HashSet<string>();
     static string personaPath;
     static NativeTray tray;
@@ -254,6 +254,15 @@ partial class App
             upgradePending=message.ContainsKey("recoveryKind")&&Convert.ToString(message["recoveryKind"])=="upgrade";
             if(maintenanceDialog!=null&&!maintenanceBusy)maintenanceRecover.Visibility=recoveryPending&&!upgradePending?Visibility.Visible:Visibility.Collapsed;
             runtimePhase=message.ContainsKey("phase")?Convert.ToString(message["phase"]):"";runtimeFailure="";
+            qqConnection=message.ContainsKey("qqConnection")?Convert.ToString(message["qqConnection"]):"";
+            var disconnect=message.ContainsKey("qqLastDisconnect")?message["qqLastDisconnect"] as Dictionary<string,object>:null;
+            var notice=Find<TextBlock>("LastQqDisconnect");
+            DateTimeOffset occurred;
+            if(disconnect!=null && disconnect.ContainsKey("time") && disconnect.ContainsKey("label") &&
+                DateTimeOffset.TryParse(Convert.ToString(disconnect["time"]),out occurred)) {
+                notice.Text="上次下线通知 · "+occurred.ToLocalTime().ToString("MM-dd HH:mm")+" · "+Convert.ToString(disconnect["label"]);
+                notice.Visibility=Visibility.Visible;
+            } else notice.Visibility=Visibility.Collapsed;
             if(message.ContainsKey("supervision"))foreach(var entry in ((Dictionary<string,object>)message["supervision"]).Values){var item=entry as Dictionary<string,object>;if(item!=null&&item.ContainsKey("failure")&&Convert.ToString(item["phase"])=="needs_attention"){var failure=item["failure"] as Dictionary<string,object>;if(failure!=null)runtimeFailure=Convert.ToString(failure["message"]);}}
             Find<TextBlock>("State").Text = busy ? "小鲸正在安排工作…" : bridge && napcat ? "小鲸已出发，等待连接就绪" : bridge || napcat ? "部分进程运行中，请查看日志" : "小鲸休息中，随时可以出发";
             if(recoveryPending&&!busy)Find<TextBlock>("State").Text=upgradePending?"安装升级尚未收尾，请在安装工具处理中断":"数据恢复尚未收尾，请在数据维护处理中断";
@@ -277,7 +286,7 @@ partial class App
             bool online = (bool)message["qqOnline"] && (bool)message["wsConnected"] && (bool)message["acpConnected"];
             if(online)CompleteSetup();
             Find<TextBlock>("State").Text = online ? "小鲸在线，正在认真陪伴" : "进程运行中，等待 QQ / 模型连接";
-            Find<TextBlock>("Stats").Text = "QQ " + ((bool)message["qqOnline"] ? "在线" : "离线") + "  ·  模型 " + ((bool)message["acpConnected"] ? "已连接" : "未连接") + "  ·  收到 " + message["messagesIn"] + " / 发出 " + message["messagesOut"] + "  ·  排队 " + message["pendingMessages"];
+            Find<TextBlock>("Stats").Text = "QQ " + (QqConnectionLabel() ?? ((bool)message["qqOnline"] ? "在线" : "连接中")) + "  ·  模型 " + ((bool)message["acpConnected"] ? "已连接" : "未连接") + "  ·  收到 " + message["messagesIn"] + " / 发出 " + message["messagesOut"] + "  ·  排队 " + message["pendingMessages"];
             Find<TextBlock>("QqState").Text = (bool)message["qqOnline"] ? "已在线" : "连接中";
             Find<TextBlock>("ModelState").Text = (bool)message["acpConnected"] ? (message.ContainsKey("model")?(string)message["model"]+" · 已就绪":"已就绪") : "连接中";
             Find<TextBlock>("MessagesIn").Text = message["messagesIn"].ToString();
@@ -295,10 +304,23 @@ partial class App
             ApplyRuntimePhase();
         }
     }
+    static string QqConnectionLabel() {
+        switch(qqConnection) {
+            case "online": return "已在线";
+            case "channel_down": return "消息通道断开";
+            case "status_conflict": return "登录与心跳状态不一致";
+            case "offline": return "未登录";
+            case "unknown": return "登录状态未知";
+            default: return null;
+        }
+    }
     static void ApplyRuntimePhase() {
+        string qqLabel=QqConnectionLabel();
+        if(qqLabel!=null)Find<TextBlock>("QqState").Text=qqLabel;
         string label=runtimePhase=="recovering"?"正在恢复":runtimePhase=="needs_attention"?"需要处理":runtimePhase=="waiting_login"?"等待 QQ 登录":runtimePhase=="connecting"?"正在连接":null;
         if(label==null)return;
         Find<TextBlock>("State").Text=runtimePhase=="recovering"?"进程意外退出，正在等待自动恢复，可点击停止取消。":runtimePhase=="needs_attention"?(runtimeFailure.Length>0?runtimeFailure:"运行需要处理，请查看启动诊断后重试。"):runtimePhase=="waiting_login"?"等待 QQ 登录，请打开登录窗口完成操作。":"正在连接 QQ 与模型服务…";
+        if(runtimePhase=="connecting" && qqConnection=="channel_down")Find<TextBlock>("State").Text="QQ 已登录，正在重连消息通道。";
         Find<TextBlock>("ConnectionBadge").Text=label;
         Find<TextBlock>("ConnectionBadge").Foreground=(Brush)new BrushConverter().ConvertFromString("#97733F");
         Find<System.Windows.Shapes.Ellipse>("ConnectionDot").Fill=Find<TextBlock>("ConnectionBadge").Foreground;

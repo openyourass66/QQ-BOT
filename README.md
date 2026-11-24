@@ -7,6 +7,8 @@ QQ ↔ NapCat / OneBot 11 ↔ bridge ↔ DSH（ACP）
                             └── QQ MCP 工具与后台资料整理
 ```
 
+工作总览显示最近的 QQ 下线通知，并区分登录状态与消息通道故障。详见 [QQ 登录与掉线诊断](docs/qq-login.md)。
+
 ## 下载与安装
 
 发行包放在 [Releases](https://github.com/openyourass66/QQ-BOT/releases)，当前版本 **0.2.1**，提供 Windows x64 与 Linux x64 两种布局。

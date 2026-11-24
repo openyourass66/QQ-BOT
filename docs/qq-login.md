@@ -16,6 +16,10 @@ QQ 原生库的资料目录通过实例适配器指向当前数据目录的 `nap
 
 更新启动脚本后须在工作台点击「重新启动」，仅「重连模型」不会更新 QQ 进程。登录凭据失效或要求额外验证时，仍须在登录窗口或本机 WebUI 按官方流程重新扫码和验证。
 
+工作总览将受管 QQ 的登录状态与 OneBot 消息通道分别显示。桥接失去 QQ 在线信号时，管理进程通过本机 NapCat WebUI 独立查询登录状态，正常情况下每 30 秒最多发起一次。外部 OneBot 没有本机登录探测，无法确认时显示「登录状态未知」。
+
+工作台显示最近一条 NapCat 下线通知的时间和原因分类。最近 32 条记录保存在实例控制台日志目录的 `qq-disconnects.json`，与普通日志分开轮换。记录仅包含时间和固定分类。分类描述 QQ 返回的提示，不能确认腾讯实际触发的检测条件。
+
 WebUI 凭据只在管理进程内存中缓存，支持文件令牌轮换与有限的认证重试；不会把上游敏感错误原文转发到工作台。主工作日志隐藏上游输出的 WebUI 令牌、登录 URL 和终端二维码。NapCat 自己仍可能在其缓存和日志中保存登录二维码、账号材料，应保护整个数据目录，默认诊断与分发不得包含这些目录。不能把工作台日志脱敏描述为上游从不落盘。
 
 登录适配使用固定版本的[QQ 登录路由](https://github.com/NapNeko/NapCatQQ/blob/v4.18.41/packages/napcat-webui-backend/src/router/QQLogin.ts)和[认证路由](https://github.com/NapNeko/NapCatQQ/blob/v4.18.41/packages/napcat-webui-backend/src/router/auth.ts)，默认网络配置格式参照[官方说明](https://napneko.github.io/config/basic)。实现为独立适配，尚不承诺其它 NapCat 版本兼容。

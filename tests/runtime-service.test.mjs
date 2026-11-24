@@ -55,6 +55,7 @@ test('管理宿主被强制结束后，租约随 IPC 断开释放，不依赖删
 }));
 
 test('桥接异常退出后单独恢复，QQ 进程保留；等待登录与就绪状态按实际连接报告',{timeout:20000},()=>fixture(async({createRuntimeService,...options})=>{
+  await writeFile(join(options.root,'scripts/qq-runtime.mjs'),"export class ManagedQQ { async loginHealth(){return 'offline';} }");
   const marker=join(options.layout.dataRoot,'attempts');
   await writeFile(join(options.root,'scripts/napcat-node.mjs'),"console.log('napcat-once');process.on('message',()=>{});setInterval(()=>{},1000);");
   await writeFile(join(options.root,'dist/bridge.js'),`import{readFileSync,writeFileSync}from'node:fs';let n=0;try{n=Number(readFileSync(${JSON.stringify(marker)},'utf8'))}catch{}writeFileSync(${JSON.stringify(marker)},String(n+1));process.on('message',m=>{if(m==='shutdown')process.exit()});process.send({type:'status',acpConnected:true,qqOnline:false,wsConnected:true});if(!n)setTimeout(()=>{process.send({type:'fatal',failure:{code:'MODEL_EXITED',recoverable:true,message:'模型退出'}});process.exit(1)},100);else setTimeout(()=>process.send({type:'status',acpConnected:true,qqOnline:true,wsConnected:true}),100);setInterval(()=>{},1000);`);
@@ -65,6 +66,24 @@ test('桥接异常退出后单独恢复，QQ 进程保留；等待登录与就�
     await service.receive({action:'restartBridge'});await until(()=>events.filter(e=>e.phase==='ready').length>=2);assert.equal(await readFile(marker,'utf8'),'3');
     await service.receive({action:'stop'});assert.equal(events.filter(e=>e.type==='state').at(-1).phase,'stopped');
   }finally{await service.close();}
+}));
+
+test('QQ 登录与消息通道分别诊断，下线通知脱敏保存并可在重启后查看',()=>fixture(async({createRuntimeService,...options})=>{
+  await writeFile(join(options.root,'scripts/qq-runtime.mjs'),"export class ManagedQQ { async loginHealth(){return 'online';} }");
+  await writeFile(join(options.root,'scripts/napcat-node.mjs'),"console.error('11-24 13:46:18 [error] 测试 | [KickedOffLine] [下线通知] 您的账号已在另一台终端登录 https://example.com/private-link');setInterval(()=>{},1000);");
+  await writeFile(join(options.root,'dist/bridge.js'),"process.on('message',m=>{if(m==='shutdown')process.exit()});process.send({type:'status',acpConnected:true,qqOnline:false,wsConnected:false});setInterval(()=>{},1000);");
+  const events=[],service=await createRuntimeService({...options,onEvent:event=>events.push(event)});
+  try {
+    await service.receive({action:'start'});
+    await until(()=>events.some(event=>event.qqConnection==='channel_down' && event.qqLastDisconnect?.reason==='other_terminal'));
+    assert.ok(!events.some(event=>event.phase==='waiting_login'));
+    assert.equal(JSON.parse(await readFile(join(options.layout.logDir,'qq-disconnects.json'),'utf8'))[0].reason,'other_terminal');
+    assert.ok(!JSON.stringify(events).includes('private-link'));
+    assert.doesNotMatch(await readFile(join(options.layout.logDir,'console.log'),'utf8'),/private-link/);
+  } finally {await service.close();}
+  const restored=[],restart=await createRuntimeService({...options,onEvent:event=>restored.push(event)});
+  try {assert.ok(restored.some(event=>event.qqLastDisconnect?.reason==='other_terminal'));}
+  finally {await restart.close();}
 }));
 
 test('损坏数据转为待处理且不自动重启；手动处理后可以重新启动',{timeout:15000},()=>fixture(async({createRuntimeService,...options})=>{

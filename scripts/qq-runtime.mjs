@@ -150,6 +150,14 @@ export class ManagedQQ {
     try {return await post(path,body,this.auth.credential);}
     catch(error){if(retry&&error.unauthorized){this.auth=undefined;return this.request(path,body,false);}throw error;}
   }
+  async loginHealth() {
+    const data = await this.request('/QQLogin/CheckLoginStatus');
+    if (!data || typeof data.isLogin !== 'boolean') return 'unknown';
+    if (data.isOffline === true) return 'offline';
+    if (data.isLogin && data.coreReady === true) return 'online';
+    if (!data.isLogin && ['waiting_qrcode', 'offline'].includes(data.loginPhase)) return 'offline';
+    return 'unknown';
+  }
   async status({refresh=false,mode}={}) {
     if(mode==='external')return {operation:'status',phase:'external',managed:false,message:'当前连接外部 QQ 服务，请在原服务中完成 QQ 登录。'};
     let metadata;

@@ -1,5 +1,6 @@
 import { resolve, join } from 'node:path';
-import { mkdirSync, appendFileSync, existsSync, statSync, renameSync, readFileSync, rmSync } from 'node:fs';
+import { mkdirSync, appendFileSync, existsSync, statSync, renameSync, readFileSync, rmSync, writeFileSync, lstatSync } from 'node:fs';
+import { randomUUID } from 'node:crypto';
 import { diagnose, environment, onebotOnline } from '../desktop/diagnostics.mjs';
 import { acquireRuntimeLease } from './runtime-lease.mjs';
 import { RuntimeConfiguration } from './runtime-configuration.mjs';
@@ -20,6 +21,23 @@ const protectedCredentials=process.platform==='win32'&&['installed','portable'].
 const configuration = new RuntimeConfiguration(dataRoot,{protectedCredentials});
 const logDir = layout.logDir; mkdirSync(logDir, { recursive: true });
 const logPath = join(logDir, 'console.log');
+const disconnectPath = join(logDir, 'qq-disconnects.json');
+const disconnectLabels = {
+  other_terminal: 'QQ 提示账号已在另一台终端登录',
+  login_expired: 'QQ 提示当前登录已失效',
+  software_warning: 'QQ 提示存在外挂或其他软件影响使用',
+  unspecified: 'QQ 发出下线通知，原因未分类',
+};
+let disconnects = [];
+try {
+  const file = lstatSync(disconnectPath);
+  if (file.isFile() && file.size <= 8192) {
+    const saved = JSON.parse(readFileSync(disconnectPath, 'utf8'));
+    if (Array.isArray(saved)) disconnects = saved.filter(event => event && Object.hasOwn(disconnectLabels, event.reason) &&
+      typeof event.time === 'string' && /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$/.test(event.time))
+      .slice(-32).map(({reason,time}) => ({reason,time}));
+  }
+} catch { /* Missing history is normal on first launch. */ }
 const children = new Map();
 const desired=new Set(),launchPlans=new Map(),expectedExits=new WeakSet(),failures=new WeakMap(),configWorkers=new Set();
 let supervisor,lastBridgeStatus;
@@ -30,9 +48,39 @@ let componentWorker;
 let maintenanceWorker,maintenanceCancelRequested=false,maintenanceQueued=false;
 let componentCancelEpoch=0;
 let qqController;
+async function getQQController() {
+  if (qqController) return qqController;
+  const {ManagedQQ} = await import('./qq-runtime.mjs');
+  return qqController ??= new ManagedQQ({root,dataRoot});
+}
+let loginHealth = 'unknown';
+let lastProbeAt = -Infinity;
+let pendingProbe;
+let loginRevision = 0;
+function probeQQLogin(bridge) {
+  const napcat = children.get('napcat');
+  if (!napcat || pendingProbe || performance.now() - lastProbeAt < 30_000) return;
+  lastProbeAt = performance.now();
+  const revision = loginRevision;
+  pendingProbe = (async () => {
+    let result = 'unknown';
+    try { result = await (await getQQController()).loginHealth(); } catch { /* An unavailable WebUI does not imply logout. */ }
+    if (closing || revision !== loginRevision || children.get('napcat') !== napcat || children.get('bridge') !== bridge ||
+        expectedExits.has(napcat) || expectedExits.has(bridge) || lastBridgeStatus?.qqOnline) return;
+    loginHealth = result;
+    updateConnectionStatus(lastBridgeStatus);
+    state();
+  })().finally(() => { pendingProbe = undefined; });
+}
+function updateConnectionStatus(message) {
+  const online = message.qqOnline || loginHealth === 'online';
+  const waitingLogin = !online && loginHealth === 'offline';
+  supervisor.status('bridge', {ready:message.acpConnected && message.qqOnline && message.wsConnected,waitingLogin});
+  if (children.has('napcat')) supervisor.status('napcat', {ready:online,waitingLogin});
+}
 async function qqLogin(data) {
   if (!data || !['prepare','status','refresh','connection'].includes(data.operation) || Object.keys(data).some(key=>!['operation','shell','mode'].includes(key))) throw new Error('QQ 登录操作参数无效');
-  if (!qqController) { const {ManagedQQ}=await import('../scripts/qq-runtime.mjs');qqController=new ManagedQQ({root,dataRoot}); }
+  await getQQController();
   if(data.operation==='connection') {emit({type:'qq-login',...await qqController.connection(data.shell)});return;}
   if(data.operation==='prepare') {
     if(children.has('bridge')||children.has('napcat'))throw new Error('请先停止机器人，再创建 QQ 连接；已运行时可直接查看登录状态');
@@ -84,10 +132,37 @@ const emit = event => {
   }
   onEvent(event);
 };
+function recordQQDisconnect(text) {
+  const notice = /^\d\d-\d\d \d\d:\d\d:\d\d \[error\] [^|\r\n]{1,128}\| \[KickedOffLine\]\s*(.*)$/.exec(text);
+  if (!notice) return false;
+  const reason = /外挂|其他软件影响/.test(notice[1]) ? 'software_warning' :
+    /另一台终端登录|其他设备登录/.test(notice[1]) ? 'other_terminal' :
+    /登录已失效|登录失效/.test(notice[1]) ? 'login_expired' : 'unspecified';
+  const event = {time:new Date().toISOString(),reason};
+  disconnects = [...disconnects.slice(-31),event];
+  const temp = disconnectPath + '.' + randomUUID() + '.tmp';
+  try {
+    writeFileSync(temp, JSON.stringify(disconnects) + '\n', {mode:0o600,flag:'wx'});
+    renameSync(temp, disconnectPath);
+  } catch {
+    try { rmSync(temp, {force:true}); } catch { /* A failed cleanup does not affect the current event. */ }
+    emit({type:'error',text:'无法保存 QQ 下线记录，请检查日志目录。'});
+  }
+  state();
+  emit({type:'log',source:'napcat',text:'[napcat] ' + disconnectLabels[reason]});
+  return true;
+}
 const state = () => {
   const supervision=supervisor?.snapshot()??{},phases=Object.values(supervision).map(item=>item.phase);
   const phase=phases.includes('needs_attention')?'needs_attention':phases.includes('recovering')?'recovering':supervision.bridge?.phase==='ready'?'ready':phases.includes('waiting_login')?'waiting_login':phases.includes('connecting')?'connecting':'stopped';
-  emit({ type: 'state', bridge: children.has('bridge'), napcat: children.has('napcat') || externalNapcat, externalNapcat, busy, maintenance:Boolean(maintenanceWorker),recoveryPending:maintenancePending(dataRoot),recoveryKind:pendingMaintenanceKind(dataRoot)??null,paths: layout,phase,supervision });
+  const latest = disconnects.at(-1);
+  const qqConnection = children.has('bridge') && lastBridgeStatus
+    ? lastBridgeStatus.qqOnline ? (lastBridgeStatus.wsConnected ? 'online' : 'channel_down')
+      : loginHealth === 'online' ? (lastBridgeStatus.wsConnected ? 'status_conflict' : 'channel_down')
+      : loginHealth === 'offline' ? 'offline' : 'unknown'
+    : null;
+  emit({ type: 'state', bridge: children.has('bridge'), napcat: children.has('napcat') || externalNapcat, externalNapcat, busy, maintenance:Boolean(maintenanceWorker),recoveryPending:maintenancePending(dataRoot),recoveryKind:pendingMaintenanceKind(dataRoot)??null,paths: layout,phase,supervision,qqConnection,
+    qqLastDisconnect:latest ? {...latest,label:disconnectLabels[latest.reason]} : null });
 };
 supervisor=new ProcessSupervisor({onChange:()=>state(),recover:async name=>{
   const task=queue.then(async()=>{if(closing||quitting||!lease.held||!desired.has(name)){supervisor.stopped(name);return;}if(children.has(name))return;const plan=launchPlans.get(name);if(!plan)throw new Error('缺少受管启动配置');await launch(name,plan.script,plan.overrides,true);});
@@ -95,7 +170,7 @@ supervisor=new ProcessSupervisor({onChange:()=>state(),recover:async name=>{
 }});
 async function launch(name, script, overrides = {}, recovering=false) {
   assertNoPendingRestore(dataRoot);
-  desired.add(name);launchPlans.set(name,{script,overrides});supervisor.starting(name,{manual:!recovering,waitingLogin:name==='napcat'});
+  desired.add(name);launchPlans.set(name,{script,overrides});supervisor.starting(name,{manual:!recovering});
   try {
   if(!lease.held)throw new Error('运行管理实例锁已失效');
   if(closing)throw new Error('运行管理服务正在关闭');
@@ -109,10 +184,13 @@ async function launch(name, script, overrides = {}, recovering=false) {
     if (managed && await sameRuntimePath(resolve(dataRoot,env.BOT_NAPCAT_DIR || 'napcat/shell'),napcatShellDirectory(managed))) execPath = process.platform === 'win32' ? join(managed.directory,'node.exe') : execPath;
   }
   const child = await processGuard.fork(script,{cwd:dataRoot,env,execPath});
+  loginHealth = 'unknown';lastProbeAt = -Infinity;
+  if (name === 'bridge') lastBridgeStatus = undefined;
   children.set(name, child);
   for (const stream of [child.stdout, child.stderr]) {
     consumeLines(stream, text => {
       text = text.replace(/\x1b\[[0-9;]*[A-Za-z]/g, '').slice(0, 8000);
+      if (name === 'napcat' && children.get(name) === child && recordQQDisconnect(text)) return;
       if(name==='napcat'&&/二维码解码URL|WebUi Token|User Panel Url|[?&](?:token|k)=|[\u2580-\u259f]/i.test(text))text='QQ 登录凭据已隐藏，请在登录窗口操作。';
       emit({ type: 'log', source: name, text: `[${name}] ${text}` });
       if (/EPERM.*cordis\.yml/.test(text)) emit({ type: 'error', text: 'DSH 无法写入 Profile 的 cordis.yml。请关闭占用该文件的程序、检查文件访问权限，再点击“重连模型”。NapCat 会继续保持登录。' });
@@ -121,12 +199,25 @@ async function launch(name, script, overrides = {}, recovering=false) {
   child.on('message', message => {
     if (name !== 'bridge') return;
     if (message?.type === 'fatal'){failures.set(child,message.failure);return;}
-    if (message?.type === 'status'&&!expectedExits.has(child)&&children.get(name)===child) {lastBridgeStatus=message;supervisor.status('bridge',{ready:message.acpConnected&&message.qqOnline&&message.wsConnected,waitingLogin:message.acpConnected&&!message.qqOnline});if(children.has('napcat'))supervisor.status('napcat',{ready:message.qqOnline,waitingLogin:!message.qqOnline});emit(message);}
+    if (message?.type === 'status' && !expectedExits.has(child) && children.get(name) === child) {
+      const previous = lastBridgeStatus;
+      lastBridgeStatus = message;
+      if (message.qqOnline !== previous?.qqOnline) {
+        loginRevision++;
+        loginHealth = 'unknown';
+        lastProbeAt = -Infinity;
+      }
+      if (!message.qqOnline) probeQQLogin(child);
+      updateConnectionStatus(message);
+      emit(message);
+      if (!previous || previous.qqOnline !== message.qqOnline || previous.wsConnected !== message.wsConnected) state();
+    }
     if (message?.type === 'social-result') { const pending = socialRequests.get(message.id); if (pending) { socialRequests.delete(message.id); clearTimeout(pending.timer); message.error ? pending.reject(new Error(message.error)) : pending.done(message.result); } }
   });
   child.on('error', error => emit({ type: 'error', text: `${name} 启动失败：${error.code || error.message}` }));
   child.once('close', (code, signal) => {
     if(children.get(name)!==child)return;children.delete(name);
+    loginHealth = 'unknown';lastProbeAt = -Infinity;
     const failure=failures.get(child)??classifyRuntimeFailure(undefined);
     emit({type:expectedExits.has(child)?'log':'error',text:`[${name}] 已退出，代码 ${code??signal}${!expectedExits.has(child)&&!failure.recoverable?'：'+failure.message:''}`});
     if(name==='bridge'){
